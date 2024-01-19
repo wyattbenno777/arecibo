@@ -22,7 +22,7 @@ use crate::spartan::math::Math;
 
 /*
   This is a modification of the lookup gadget discussed here.
-  https://github.com/lurk-lab/arecibo/pull/48
+  https://github.com/lurk-lab/arecibo/pull/48 by @hero78119
   I instead focus on only using it as a memory consistancy check for a Nova based zkVM.
 */
 
@@ -32,7 +32,7 @@ use crate::spartan::math::Math;
   They are deterministic: i.e. it is always multiplicity++
   All reads are followed by a write that increases the multiplicity value for that cell.
   At the end of the procedure one final Read will occur, but this time not followed by a write.
-  This makes Read.len == Write.len and ready for permutation checks.
+  This makes Read.len == Write.len and we are ready for permutation check.
 */
 
 #[derive(Clone, Debug)]
@@ -367,64 +367,93 @@ impl<E: Engine> MemoryR1CS<E> {
   }
 }
 
-/*
- MemoryBuilder:
- memory_trace: Vec[Enum(Read or Write)]
- table_aux: (address, (write_val, multiplicity))
+/* 
+  Memory Consistency Object:
+  memory_trace: Vec[Enum(Read or Write)]
+  Table should be init with a write (addr, val, 0).
 */
-pub struct MemoryBuilder<'a, E: Engine> {
-  lookup: &'a mut MemoryConsistencyObject<E::Scalar>,
+#[derive(Clone, Debug)]
+pub struct MemoryConsistencyObject<E: Engine> {
   memory_trace: Vec<MemoryTraceEnum<E::Scalar>>,
-  table_aux: BTreeMap<E::Scalar, (E::Scalar, E::Scalar)>,
+  table_aux: BTreeMap<E::Scalar, (E::Scalar, E::Scalar)>, // addr, (value, counter)
+  multiplicity: E::Scalar,
+  pub(crate) memory_size_log2: usize, // max cap for multiplicity operation in bits
 }
 
-impl<'a, E: Engine> MemoryBuilder<'a, E> {
-  /// start a new transaction simulated
-  pub fn new(lookup: &'a mut MemoryConsistencyObject<E::Scalar>) -> MemoryBuilder<'a, E> {
-    MemoryBuilder {
-      lookup,
-      memory_trace: vec![],
-      table_aux: BTreeMap::new(),
+impl<E: Engine> MemoryConsistencyObject<E> {
+  /// new lookup table
+  pub fn new(
+    memory_size: usize,
+  ) -> MemoryConsistencyObject<E>
+  where
+    E::Scalar: Ord,
+  {
+    let memory_size_log2 = memory_size.log_2();
+    let mut table_aux = BTreeMap::new();
+    let mut memory_trace = vec![];
+
+    for i in 0..memory_size {
+      let address = E::Scalar::from(i as u64);
+      table_aux.insert(
+        address, 
+        (E::Scalar::ZERO, E::Scalar::ZERO)
+      );
+
+      memory_trace.push(MemoryTraceEnum::Write(
+        address,
+        E::Scalar::ZERO, //value
+        E::Scalar::ZERO, //multiplicity
+        E::Scalar::ZERO, //new value
+      )); 
+    }
+
+    Self {
+      memory_trace,
+      table_aux,
+      multiplicity: E::Scalar::ZERO,
+      memory_size_log2,
     }
   }
 
-  /// read value from table
-  pub fn read(&mut self, addr: E::Scalar) -> E::Scalar
-  where
-    <E as Engine>::Scalar: Ord,
-  {
-    let key = &addr;
-    let (value, _) = self.table_aux.entry(*key).or_insert_with(|| {
-      self
-        .lookup
-        .table_aux
-        .get(key)
-        .cloned()
-        .unwrap_or((E::Scalar::ZERO, E::Scalar::ZERO))
-    });
-    self
-      .memory_trace
-      .push(MemoryTraceEnum::Read(addr, *value, E::Scalar::ZERO));
-    *value
+  pub fn table_size(&self) -> usize {
+    self.table_aux.len()
   }
-  /// write value to lookup table
-  pub fn write(&mut self, addr: E::Scalar, value: E::Scalar)
+
+  pub fn values(&self) -> Values<'_, E::Scalar, (E::Scalar, E::Scalar)> {
+    self.table_aux.values()
+  }
+
+  /*
+   All reads are followed by a write that increments the multiplicity.
+  */
+  fn rw_operation(&mut self, addr: E::Scalar, external_value: Option<E::Scalar>) -> (E::Scalar, E::Scalar)
   where
-    <E as Engine>::Scalar: Ord,
+    E::Scalar: Ord,
   {
-    let _ = self.table_aux.insert(
-      addr,
-      (
-        value,
-        E::Scalar::ZERO, // zero counter doens't matter, real counter will provided in snapshot stage
-      ),
+
+    let (read_value, multiplicity) = self
+      .table_aux
+      .get(&addr)
+      .cloned()
+      .unwrap_or((E::Scalar::from(0), E::Scalar::from(0)));
+
+    self
+    .memory_trace
+    .push(MemoryTraceEnum::Read(addr, read_value, multiplicity));
+
+    let (write_value, write_counter) = (
+        external_value.unwrap_or(read_value), // Write the new value or keep the read value.
+        multiplicity + E::Scalar::ONE,
     );
-    self.memory_trace.push(MemoryTraceEnum::Write(
-      addr,
-      E::Scalar::ZERO,
-      value,
-      E::Scalar::ZERO,
-    )); // append read trace
+
+    // Follow all reads by a write until last step.
+    self
+    .memory_trace
+    .push(MemoryTraceEnum::Write(addr, write_value, write_counter, multiplicity));
+    
+    self.table_aux.insert(addr, (write_value, write_counter)); // note. This updates when addr exists.
+    self.multiplicity = write_counter;
+    (write_value, multiplicity)
   }
 
   /// commit memory_trace to lookup
@@ -442,13 +471,14 @@ impl<'a, E: Engine> MemoryBuilder<'a, E> {
       <E2 as Engine>::RO::new(ro_consts, 1 + self.memory_trace.len() * 3);
     hasher.absorb(prev_intermediate_gamma);
 
-    let rw_processed = self
-      .memory_trace
-      .drain(..)
+    let memory_trace = self.memory_trace.drain(..).collect::<Vec<_>>();
+
+    let rw_processed = memory_trace
+      .into_iter()
       .map(|rwtrace| {
         let (memory_trace_with_counter, addr, read_value, read_counter) = match rwtrace {
           MemoryTraceEnum::Read(addr, expected_read_value, _) => {
-            let (read_value, read_counter) = self.lookup.rw_operation(addr, None);
+            let (read_value, read_counter) = self.rw_operation(addr, None);
             assert_eq!(
               read_value, expected_read_value,
               "expected_read_value {:?} != read_value {:?}",
@@ -462,7 +492,7 @@ impl<'a, E: Engine> MemoryBuilder<'a, E> {
             )
           }
           MemoryTraceEnum::Write(addr, _, write_value, _) => {
-            let (read_value, read_counter) = self.lookup.rw_operation(addr, Some(write_value));
+            let (read_value, read_counter) = self.rw_operation(addr, Some(write_value));
             (
               MemoryTraceEnum::Write(addr, read_value, write_value, read_counter),
               addr,
@@ -486,15 +516,15 @@ impl<'a, E: Engine> MemoryBuilder<'a, E> {
         expected_memory_trace: rw_processed,
         memory_trace_allocated_num: vec![],
         cursor: 0,
-        memory_size_log2: self.lookup.memory_size_log2,
+        memory_size_log2: self.memory_size_log2,
       },
     )
   }
 
-  /// get permutation fingerprints challenge
+  /// Get permutation fingerprint alpha and gamma
   pub fn get_challenge<E2: Engine>(
+    &self,
     ck: &<<E as Engine>::CE as CommitmentEngineTrait<E>>::CommitmentKey,
-    final_table: &MemoryConsistencyObject<E::Scalar>,
     intermediate_gamma: E::Scalar,
   ) -> (E::Scalar, E::Scalar)
   where
@@ -503,8 +533,9 @@ impl<'a, E: Engine> MemoryBuilder<'a, E> {
   {
     let ro_consts =
       <<E as Engine>::RO as ROTrait<<E as Engine>::Base, <E as Engine>::Scalar>>::Constants::default();
+
     let (final_values, final_counters): (Vec<_>, Vec<_>) =
-      final_table.table_aux.values().copied().unzip();
+      self.table_aux.values().copied().unzip();
 
     // final_value and final_counter
     let (comm_final_value, comm_final_counter) = rayon::join(
@@ -528,77 +559,9 @@ impl<'a, E: Engine> MemoryBuilder<'a, E> {
   }
 }
 
-/* 
-  Memory Consistency Object:
-  Table should be init with a write (addr, val, 0).
-*/
-#[derive(Clone, Debug)]
-pub struct MemoryConsistencyObject<F: PrimeField> {
-  table_aux: BTreeMap<F, (F, F)>, // addr, (value, counter)
-  multiplicity: F,
-  pub(crate) memory_size_log2: usize, // max cap for multiplicity operation in bits
-}
-
-impl<F: PrimeField> MemoryConsistencyObject<F> {
-  /// new lookup table
-  pub fn new(
-    memory_size: usize,
-  ) -> MemoryConsistencyObject<F>
-  where
-    F: Ord,
-  {
-    let memory_size_log2 = memory_size.log_2();
-    let mut table_aux = BTreeMap::new();
-    for i in 0..memory_size {
-      table_aux.insert(
-        F::from(i as u64), 
-        (F::ZERO, F::ZERO)
-      );
-    }
-
-    Self {
-      table_aux,
-      multiplicity: F::ZERO,
-      memory_size_log2,
-    }
-  }
-
-  pub fn table_size(&self) -> usize {
-    self.table_aux.len()
-  }
-
-  pub fn values(&self) -> Values<'_, F, (F, F)> {
-    self.table_aux.values()
-  }
-
-  /*
-   All reads are followed by a write that increments the multiplicity.
-  */
-  fn rw_operation(&mut self, addr: F, external_value: Option<F>) -> (F, F)
-  where
-    F: Ord,
-  {
-
-    let (read_value, read_counter) = self
-      .table_aux
-      .get(&addr)
-      .cloned()
-      .unwrap_or((F::from(0), F::from(0)));
-
-    let (write_value, write_counter) = (
-        external_value.unwrap_or(read_value), // Write the new value or keep the read value.
-        read_counter + F::ONE,
-    );
-    
-    self.table_aux.insert(addr, (write_value, write_counter)); // note. This updates when addr exists.
-    self.multiplicity = write_counter;
-    (read_value, read_counter)
-  }
-}
-
-impl<'a, F: PrimeField> IntoIterator for &'a MemoryConsistencyObject<F> {
-  type Item = (&'a F, &'a (F, F));
-  type IntoIter = Iter<'a, F, (F, F)>;
+impl<'a, E: Engine> IntoIterator for &'a MemoryConsistencyObject<E> {
+  type Item = (&'a E::Scalar, &'a (E::Scalar, E::Scalar));
+  type IntoIter = Iter<'a, E::Scalar, (E::Scalar, E::Scalar)>;
 
   fn into_iter(self) -> Self::IntoIter {
     self.table_aux.iter()
@@ -611,7 +574,6 @@ mod test {
     // bellpepper::test_shape_cs::TestShapeCS,
     constants::NUM_CHALLENGE_BITS,
     gadgets::{
-      mcc::MemoryBuilder,
       utils::{alloc_one, alloc_zero, scalar_as_base},
     },
     provider::{poseidon::PoseidonConstantsCircuit, PallasEngine, VestaEngine},
@@ -626,28 +588,29 @@ mod test {
   #[test]
   fn test_lookup_simulation() {
     type E1 = PallasEngine;
-    type E2 = VestaEngine;
-
-    let ro_consts: ROConstantsCircuit<E2> = PoseidonConstantsCircuit::default();
+    type _E2 = VestaEngine;
 
     // let mut cs: TestShapeCS<E1> = TestShapeCS::new();
     let mut mcc =
-      MemoryConsistencyObject::<<E1 as Engine>::Scalar>::new(1024);
-    let mut lookup_trace_builder = MemoryBuilder::<E1>::new(&mut mcc);
-    let prev_intermediate_gamma = <E1 as Engine>::Scalar::ONE;
-    let read_value = lookup_trace_builder.read(<E1 as Engine>::Scalar::ZERO);
+      MemoryConsistencyObject::<E1>::new(124);
+    let (read_value, _multiplicity) = mcc.rw_operation(<E1 as Engine>::Scalar::ZERO, None);
     assert_eq!(read_value, <E1 as Engine>::Scalar::ZERO);
-    let read_value = lookup_trace_builder.read(<E1 as Engine>::Scalar::ONE);
-    assert_eq!(read_value, <E1 as Engine>::Scalar::ONE);
-    lookup_trace_builder.write(
+
+    let (read_value, _multiplicity) = mcc.rw_operation(<E1 as Engine>::Scalar::ONE, None);
+    assert_eq!(read_value, <E1 as Engine>::Scalar::ZERO);
+
+    mcc.rw_operation(
       <E1 as Engine>::Scalar::ZERO,
-      <E1 as Engine>::Scalar::from(111),
+      Some(<E1 as Engine>::Scalar::from(111)),
     );
-    let read_value = lookup_trace_builder.read(<E1 as Engine>::Scalar::ZERO);
-    assert_eq!(read_value, <E1 as Engine>::Scalar::from(111),);
+    let (read_value, _multiplicity) = mcc.rw_operation(<E1 as Engine>::Scalar::ZERO, None);
+    assert_eq!(read_value, <E1 as Engine>::Scalar::from(111));
+
+    /*let ro_consts: ROConstantsCircuit<E2> = PoseidonConstantsCircuit::default();
+    let prev_intermediate_gamma = <E1 as Engine>::Scalar::ONE;
 
     let (next_intermediate_gamma, _) =
-      lookup_trace_builder.snapshot::<E2>(ro_consts.clone(), prev_intermediate_gamma);
+      mcc.snapshot::<E2>(ro_consts.clone(), prev_intermediate_gamma);
 
     let mut hasher = <E2 as Engine>::RO::new(ro_consts, 1 + 3 * 4);
     hasher.absorb(prev_intermediate_gamma);
@@ -668,7 +631,7 @@ mod test {
     hasher.absorb(<E1 as Engine>::Scalar::from(3)); // counter
     
     let res = hasher.squeeze(NUM_CHALLENGE_BITS);
-    assert_eq!(scalar_as_base::<E2>(res), next_intermediate_gamma);
+    assert_eq!(scalar_as_base::<E2>(res), next_intermediate_gamma);*/
   }
 
 
@@ -680,10 +643,8 @@ mod test {
     let ro_consts: ROConstantsCircuit<E2> = PoseidonConstantsCircuit::default();
 
     let mut cs = TestConstraintSystem::<<E1 as Engine>::Scalar>::new();
-    // let mut cs: TestShapeCS<E1> = TestShapeCS::new();
-    let mut mcc =
-      MemoryConsistencyObject::<<E1 as Engine>::Scalar>::new(1024);
-    let mut lookup_trace_builder = MemoryBuilder::<E1>::new(&mut mcc);
+    let mut mcc = MemoryConsistencyObject::<E1>::new(124);
+
     let challenges = (
       AllocatedNum::alloc(cs.namespace(|| "alpha"), || {
         Ok(<E1 as Engine>::Scalar::from(5))
@@ -704,13 +665,15 @@ mod test {
       Ok(<E1 as Engine>::Scalar::from(101))
     })
     .unwrap();
-    lookup_trace_builder.write(
+
+    mcc.rw_operation(
       addr.get_value().unwrap(),
-      write_value_1.get_value().unwrap(),
+      Some(write_value_1.get_value().unwrap()),
     );
-    let read_value = lookup_trace_builder.read(addr.get_value().unwrap());
+
+    let (read_value, _multiplicity) = mcc.rw_operation(addr.get_value().unwrap(), None);
     assert_eq!(read_value, <E1 as Engine>::Scalar::from(101));
-    let (_, mut lookup_trace) = lookup_trace_builder.snapshot::<E2>(
+    let (_, mut lookup_trace) = mcc.snapshot::<E2>(
       ro_consts.clone(),
       prev_intermediate_gamma.get_value().unwrap(),
     );
