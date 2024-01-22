@@ -38,7 +38,7 @@ use crate::spartan::math::Math;
 #[derive(Clone, Debug)]
 pub enum MemoryTraceEnum<T> {
   Read(T, T, T), // addr, read_value, multiplicity
-  Write(T, T, T, T), // addr, read_value, multiplicity, new_value
+  Write(T, T, T, T), // addr, read_value, new_value, multiplicity
 }
 
 /// R1CS for reads and writes into the table.
@@ -435,7 +435,7 @@ impl<E: Engine> MemoryConsistencyObject<E> {
       .table_aux
       .get(&addr)
       .cloned()
-      .unwrap_or((E::Scalar::from(0), E::Scalar::from(0)));
+      .unwrap();
 
     self
     .memory_trace
@@ -449,7 +449,7 @@ impl<E: Engine> MemoryConsistencyObject<E> {
     // Follow all reads by a write until last step.
     self
     .memory_trace
-    .push(MemoryTraceEnum::Write(addr, write_value, write_counter, multiplicity));
+    .push(MemoryTraceEnum::Write(addr, read_value, write_value, write_counter));
     
     self.table_aux.insert(addr, (write_value, write_counter)); // note. This updates when addr exists.
     self.multiplicity = write_counter;
@@ -473,37 +473,31 @@ impl<E: Engine> MemoryConsistencyObject<E> {
 
     let memory_trace = self.memory_trace.drain(..).collect::<Vec<_>>();
 
+    // This absorbs addr, read_value, multiplicity.
     let rw_processed = memory_trace
       .into_iter()
       .map(|rwtrace| {
-        let (memory_trace_with_counter, addr, read_value, read_counter) = match rwtrace {
-          MemoryTraceEnum::Read(addr, expected_read_value, _) => {
-            let (read_value, read_counter) = self.rw_operation(addr, None);
-            assert_eq!(
-              read_value, expected_read_value,
-              "expected_read_value {:?} != read_value {:?}",
-              expected_read_value, read_value
-            );
+        let (memory_trace_with_counter, addr, end_value, multiplicity) = match rwtrace {
+          MemoryTraceEnum::Read(addr, expected_read_value, multiplicity) => {
             (
-              MemoryTraceEnum::Read(addr, expected_read_value, read_counter),
+              MemoryTraceEnum::Read(addr, expected_read_value, multiplicity),
               addr,
               expected_read_value,
-              read_counter,
+              multiplicity,
             )
           }
-          MemoryTraceEnum::Write(addr, _, write_value, _) => {
-            let (read_value, read_counter) = self.rw_operation(addr, Some(write_value));
+          MemoryTraceEnum::Write(addr, read_value, write_value, multiplicity) => {
             (
-              MemoryTraceEnum::Write(addr, read_value, write_value, read_counter),
+              MemoryTraceEnum::Write(addr, read_value, write_value, multiplicity),
               addr,
-              read_value,
-              read_counter,
+              write_value,
+              multiplicity,
             )
           }
         };
         hasher.absorb(addr);
-        hasher.absorb(read_value);
-        hasher.absorb(read_counter);
+        hasher.absorb(end_value);
+        hasher.absorb(multiplicity);
 
         memory_trace_with_counter
       })
@@ -588,11 +582,12 @@ mod test {
   #[test]
   fn test_lookup_simulation() {
     type E1 = PallasEngine;
-    type _E2 = VestaEngine;
+    type E2 = VestaEngine;
 
     // let mut cs: TestShapeCS<E1> = TestShapeCS::new();
     let mut mcc =
-      MemoryConsistencyObject::<E1>::new(124);
+      MemoryConsistencyObject::<E1>::new(3);
+      
     let (read_value, _multiplicity) = mcc.rw_operation(<E1 as Engine>::Scalar::ZERO, None);
     assert_eq!(read_value, <E1 as Engine>::Scalar::ZERO);
 
@@ -603,38 +598,70 @@ mod test {
       <E1 as Engine>::Scalar::ZERO,
       Some(<E1 as Engine>::Scalar::from(111)),
     );
+
     let (read_value, _multiplicity) = mcc.rw_operation(<E1 as Engine>::Scalar::ZERO, None);
     assert_eq!(read_value, <E1 as Engine>::Scalar::from(111));
 
-    /*let ro_consts: ROConstantsCircuit<E2> = PoseidonConstantsCircuit::default();
+    let ro_consts: ROConstantsCircuit<E2> = PoseidonConstantsCircuit::default();
     let prev_intermediate_gamma = <E1 as Engine>::Scalar::ONE;
 
     let (next_intermediate_gamma, _) =
       mcc.snapshot::<E2>(ro_consts.clone(), prev_intermediate_gamma);
 
-    let mut hasher = <E2 as Engine>::RO::new(ro_consts, 1 + 3 * 4);
+    let mut hasher = <E2 as Engine>::RO::new(ro_consts, 1 + 11 * 3);
     hasher.absorb(prev_intermediate_gamma);
+
+    // Init table.
     hasher.absorb(<E1 as Engine>::Scalar::ZERO); // addr
     hasher.absorb(<E1 as Engine>::Scalar::ZERO); // value
-    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // counter
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // multiplicity
 
     hasher.absorb(<E1 as Engine>::Scalar::ONE); // addr
-    hasher.absorb(<E1 as Engine>::Scalar::ONE); // value
-    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // counter
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // value
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // multiplicity
+    
+    hasher.absorb(<E1 as Engine>::Scalar::from(2)); // addr
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // value
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // multiplicity
 
+    // first rw in 0.
     hasher.absorb(<E1 as Engine>::Scalar::ZERO); // addr
     hasher.absorb(<E1 as Engine>::Scalar::ZERO); // value
-    hasher.absorb(<E1 as Engine>::Scalar::ONE); // counter
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // multiplicity
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // addr
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // value
+    hasher.absorb(<E1 as Engine>::Scalar::ONE); // multiplicity
 
+    // first rw in 1
+    hasher.absorb(<E1 as Engine>::Scalar::ONE); // addr
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // value
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // multiplicity
+    hasher.absorb(<E1 as Engine>::Scalar::ONE); // addr
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // value
+    hasher.absorb(<E1 as Engine>::Scalar::ONE); // multiplicity
+
+    // second rw in 0
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // addr
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // value
+    hasher.absorb(<E1 as Engine>::Scalar::ONE); // multiplicity
     hasher.absorb(<E1 as Engine>::Scalar::ZERO); // addr
     hasher.absorb(<E1 as Engine>::Scalar::from(111)); // value
-    hasher.absorb(<E1 as Engine>::Scalar::from(3)); // counter
+    hasher.absorb(<E1 as Engine>::Scalar::from(2)); // multiplicity
+
+    // third rw in 0
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // addr
+    hasher.absorb(<E1 as Engine>::Scalar::from(111)); // value
+    hasher.absorb(<E1 as Engine>::Scalar::from(2)); // multiplicity
+    hasher.absorb(<E1 as Engine>::Scalar::ZERO); // addr
+    hasher.absorb(<E1 as Engine>::Scalar::from(111)); // value
+    hasher.absorb(<E1 as Engine>::Scalar::from(3)); // multiplicity
     
     let res = hasher.squeeze(NUM_CHALLENGE_BITS);
-    assert_eq!(scalar_as_base::<E2>(res), next_intermediate_gamma);*/
+    assert_eq!(scalar_as_base::<E2>(res), next_intermediate_gamma);
   }
 
 
+  // this test will not work yet.
   #[test]
   fn test_write_read_on_rwlookup() {
     type E1 = PallasEngine;
