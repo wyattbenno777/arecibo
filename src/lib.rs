@@ -1081,8 +1081,8 @@ where
     pk: &ProverKeyV2<E1, S1, S2>,
     recursive_snark: &RecursiveSNARK<E1>,
     challenges: (E1::Scalar, E1::Scalar),
-    read_row: E1::Scalar,
-    write_row: E1::Scalar,
+    R_acc: E1::Scalar,
+    W_acc: E1::Scalar,
     initial_table: &Lookup<E1::Scalar>,
     final_table: &Lookup<E1::Scalar>,
   ) -> Result<Self, NovaError> {
@@ -1108,8 +1108,8 @@ where
           &recursive_snark.r_U_primary,
           &recursive_snark.r_W_primary,
           challenges,
-          read_row,
-          write_row,
+          R_acc,
+          W_acc,
           initial_table.clone(),
           final_table.clone(),
         )
@@ -1146,9 +1146,9 @@ where
     num_steps: usize,
     z0_primary: &[E1::Scalar],
     z0_secondary: &[<Dual<E1> as Engine>::Scalar],
-    fingerprint_intermediate_gamma: E1::Scalar,
-    read_row: E1::Scalar,
-    write_row: E1::Scalar,
+    lookup_intermediate_gamma: E1::Scalar,
+    R_acc: E1::Scalar,
+    W_acc: E1::Scalar,
     challenges: (E1::Scalar, E1::Scalar),
   ) -> Result<(Vec<E1::Scalar>, Vec<<Dual<E1> as Engine>::Scalar>), NovaError> {
     // the number of steps cannot be zero
@@ -1221,9 +1221,9 @@ where
         self.r_W_snark_primary.verify::<Dual<E1>>(
           &vk.vk_primary,
           &self.r_U_primary,
-          fingerprint_intermediate_gamma,
-          read_row,
-          write_row,
+          lookup_intermediate_gamma,
+          R_acc,
+          W_acc,
           challenges.clone(),
         )
       },
@@ -2324,8 +2324,8 @@ mod tests {
     let intermediate_gamma = zn_primary[0];
     let alpha = zn_primary[1];
     let gamma = zn_primary[2];
-    let read_row = zn_primary[3];
-    let write_row = zn_primary[4];
+    let R_acc = zn_primary[3];
+    let W_acc = zn_primary[4];
     assert_eq!(
       expected_intermediate_gamma, intermediate_gamma,
       "expected_intermediate_gamma != intermediate_gamma"
@@ -2337,8 +2337,8 @@ mod tests {
       &pk,
       &recursive_snark,
       (alpha, gamma),
-      read_row,
-      write_row,
+      R_acc,
+      W_acc,
       &initial_table,
       &final_table,
     );
@@ -2352,8 +2352,8 @@ mod tests {
       &z0_primary,
       &z0_secondary,
       expected_intermediate_gamma,
-      read_row,
-      write_row,
+      R_acc,
+      W_acc,
       (alpha, gamma),
     );
     assert!(res.is_ok());
