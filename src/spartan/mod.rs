@@ -8,7 +8,6 @@
 
 pub mod batched;
 pub mod batched_ppsnark;
-// pub mod lookupsnark;
 #[macro_use]
 mod macros;
 pub mod math;
