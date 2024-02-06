@@ -2234,7 +2234,7 @@ mod tests {
     };
 
     let (circuit_primaries, final_table, expected_intermediate_gamma) =
-      HeapifyCircuit::new(initial_table.clone(), ro_consts);
+      HeapifyCircuit::<E1, E2>::new(initial_table.clone(), ro_consts);
 
     let circuit_secondary = TrivialCircuit::default();
 
@@ -2243,7 +2243,7 @@ mod tests {
 
     // produce public parameters
     let pp =
-      PublicParams::<E1, E2, HeapifyCircuit<E1, E2>, TrivialCircuit<<E2 as Engine>::Scalar>>::setup(
+      PublicParams::<E1>::setup(
         &circuit_primaries[0],
         &circuit_secondary,
         ck_hint1,
@@ -2252,7 +2252,7 @@ mod tests {
 
     // produce the prover and verifier keys for compressed snark
     let (pk, vk) =
-      CompressedSNARKV2::<_, _, _, _, S1<E1, EE<E1>>, S2<E2, EE<E2>>>::setup(&pp, &initial_table)
+      CompressedSNARKV2::<_, S1<E1, EE<E1>>, S2<E2, EE<E2>>>::setup(&pp, &initial_table)
         .unwrap();
 
     let z0_primary =
@@ -2265,12 +2265,7 @@ mod tests {
     let z0_secondary = vec![<E2 as Engine>::Scalar::ZERO; 1];
 
     // produce a recursive SNARK
-    let mut recursive_snark: RecursiveSNARK<
-      E1,
-      E2,
-      HeapifyCircuit<E1, E2>,
-      TrivialCircuit<<E2 as Engine>::Scalar>,
-    > = RecursiveSNARK::new(
+    let mut recursive_snark: RecursiveSNARK<E1> = RecursiveSNARK::new(
       &pp,
       &circuit_primaries[0],
       &circuit_secondary,
@@ -2282,8 +2277,7 @@ mod tests {
     for i in 0..num_steps {
       println!("step i {}", i);
       let res = recursive_snark.prove_step(&pp, &circuit_primaries[i as usize], &circuit_secondary);
-      res
-        .clone()
+      res.as_ref()
         .map_err(|err| println!("err {:?}", err))
         .unwrap();
       assert!(res.is_ok());
@@ -2291,7 +2285,6 @@ mod tests {
     // verify the recursive SNARK
     let res = recursive_snark.verify(&pp, num_steps as usize, &z0_primary, &z0_secondary);
     let (zn_primary, _) = res
-      .clone()
       .map_err(|err| {
         print_constraints_name_on_error_index::<E1, E2, _>(&err, &circuit_primaries[0])
       })
@@ -2322,7 +2315,7 @@ mod tests {
     );
 
     // produce a compressed SNARK
-    let res = CompressedSNARKV2::<_, _, _, _, S1<E1, EE<E1>>, S2<E2, EE<E2>>>::prove(
+    let res = CompressedSNARKV2::<_, S1<E1, EE<E1>>, S2<E2, EE<E2>>>::prove(
       &pp,
       &pk,
       &recursive_snark,
