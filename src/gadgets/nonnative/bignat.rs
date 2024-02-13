@@ -168,7 +168,7 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
   }
 
   /// Allocates a `BigNat` in the circuit with `n_limbs` limbs of width `limb_width` each.
-  /// The `max_word` is gauranteed to be `(2 << limb_width) - 1`.
+  /// The `max_word` is guaranteed to be `(2 << limb_width) - 1`.
   /// The value is provided by a closure returning a natural number.
   pub fn alloc_from_nat<CS, F>(
     mut cs: CS,
@@ -219,7 +219,7 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
   }
 
   /// Allocates a `BigNat` in the circuit with `n_limbs` limbs of width `limb_width` each.
-  /// The `max_word` is gauranteed to be `(2 << limb_width) - 1`.
+  /// The `max_word` is guaranteed to be `(2 << limb_width) - 1`.
   /// The value is provided by an allocated number
   pub fn from_num<CS: ConstraintSystem<Scalar>>(
     mut cs: CS,
@@ -494,7 +494,7 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
     })
   }
 
-  /// Compute a `BigNat` contrained to be equal to `self * other % modulus`.
+  /// Compute a `BigNat` constrained to be equal to `self * other % modulus`.
   pub fn mult_mod<CS: ConstraintSystem<Scalar>>(
     &self,
     mut cs: CS,
@@ -565,7 +565,7 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
     Ok((quotient, remainder))
   }
 
-  /// Compute a `BigNat` contrained to be equal to `self * other % modulus`.
+  /// Compute a `BigNat` constrained to be equal to `self * other % modulus`.
   pub fn red_mod<CS: ConstraintSystem<Scalar>>(
     &self,
     mut cs: CS,
