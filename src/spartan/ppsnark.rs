@@ -608,7 +608,8 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
     let poly_vec = vec![&Az, &Bz, &Cz];
     let c = transcript.squeeze(b"c")?;
     let w: PolyEvalWitness<E> = PolyEvalWitness::batch(&poly_vec, &c);
-    let u: PolyEvalInstance<E> = PolyEvalInstance::batch(&comm_vec, &tau_coords, &eval_vec, &c);
+    let u: PolyEvalInstance<E> =
+    PolyEvalInstance::batch(&comm_vec, tau_coords.clone(), &eval_vec, &c);
 
     // we now need to prove three claims
     // (1) 0 = \sum_x poly_tau(x) * (poly_Az(x) * poly_Bz(x) - poly_uCz_E(x)), and eval_Az_at_tau + r * eval_Bz_at_tau + r^2 * eval_Cz_at_tau = (Az+r*Bz+r^2*Cz)(tau)
@@ -846,7 +847,8 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
     transcript.absorb(b"e", &eval_vec.as_slice()); // comm_vec is already in the transcript
     let c = transcript.squeeze(b"c")?;
     let w: PolyEvalWitness<E> = PolyEvalWitness::batch(&poly_vec, &c);
-    let u: PolyEvalInstance<E> = PolyEvalInstance::batch(&comm_vec, &rand_sc, &eval_vec, &c);
+    let u: PolyEvalInstance<E> = PolyEvalInstance::batch(&comm_vec, rand_sc.clone(), &eval_vec, &c);
+
 
     let eval_arg = EE::prove(ck, &pk.pk_ee, &mut transcript, &u.c, &w.p, &rand_sc, &u.e)?;
 
@@ -932,7 +934,9 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
     transcript.absorb(b"e", &vec![comm_L_row, comm_L_col].as_slice());
     let comm_vec = vec![comm_Az, comm_Bz, comm_Cz];
     let c = transcript.squeeze(b"c")?;
-    let u: PolyEvalInstance<E> = PolyEvalInstance::batch(&comm_vec, &tau_coords, &eval_vec, &c);
+    let u: PolyEvalInstance<E> =
+      PolyEvalInstance::batch(&comm_vec, tau_coords.clone(), &eval_vec, &c);
+
     let claim = u.e;
 
     let gamma = transcript.squeeze(b"g")?;
@@ -1109,7 +1113,8 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
     ];
     transcript.absorb(b"e", &eval_vec.as_slice()); // comm_vec is already in the transcript
     let c = transcript.squeeze(b"c")?;
-    let u: PolyEvalInstance<E> = PolyEvalInstance::batch(&comm_vec, &rand_sc, &eval_vec, &c);
+    let u: PolyEvalInstance<E> = PolyEvalInstance::batch(&comm_vec, rand_sc.clone(), &eval_vec, &c);
+
 
     // verify
     EE::verify(
@@ -1815,7 +1820,10 @@ where
     let poly_vec = vec![&Az, &Bz, &Cz];
     let c = transcript.squeeze(b"c")?;
     let w: PolyEvalWitness<E> = PolyEvalWitness::batch(&poly_vec, &c);
-    let u: PolyEvalInstance<E> = PolyEvalInstance::batch(&comm_vec, &tau_coords, &eval_vec, &c);
+    let u: PolyEvalInstance<E> =
+    PolyEvalInstance::batch(&comm_vec, tau_coords.clone(), &eval_vec, &c);
+
+
 
     // we now need to prove three claims
     // (1) 0 = \sum_x poly_tau(x) * (poly_Az(x) * poly_Bz(x) - poly_uCz_E(x)), and eval_Az_at_tau + r * eval_Bz_at_tau + r^2 * eval_Cz_at_tau = (Az+r*Bz+r^2*Cz)(tau)
@@ -2145,7 +2153,8 @@ where
     transcript.absorb(b"e", &eval_vec.as_slice()); // comm_vec is already in the transcript
     let c = transcript.squeeze(b"c")?;
     let w: PolyEvalWitness<E> = PolyEvalWitness::batch(&poly_vec, &c);
-    let u: PolyEvalInstance<E> = PolyEvalInstance::batch(&comm_vec, &rand_sc, &eval_vec, &c);
+    let u: PolyEvalInstance<E> = PolyEvalInstance::batch(&comm_vec, rand_sc.clone(), &eval_vec, &c);
+
 
     let eval_arg = EE::prove(ck, &pk.pk_ee, &mut transcript, &u.c, &w.p, &rand_sc, &u.e)?;
 
@@ -2272,7 +2281,8 @@ where
     transcript.absorb(b"c", &vec![comm_L_row, comm_L_col].as_slice());
     let comm_vec = vec![comm_Az, comm_Bz, comm_Cz];
     let c = transcript.squeeze(b"c")?;
-    let u: PolyEvalInstance<E> = PolyEvalInstance::batch(&comm_vec, &tau_coords, &eval_vec, &c);
+    let u: PolyEvalInstance<E> =
+      PolyEvalInstance::batch(&comm_vec, tau_coords.clone(), &eval_vec, &c);
     let claim = u.e;
 
     let gamma = transcript.squeeze(b"g")?;
@@ -2501,7 +2511,8 @@ where
     ];
     transcript.absorb(b"e", &eval_vec.as_slice()); // comm_vec is already in the transcript
     let c = transcript.squeeze(b"c")?;
-    let u: PolyEvalInstance<E> = PolyEvalInstance::batch(&comm_vec, &rand_sc, &eval_vec, &c);
+    let u: PolyEvalInstance<E> = PolyEvalInstance::batch(&comm_vec, rand_sc.clone(), &eval_vec, &c);
+
 
     // verify
     EE::verify(
