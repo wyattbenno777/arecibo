@@ -734,12 +734,11 @@ where
         )
       },
     );
-
+    
     // check the returned res objects
     res_r_primary?;
     res_r_secondary?;
     res_l_secondary?;
-
     Ok((self.zi_primary.clone(), self.zi_secondary.clone()))
   }
 
@@ -2295,6 +2294,326 @@ mod tests {
     assert_eq!(pp.circuit_shape_primary.r1cs_shape.num_vars, 13388);
     assert_eq!(pp.circuit_shape_secondary.r1cs_shape.num_cons, 10349);
     assert_eq!(pp.circuit_shape_secondary.r1cs_shape.num_vars, 10329);
+
+    println!("zn_primary {:?}", zn_primary);
+
+    let intermediate_gamma = zn_primary[0];
+    let r = zn_primary[1];
+    let gamma = zn_primary[2];
+    let RW_acc = zn_primary[3];
+    assert_eq!(
+      expected_intermediate_gamma, intermediate_gamma,
+      "expected_intermediate_gamma != intermediate_gamma"
+    );
+
+    // produce a compressed SNARK
+    let res = CompressedSNARKV2::<_, S1<E1, EE<E1>>, S2<E2, EE<E2>>>::prove(
+      &pp,
+      &pk,
+      &recursive_snark,
+      (r, gamma),
+      RW_acc,
+      &initial_table,
+      &final_table,
+    );
+    assert!(res.is_ok());
+    let compressed_snark = res.unwrap();
+
+    // verify the compressed SNARK
+    let res = compressed_snark.verify(
+      &vk,
+      num_steps.try_into().unwrap(),
+      &z0_primary,
+      &z0_secondary,
+      expected_intermediate_gamma,
+      RW_acc,
+      (r, gamma),
+    );
+    println!("res {:?}", res);
+    assert!(res.is_ok());
+  }
+
+  #[test]
+  fn test_ivc_mcc() {
+    type S1<E, EE> = spartan::ppsnark::RelaxedR1CSSNARKV2<E, EE>;
+    type S2<E, EE> = spartan::ppsnark::RelaxedR1CSSNARK<E, EE>;
+    type E1 = provider::PallasEngine;
+    type E2 = provider::VestaEngine;
+    type EE<E> = provider::ipa_pc::EvaluationEngine<E>;
+
+    #[derive(Clone, Debug)]
+    enum AccessType {
+      Read,
+      Write,
+    }
+
+    #[derive(Clone, Debug)]
+    struct MTEntry {
+      value: u64,
+      access_type: AccessType,
+      addr: u64,
+    }
+
+    #[derive(Clone, Debug)]
+    struct MTable(Vec<MTEntry>);
+    impl MTable {
+      fn new() -> Self {
+        MTable(Vec::new())
+      }
+      fn entries(&self) -> &Vec<MTEntry> {
+        &self.0
+      }
+
+      fn push(&mut self, entry: MTEntry) {
+        self.0.push(entry);
+      }
+    }
+
+    // rw lookup to serve as a non-deterministic advices.
+    #[derive(Clone)]
+    struct HeapifyCircuit<E1: Engine, E2: Engine>
+    where
+      <E1 as Engine>::Scalar: Ord,
+      E1: Engine<Base = <E2 as Engine>::Scalar>,
+      E2: Engine<Base = <E1 as Engine>::Scalar>,
+    {
+      lookup_trace: LookupTrace<E1>,
+      ro_consts: ROConstantsCircuit<E2>,
+      m_entry: MTEntry,
+      _phantom: PhantomData<E2>,
+    }
+
+    impl<E1: Engine, E2: Engine> HeapifyCircuit<E1, E2>
+    where
+      <E1 as Engine>::Scalar: Ord,
+      E1: Engine<Base = <E2 as Engine>::Scalar>,
+      E2: Engine<Base = <E1 as Engine>::Scalar>,
+    {
+      fn new(
+        initial_table: Lookup<E1::Scalar>,
+        ro_consts_circuit: ROConstantsCircuit<E2>,
+        m_table: &MTable,
+      ) -> (Vec<Self>, Lookup<E1::Scalar>, E1::Scalar) {
+
+        let initial_intermediate_gamma = <E1 as Engine>::Scalar::from(1);
+
+        let mut lookup = initial_table;
+        let num_steps = m_table.entries().len();
+        let mut intermediate_gamma = initial_intermediate_gamma;
+        // simulate folding step lookup io
+        let mut primary_circuits = Vec::with_capacity(num_steps + 1);
+        let ro_consts = <<E2 as Engine>::RO as ROTrait<
+          <E2 as Engine>::Base,
+          <E2 as Engine>::Scalar,
+        >>::Constants::default();
+
+        for entry in m_table.entries() {
+          let mut lookup_trace_builder = LookupTraceBuilder::<E1>::new(&mut lookup);
+          let addr = E1::Scalar::from(entry.addr);
+          
+          match entry.access_type {
+            AccessType::Read => {
+              let val = lookup_trace_builder.read(addr);
+              let _ = lookup_trace_builder.write(addr, val);
+            }
+            AccessType::Write => {
+              let _val = lookup_trace_builder.read(addr);
+              let _ = lookup_trace_builder.write(addr, E1::Scalar::from(entry.value));
+            }
+          }
+
+          let res = lookup_trace_builder.snapshot::<E2>(ro_consts.clone(), intermediate_gamma);
+          intermediate_gamma = res.0;
+          let (_, lookup_trace) = res;
+          primary_circuits.push(Self {
+            lookup_trace,
+            ro_consts: ro_consts_circuit.clone(),
+            m_entry: entry.clone(),
+            _phantom: PhantomData::<E2> {},
+          });
+        }
+
+        (primary_circuits, lookup, intermediate_gamma)
+      }
+
+      fn get_z0(
+        ck: &CommitmentKey<E1>,
+        final_table: &Lookup<E1::Scalar>,
+        intermediate_gamma: E1::Scalar,
+      ) -> Vec<E1::Scalar>
+      where
+        E1: Engine<Base = <E2 as Engine>::Scalar>,
+        E2: Engine<Base = <E1 as Engine>::Scalar>,
+      {
+
+        let (initial_intermediate_gamma, init_prev_RW_acc, init_global_ts) = (
+          <E1 as Engine>::Scalar::ONE,
+          <E1 as Engine>::Scalar::ZERO,
+          <E1 as Engine>::Scalar::ZERO,
+        );
+
+        let (alpha, gamma) =
+          LookupTraceBuilder::<E1>::get_challenge::<E2>(ck, final_table, intermediate_gamma);
+        vec![
+          initial_intermediate_gamma,
+          alpha,
+          gamma,
+          init_prev_RW_acc,
+          init_global_ts,
+        ]
+      }
+    }
+
+    impl<F: PrimeField, E1: Engine + Engine<Scalar = F>, E2: Engine> StepCircuit<F>
+      for HeapifyCircuit<E1, E2>
+    where
+      E1::Scalar: Ord,
+      E1: Engine<Base = <E2 as Engine>::Scalar>,
+      E2: Engine<Base = <E1 as Engine>::Scalar>,
+    {
+      fn arity(&self) -> usize {
+        5
+      }
+
+      fn synthesize<CS: ConstraintSystem<F>>(
+        &self,
+        cs: &mut CS,
+        z: &[AllocatedNum<F>],
+      ) -> Result<Vec<AllocatedNum<F>>, SynthesisError> {
+        let mut lookup_trace = self.lookup_trace.clone();
+        let prev_intermediate_gamma = &z[0];
+        let alpha = &z[1];
+        let gamma = &z[2];
+        let prev_RW_acc = &z[3];
+        let prev_global_ts = &z[4];
+
+        let index = AllocatedNum::alloc(cs.namespace(|| "index"), || Ok(F::from(self.m_entry.addr)))?;
+        
+        match self.m_entry.access_type {
+          AccessType::Read => {
+
+            let val = lookup_trace.read(cs.namespace(|| "read"), &index)?;
+            let value = AllocatedNum::alloc(cs.namespace(|| "value"), || Ok(val.get_value().unwrap()))?;
+            let _ = lookup_trace.write(cs.namespace(|| "write"), &index, &value)?;
+          }
+          AccessType::Write => {
+            let _val = lookup_trace.read(cs.namespace(|| "read"), &index)?;
+            let value = AllocatedNum::alloc(cs.namespace(|| "value"), || Ok(F::from(self.m_entry.value)))?;
+            let _ = lookup_trace.write(cs.namespace(|| "write"), &index, &value)?;
+          }
+        }
+
+        // commit the rw change
+        let (next_RW_acc, next_global_ts, next_intermediate_gamma) = lookup_trace
+          .commit::<E2, Namespace<'_, F, <CS as ConstraintSystem<F>>::Root>>(
+            cs.namespace(|| "commit"),
+            self.ro_consts.clone(),
+            prev_intermediate_gamma,
+            &(alpha.clone(), gamma.clone()),
+            prev_RW_acc,
+            prev_global_ts,
+          )?;
+
+        Ok(vec![
+          next_intermediate_gamma,
+          alpha.clone(),
+          gamma.clone(),
+          next_RW_acc,
+          next_global_ts,
+        ])
+      }
+    }
+
+    let stack_size: usize = 4;
+
+    let ro_consts: ROConstantsCircuit<E2> = PoseidonConstantsCircuit::default();
+
+    let initial_table = {
+      let mut initial_table = (0..stack_size - 1)
+        .map(|i| {
+          (
+            <E2 as Engine>::Base::from(i as u64),
+            <E2 as Engine>::Base::from(0),
+          )
+        })
+        .collect::<Vec<(<E2 as Engine>::Base, <E2 as Engine>::Base)>>();
+      initial_table.push((
+        <E2 as Engine>::Base::from(stack_size as u64 - 1),
+        <E2 as Engine>::Base::ZERO,
+      )); // attach 1 dummy element to assure table size is power of 2
+      Lookup::new(stack_size * 4, TableType::ReadWrite, initial_table)
+    };
+
+    // Create dummy memory trace for testing POC
+    let mut m_table = MTable::new();
+    m_table.push(MTEntry {
+      value: 1,
+      access_type: AccessType::Write,
+      addr: 0,
+    });
+    m_table.push(MTEntry {
+      value: 0,
+      access_type: AccessType::Read,
+      addr: 0,
+    });
+
+    let (circuit_primaries, final_table, expected_intermediate_gamma) =
+      HeapifyCircuit::<E1, E2>::new(initial_table.clone(), ro_consts, &m_table);
+
+    let circuit_secondary = TrivialCircuit::default();
+
+    let ck_hint1 = &*SPrime::<E1, EE<_>>::ck_floor();
+    let ck_hint2 = &*SPrime::<E2, EE<_>>::ck_floor();
+
+    // produce public parameters
+    let pp =
+      PublicParams::<E1>::setup(
+        &circuit_primaries[0],
+        &circuit_secondary,
+        ck_hint1,
+        ck_hint2,
+      );
+
+    // produce the prover and verifier keys for compressed snark
+    let (pk, vk) =
+      CompressedSNARKV2::<_, S1<E1, EE<E1>>, S2<E2, EE<E2>>>::setup(&pp, &initial_table)
+        .unwrap();
+
+    let z0_primary =
+      HeapifyCircuit::<E1, E2>::get_z0(&pp.ck_primary, &final_table, expected_intermediate_gamma);
+
+    // 5th is initial index.
+    // +1 for index end with 0
+    let num_steps = m_table.entries().len();
+
+    let z0_secondary = vec![<E2 as Engine>::Scalar::ZERO; 1];
+
+    // produce a recursive SNARK
+    let mut recursive_snark: RecursiveSNARK<E1> = RecursiveSNARK::new(
+      &pp,
+      &circuit_primaries[0],
+      &circuit_secondary,
+      &z0_primary,
+      &z0_secondary,
+    )
+    .unwrap();
+
+    for i in 0..num_steps {
+      println!("step i {}", i);
+      let res = recursive_snark.prove_step(&pp, &circuit_primaries[i as usize], &circuit_secondary);
+      res.as_ref()
+        .map_err(|err| println!("err {:?}", err))
+        .unwrap();
+      assert!(res.is_ok());
+    }
+    // verify the recursive SNARK
+    let res = recursive_snark.verify(&pp, num_steps as usize, &z0_primary, &z0_secondary);
+
+    let (zn_primary, _) = res
+      .map_err(|err| {
+        print_constraints_name_on_error_index::<E1, E2, _>(&err, &circuit_primaries[0])
+      })
+      .unwrap();
 
     println!("zn_primary {:?}", zn_primary);
 
