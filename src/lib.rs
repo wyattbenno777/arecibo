@@ -2371,7 +2371,7 @@ mod tests {
 
     // rw lookup to serve as a non-deterministic advices.
     #[derive(Clone)]
-    struct HeapifyCircuit<E1: Engine, E2: Engine>
+    struct MCCCircuit<E1: Engine, E2: Engine>
     where
       <E1 as Engine>::Scalar: Ord,
       E1: Engine<Base = <E2 as Engine>::Scalar>,
@@ -2383,7 +2383,7 @@ mod tests {
       _phantom: PhantomData<E2>,
     }
 
-    impl<E1: Engine, E2: Engine> HeapifyCircuit<E1, E2>
+    impl<E1: Engine, E2: Engine> MCCCircuit<E1, E2>
     where
       <E1 as Engine>::Scalar: Ord,
       E1: Engine<Base = <E2 as Engine>::Scalar>,
@@ -2465,7 +2465,7 @@ mod tests {
     }
 
     impl<F: PrimeField, E1: Engine + Engine<Scalar = F>, E2: Engine> StepCircuit<F>
-      for HeapifyCircuit<E1, E2>
+      for MCCCircuit<E1, E2>
     where
       E1::Scalar: Ord,
       E1: Engine<Base = <E2 as Engine>::Scalar>,
@@ -2558,7 +2558,7 @@ mod tests {
     });
 
     let (circuit_primaries, final_table, expected_intermediate_gamma) =
-      HeapifyCircuit::<E1, E2>::new(initial_table.clone(), ro_consts, &m_table);
+      MCCCircuit::<E1, E2>::new(initial_table.clone(), ro_consts, &m_table);
 
     let circuit_secondary = TrivialCircuit::default();
 
@@ -2580,7 +2580,7 @@ mod tests {
         .unwrap();
 
     let z0_primary =
-      HeapifyCircuit::<E1, E2>::get_z0(&pp.ck_primary, &final_table, expected_intermediate_gamma);
+    MCCCircuit::<E1, E2>::get_z0(&pp.ck_primary, &final_table, expected_intermediate_gamma);
 
     // 5th is initial index.
     // +1 for index end with 0
