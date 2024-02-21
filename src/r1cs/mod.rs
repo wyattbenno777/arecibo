@@ -25,7 +25,7 @@ use rand_core::{CryptoRng, RngCore};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-pub(crate) use self::sparse::SparseMatrix;
+pub(crate) use sparse::SparseMatrix;
 
 /// A type that holds the shape of the R1CS matrices
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Abomonation)]
@@ -145,7 +145,7 @@ impl<E: Engine> R1CSShape<E> {
 
     // We require the number of public inputs/outputs to be even
     if num_io % 2 != 0 {
-      return Err(NovaError::OddInputLength);
+      return Err(NovaError::InvalidStepCircuitIO);
     }
 
     Ok(Self {
@@ -660,16 +660,8 @@ impl<E: Engine> RelaxedR1CSWitness<E> {
       return Err(NovaError::InvalidWitnessLength);
     }
 
-    let W = W1
-      .par_iter()
-      .zip_eq(W2)
-      .map(|(a, b)| *a + *r * *b)
-      .collect::<Vec<E::Scalar>>();
-    let E = E1
-      .par_iter()
-      .zip_eq(T)
-      .map(|(a, b)| *a + *r * *b)
-      .collect::<Vec<E::Scalar>>();
+    let W = zip_with!((W1.par_iter(), W2), |a, b| *a + *r * *b).collect::<Vec<E::Scalar>>();
+    let E = zip_with!((E1.par_iter(), T), |a, b| *a + *r * *b).collect::<Vec<E::Scalar>>();
     Ok(Self { W, E })
   }
 
@@ -755,11 +747,7 @@ impl<E: Engine> RelaxedR1CSInstance<E> {
     let (X2, comm_W_2) = (&U2.X, &U2.comm_W);
 
     // weighted sum of X, comm_W, comm_E, and u
-    let X = X1
-      .par_iter()
-      .zip_eq(X2)
-      .map(|(a, b)| *a + *r * *b)
-      .collect::<Vec<E::Scalar>>();
+    let X = zip_with!((X1.par_iter(), X2), |a, b| *a + *r * *b).collect::<Vec<E::Scalar>>();
     let comm_W = *comm_W_1 + *comm_W_2 * *r;
     let comm_E = *comm_E_1 + *comm_T * *r;
     let u = *u1 + *r;
@@ -820,19 +808,19 @@ pub fn default_T<E: Engine>(num_cons: usize) -> Vec<E::Scalar> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
   use ff::Field;
   use rand_chacha::ChaCha20Rng;
   use rand_core::SeedableRng;
 
   use super::*;
   use crate::{
-    provider::{Bn256Engine, PallasEngine, Secp256k1Engine},
+    provider::{Bn256EngineIPA, Bn256EngineKZG, PallasEngine, Secp256k1Engine},
     r1cs::sparse::SparseMatrix,
     traits::Engine,
   };
 
-  fn tiny_r1cs<E: Engine>(num_vars: usize) -> R1CSShape<E> {
+  pub(crate) fn tiny_r1cs<E: Engine>(num_vars: usize) -> R1CSShape<E> {
     let one = <E::Scalar as Field>::ONE;
     let (num_cons, num_vars, num_io, A, B, C) = {
       let num_cons = 4;
@@ -910,7 +898,7 @@ mod tests {
   #[test]
   fn test_pad_tiny_r1cs() {
     test_pad_tiny_r1cs_with::<PallasEngine>();
-    test_pad_tiny_r1cs_with::<Bn256Engine>();
+    test_pad_tiny_r1cs_with::<Bn256EngineKZG>();
     test_pad_tiny_r1cs_with::<Secp256k1Engine>();
   }
 
@@ -931,6 +919,6 @@ mod tests {
 
   #[test]
   fn test_random_r1cs() {
-    test_random_r1cs_with::<Bn256Engine>();
+    test_random_r1cs_with::<Bn256EngineIPA>();
   }
 }

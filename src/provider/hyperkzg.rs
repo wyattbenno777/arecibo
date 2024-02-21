@@ -9,13 +9,12 @@
 use crate::{
   errors::NovaError,
   provider::{
-    kzg_commitment::KZGCommitmentEngine,
-    non_hiding_kzg::{trim, KZGProverKey, KZGVerifierKey, UniversalKZGParam},
+    kzg_commitment::{KZGCommitmentEngine, KZGProverKey, KZGVerifierKey, UniversalKZGParam},
     pedersen::Commitment,
     traits::DlogGroup,
-    util::iterators::DoubleEndedIteratorExt as _,
+    util::iterators::IndexedParallelIteratorExt as _,
   },
-  spartan::polys::univariate::UniPoly,
+  spartan::{polys::univariate::UniPoly, powers},
   traits::{
     commitment::{CommitmentEngineTrait, Len},
     evaluation::EvaluationEngineTrait,
@@ -92,9 +91,7 @@ where
 
   /// Compute powers of q : (1, q, q^2, ..., q^(k-1))
   pub fn batch_challenge_powers(q: E::Fr, k: usize) -> Vec<E::Fr> {
-    std::iter::successors(Some(E::Fr::ONE), |&x| Some(x * q))
-      .take(k)
-      .collect()
+    powers(&q, k)
   }
 
   /// TODO: write doc
@@ -127,7 +124,7 @@ where
 
   fn setup(ck: Arc<UniversalKZGParam<E>>) -> (Self::ProverKey, Self::VerifierKey) {
     let len = ck.length() - 1;
-    trim(ck, len)
+    UniversalKZGParam::trim(ck, len)
   }
 
   fn prove(
@@ -182,7 +179,7 @@ where
      -> (Vec<E::G1Affine>, Vec<Vec<E::Fr>>) {
       let kzg_compute_batch_polynomial = |f: Vec<Vec<E::Fr>>, q: E::Fr| -> Vec<E::Fr> {
         // Compute B(x) = f_0(x) + q * f_1(x) + ... + q^(k-1) * f_{k-1}(x)
-        let B: UniPoly<E::Fr> = f.into_iter().map(UniPoly::new).rlc(&q);
+        let B: UniPoly<E::Fr> = f.into_par_iter().map(UniPoly::new).rlc(&q);
         B.coeffs
       };
       ///////// END kzg_open_batch closure helpers
@@ -421,10 +418,9 @@ where
 mod tests {
   use super::*;
   use crate::provider::util::test_utils::prove_verify_from_num_vars;
-  use crate::{
-    provider::keccak::Keccak256Transcript, traits::commitment::CommitmentTrait, CommitmentKey,
-  };
+  use crate::{provider::keccak::Keccak256Transcript, CommitmentKey};
   use bincode::Options;
+  use expect_test::expect;
 
   type E = halo2curves::bn256::Bn256;
   type NE = crate::provider::Bn256EngineKZG;
@@ -437,36 +433,52 @@ mod tests {
     let ck: CommitmentKey<NE> =
       <KZGCommitmentEngine<E> as CommitmentEngineTrait<NE>>::setup(b"test", n);
     let ck = Arc::new(ck);
-    let (pk, _vk): (KZGProverKey<E>, KZGVerifierKey<E>) =
+    let (pk, vk): (KZGProverKey<E>, KZGVerifierKey<E>) =
       EvaluationEngine::<E, NE>::setup(ck.clone());
 
     // poly is in eval. representation; evaluated at [(0,0), (0,1), (1,0), (1,1)]
     let poly = vec![Fr::from(1), Fr::from(2), Fr::from(2), Fr::from(4)];
 
     let C = <KZGCommitmentEngine<E> as CommitmentEngineTrait<NE>>::commit(&ck, &poly);
-    let mut tr = Keccak256Transcript::<NE>::new(b"TestEval");
 
-    // Call the prover with a (point, eval) pair. The prover recomputes
-    // poly(point) = eval', and fails if eval' != eval
+    let test_inner = |point: Vec<Fr>, eval: Fr| -> Result<(), NovaError> {
+      let mut tr = Keccak256Transcript::<NE>::new(b"TestEval");
+      let proof =
+        EvaluationEngine::<E, NE>::prove(&ck, &pk, &mut tr, &C, &poly, &point, &eval).unwrap();
+      let mut tr = Keccak256Transcript::new(b"TestEval");
+      EvaluationEngine::<E, NE>::verify(&vk, &mut tr, &C, &point, &eval, &proof)
+    };
+
+    // Call the prover with a (point, eval) pair.
+    // The prover does not recompute so it may produce a proof, but it should not verify
     let point = vec![Fr::from(0), Fr::from(0)];
     let eval = Fr::ONE;
-    assert!(EvaluationEngine::<E, NE>::prove(&ck, &pk, &mut tr, &C, &poly, &point, &eval).is_ok());
+    assert!(test_inner(point, eval).is_ok());
 
     let point = vec![Fr::from(0), Fr::from(1)];
     let eval = Fr::from(2);
-    assert!(EvaluationEngine::<E, NE>::prove(&ck, &pk, &mut tr, &C, &poly, &point, &eval).is_ok());
+    assert!(test_inner(point, eval).is_ok());
 
     let point = vec![Fr::from(1), Fr::from(1)];
     let eval = Fr::from(4);
-    assert!(EvaluationEngine::<E, NE>::prove(&ck, &pk, &mut tr, &C, &poly, &point, &eval).is_ok());
+    assert!(test_inner(point, eval).is_ok());
 
     let point = vec![Fr::from(0), Fr::from(2)];
     let eval = Fr::from(3);
-    assert!(EvaluationEngine::<E, NE>::prove(&ck, &pk, &mut tr, &C, &poly, &point, &eval).is_ok());
+    assert!(test_inner(point, eval).is_ok());
 
     let point = vec![Fr::from(2), Fr::from(2)];
     let eval = Fr::from(9);
-    assert!(EvaluationEngine::<E, NE>::prove(&ck, &pk, &mut tr, &C, &poly, &point, &eval).is_ok());
+    assert!(test_inner(point, eval).is_ok());
+
+    // Try a couple incorrect evaluations and expect failure
+    let point = vec![Fr::from(2), Fr::from(2)];
+    let eval = Fr::from(50);
+    assert!(test_inner(point, eval).is_err());
+
+    let point = vec![Fr::from(0), Fr::from(2)];
+    let eval = Fr::from(4);
+    assert!(test_inner(point, eval).is_err());
   }
 
   #[test]
@@ -565,15 +577,12 @@ mod tests {
     // same state
     assert_eq!(post_c_p, post_c_v);
 
-    let my_options = bincode::DefaultOptions::new()
+    let proof_bytes = bincode::DefaultOptions::new()
       .with_big_endian()
-      .with_fixint_encoding();
-    let mut output_bytes = my_options.serialize(&vk).unwrap();
-    output_bytes.append(&mut my_options.serialize(&C.compress()).unwrap());
-    output_bytes.append(&mut my_options.serialize(&point).unwrap());
-    output_bytes.append(&mut my_options.serialize(&eval).unwrap());
-    output_bytes.append(&mut my_options.serialize(&proof).unwrap());
-    println!("total output = {} bytes", output_bytes.len());
+      .with_fixint_encoding()
+      .serialize(&proof)
+      .unwrap();
+    expect!["368"].assert_eq(&proof_bytes.len().to_string());
 
     // Change the proof and expect verification to fail
     let mut bad_proof = proof.clone();

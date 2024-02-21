@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 use arecibo::{
-  provider::{PallasEngine, VestaEngine},
+  provider::{Bn256EngineKZG, GrumpkinEngine},
   traits::{
     circuit::{StepCircuit, TrivialCircuit},
     snark::RelaxedR1CSSNARKTrait,
@@ -12,14 +12,15 @@ use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use core::marker::PhantomData;
 use criterion::{measurement::WallTime, *};
 use ff::PrimeField;
+use halo2curves::bn256::Bn256;
 use std::time::Duration;
 
 mod common;
 use common::{noise_threshold_env, BenchParams};
 
-type E1 = PallasEngine;
-type E2 = VestaEngine;
-type EE1 = arecibo::provider::ipa_pc::EvaluationEngine<E1>;
+type E1 = Bn256EngineKZG;
+type E2 = GrumpkinEngine;
+type EE1 = arecibo::provider::hyperkzg::EvaluationEngine<Bn256, E1>;
 type EE2 = arecibo::provider::ipa_pc::EvaluationEngine<E2>;
 // SNARKs without computation commitmnets
 type S1 = arecibo::spartan::snark::RelaxedR1CSSNARK<E1, EE1>;
@@ -67,7 +68,8 @@ fn bench_compressed_snark_internal<S1: RelaxedR1CSSNARKTrait<E1>, S2: RelaxedR1C
   let c_secondary = TrivialCircuit::default();
 
   // Produce public parameters
-  let pp = PublicParams::<E1>::setup(&c_primary, &c_secondary, &*S1::ck_floor(), &*S2::ck_floor());
+  let pp = PublicParams::<E1>::setup(&c_primary, &c_secondary, &*S1::ck_floor(), &*S2::ck_floor())
+    .unwrap();
 
   // Produce prover and verifier keys for CompressedSNARK
   let (pk, vk) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();

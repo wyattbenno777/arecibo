@@ -149,6 +149,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
     let (mut poly_Az, mut poly_Bz, poly_Cz, mut poly_uCz_E) = {
       let (poly_Az, poly_Bz, poly_Cz) = S.multiply_vec(&z)?;
       let poly_uCz_E = (0..S.num_cons)
+        .into_par_iter()
         .map(|i| U.u * poly_Cz[i] + W.E[i])
         .collect::<Vec<E::Scalar>>();
       (
@@ -453,7 +454,7 @@ pub(in crate::spartan) fn batch_eval_prove<E: Engine>(
 
   // generate a challenge, and powers of it for random linear combination
   let rho = transcript.squeeze(b"r")?;
-  let powers_of_rho = powers::<E>(&rho, num_claims);
+  let powers_of_rho = powers(&rho, num_claims);
 
   let (claims, u_xs, comms): (Vec<_>, Vec<_>, Vec<_>) =
     u_vec.into_iter().map(|u| (u.e, u.x, u.c)).multiunzip();
@@ -511,7 +512,7 @@ pub(in crate::spartan) fn batch_eval_verify<E: Engine>(
 
   // generate a challenge
   let rho = transcript.squeeze(b"r")?;
-  let powers_of_rho = powers::<E>(&rho, num_claims);
+  let powers_of_rho = powers(&rho, num_claims);
 
   // Compute nᵢ and n = maxᵢ{nᵢ}
   let num_rounds = u_vec.iter().map(|u| u.x.len()).collect::<Vec<_>>();
