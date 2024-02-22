@@ -100,7 +100,8 @@ where
   F_arity_secondary: usize,
   ro_consts_primary: ROConstants<E>,
   ro_consts_circuit_primary: ROConstantsCircuit<Dual<E>>,
-  ck_primary: Arc<CommitmentKey<E>>,
+  /// ck primary
+  pub ck_primary: Arc<CommitmentKey<E>>,
   circuit_shape_primary: R1CSWithArity<E>,
   ro_consts_secondary: ROConstants<Dual<E>>,
   ro_consts_circuit_secondary: ROConstantsCircuit<E>,

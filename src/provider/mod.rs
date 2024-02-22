@@ -5,12 +5,12 @@ pub mod hyperkzg;
 pub mod ipa_pc;
 pub mod non_hiding_zeromorph;
 pub mod shplonk;
+pub mod poseidon;
 
 // crate-public modules, made crate-public mostly for tests
 pub(crate) mod bn256_grumpkin;
 mod pasta;
 mod pedersen;
-pub(crate) mod poseidon;
 pub(crate) mod secp_secq;
 pub(crate) mod traits;
 // a non-hiding variant of {kzg, zeromorph}
