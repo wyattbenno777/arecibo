@@ -79,7 +79,7 @@ impl<E: Engine> CircuitDigests<E> {
 }
 
 /// A vector of [`R1CSWithArity`] adjoined to a set of [`PublicParams`]
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct PublicParams<E1>
 where
@@ -427,11 +427,11 @@ where
       .expect("Failure in retrieving digest")
   }
 
-  /// Returns the number of constraints and variables in inner circuit
-  pub fn num_constraints_and_variables(&self, item: usize) -> (usize, usize) {
+  /// Returns the number of constraints and variables of inner circuit based on index
+  pub fn num_constraints_and_variables(&self, index: usize) -> (usize, usize) {
     (
-      self.circuit_shapes[item].r1cs_shape.num_cons,
-      self.circuit_shapes[item].r1cs_shape.num_vars,
+      self.circuit_shapes[index].r1cs_shape.num_cons,
+      self.circuit_shapes[index].r1cs_shape.num_vars,
     )
   }
 
