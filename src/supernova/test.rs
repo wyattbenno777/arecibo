@@ -367,13 +367,40 @@ where
   // in the augmented circuit.
 
   let rom = vec![
-    OPCODE_1, OPCODE_1, OPCODE_0, OPCODE_0, OPCODE_1, OPCODE_1, OPCODE_0, OPCODE_0, OPCODE_1,
+    OPCODE_0,
+    OPCODE_0,
+    OPCODE_0,
+    OPCODE_0,
+    OPCODE_0,
+    OPCODE_0,
+    OPCODE_0,
+    OPCODE_0,
+    OPCODE_0,
+    OPCODE_0,
+    OPCODE_0,
+    OPCODE_1,
+    OPCODE_1,
+    OPCODE_1,
+    OPCODE_1,
+    OPCODE_1,
+    OPCODE_1,
+    OPCODE_1,
+    OPCODE_1,
+    OPCODE_1,
     OPCODE_1,
   ]; // Rom can be arbitrary length.
 
   let test_rom = TestROM::<E1>::new(rom);
 
   let pp = PublicParams::setup(&test_rom, &*default_ck_hint(), &*default_ck_hint());
+
+  for i in 0..=1 {
+    println!(
+      "Number of constraints per step (primary circuit): {}",
+      pp.num_constraints_and_variables(i).0
+    );
+
+  }
 
   // extend z0_primary/secondary with rom content
   let mut z0_primary = vec![<E1 as Engine>::Scalar::ONE];
