@@ -106,7 +106,7 @@ impl<E: Engine> NIFS<E> {
     let mut ro = E::RO::new(ro_consts.clone(), NUM_FE_FOR_RO);
 
     // append the digest of pp to the transcript
-    //ro.absorb(scalar_as_base::<E>(*pp_digest));
+    ro.absorb(scalar_as_base::<E>(*pp_digest));
 
     // append U2 to transcript, U1 does not need to absorbed since U2.X[0] = Hash(params, U1, i, z0, zi)
     U2.absorb_in_ro(&mut ro);
