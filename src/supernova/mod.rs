@@ -33,6 +33,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::debug;
+use std::time::Instant;
 
 use crate::bellpepper::{
   r1cs::{NovaShape, NovaWitness},
@@ -763,6 +764,7 @@ where
     let circuit_index = c_primary.circuit_index();
     assert_eq!(self.program_counter, E1::Scalar::from(circuit_index as u64));
 
+    let start_time = Instant::now();
     // fold the secondary circuit's instance
     let nifs_secondary = NIFS::prove_mut(
       &*pp.ck_secondary,
@@ -779,10 +781,15 @@ where
     )
     .map_err(SuperNovaError::NovaError)?;
 
+    let elapsed_time = start_time.elapsed();
+    println!("prove mut secondary {:?}", elapsed_time);
+
     let mut cs_primary = SatisfyingAssignment::<E1>::with_capacity(
       pp[circuit_index].r1cs_shape.num_io + 1,
       pp[circuit_index].r1cs_shape.num_vars,
     );
+
+    let start_time = Instant::now();
     let T = Commitment::<Dual<E1>>::decompress(&nifs_secondary.comm_T)
       .map_err(SuperNovaError::NovaError)?;
     let inputs_primary: SuperNovaAugmentedCircuitInputs<'_, Dual<E1>> =
@@ -798,6 +805,9 @@ where
         E1::Scalar::ZERO,
       );
 
+    let elapsed_time = start_time.elapsed();
+    println!("decompress {:?}", elapsed_time);
+
     let circuit_primary: SuperNovaAugmentedCircuit<'_, Dual<E1>, C1> =
       SuperNovaAugmentedCircuit::new(
         &pp.augmented_circuit_params_primary,
@@ -807,6 +817,8 @@ where
         self.num_augmented_circuits,
       );
 
+    let start_time = Instant::now();
+
     let (zi_primary_pc_next, zi_primary) = circuit_primary
       .synthesize(&mut cs_primary)
       .map_err(NovaError::from)?;
@@ -815,6 +827,9 @@ where
         NovaError::InvalidInitialInputLength,
       ));
     }
+
+    let elapsed_time = start_time.elapsed();
+    println!("circuit_primary {:?}", elapsed_time);
 
     let (l_u_primary, l_w_primary) = cs_primary
       .r1cs_instance_and_witness(&pp[circuit_index].r1cs_shape, &pp.ck_primary)
@@ -838,6 +853,7 @@ where
       )
     };
 
+    let start_time = Instant::now();
     let nifs_primary = NIFS::prove_mut(
       &*pp.ck_primary,
       &pp.ro_consts_primary,
@@ -852,6 +868,9 @@ where
       &mut self.buffer_primary.ABC_Z_2,
     )
     .map_err(SuperNovaError::NovaError)?;
+
+    let elapsed_time = start_time.elapsed();
+    println!("prove_mut2 {:?}", elapsed_time);
 
     let mut cs_secondary = SatisfyingAssignment::<Dual<E1>>::with_capacity(
       pp.circuit_shape_secondary.r1cs_shape.num_io + 1,

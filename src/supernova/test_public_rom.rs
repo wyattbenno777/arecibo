@@ -7,6 +7,8 @@ use core::marker::PhantomData;
 use ff::Field;
 use ff::PrimeField;
 
+use std::time::Instant;
+
 use super::{utils::get_selector_vec_from_index, *};
 
 #[derive(Clone, Debug, Default)]
@@ -330,25 +332,6 @@ where
 
   let rom = vec![
     OPCODE_0,
-    OPCODE_0,
-    OPCODE_0,
-    OPCODE_0,
-    OPCODE_0,
-    OPCODE_0,
-    OPCODE_0,
-    OPCODE_0,
-    OPCODE_0,
-    OPCODE_0,
-    OPCODE_0,
-    OPCODE_1,
-    OPCODE_1,
-    OPCODE_1,
-    OPCODE_1,
-    OPCODE_1,
-    OPCODE_1,
-    OPCODE_1,
-    OPCODE_1,
-    OPCODE_1,
     OPCODE_1,
   ]; // Rom can be arbitrary length.
 
@@ -356,16 +339,15 @@ where
 
   let pp = PublicParams::setup(&test_rom, &*default_ck_hint(), &*default_ck_hint());
 
+  println!(
+    "Number of constraints per step (primary circuit): {}",
+    pp.num_constraints_and_variables(0).0
+  );
 
-    println!(
-      "Number of constraints per step (primary circuit): {}",
-      pp.num_constraints_and_variables(0).0
-    );
-
-    println!(
-      "Number of constraints per step (secondary circuit): {}",
-      pp.num_constraints_and_variables_secondary().0
-    );
+  println!(
+    "Number of constraints per step (secondary circuit): {}",
+    pp.num_constraints_and_variables_secondary().0
+  );
 
   // extend z0_primary/secondary with rom content
   let mut z0_primary = vec![<E1 as Engine>::Scalar::ONE];
@@ -390,9 +372,15 @@ where
       .unwrap()
     });
 
+    println!("new");
+    let start_time = Instant::now();
     recursive_snark
       .prove_step(&pp, &circuit_primary, &circuit_secondary)
       .unwrap();
+
+    let elapsed_time = start_time.elapsed();
+    println!("Prove step took {:?}", elapsed_time);
+
     recursive_snark
       .verify(&pp, &z0_primary, &z0_secondary)
       .map_err(|_err| {
