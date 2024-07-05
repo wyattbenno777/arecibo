@@ -51,15 +51,12 @@ where
   r_W_snark_primary: S1,
 
   r_U_cyclefold: RelaxedR1CSInstance<Dual<E1>>,
-  l_u_cyclefold: R1CSInstance<Dual<E1>>,
-  nifs_cyclefold: NIFS<Dual<E1>>,
   f_W_snark_cyclefold: S2,
 
   num_steps: usize,
   program_counter: E1::Scalar,
 
   zn_primary: Vec<E1::Scalar>,
-  zn_cyclefold: Vec<<Dual<E1> as Engine>::Scalar>,
 }
 
 impl<E1, S1, S2> CompressedSNARK<E1, S1, S2>
@@ -89,5 +86,71 @@ where
     };
 
     Ok((prover_key, verifier_key))
+  }
+
+  /// Create a new `CompressedSNARK`
+  pub fn prove(
+    pp: &PublicParams<E1>,
+    pk: &ProverKey<E1, S1, S2>,
+    recursive_snark: &RecursiveSNARK<E1>,
+  ) -> Result<Self, SuperNovaError> {
+    // Prepare the list of primary Relaxed R1CS instances (a default instance is provided for
+    // uninitialized circuits)
+    let r_U_primary = recursive_snark
+      .r_U_primary
+      .iter()
+      .enumerate()
+      .map(|(idx, r_U)| {
+        r_U
+          .clone()
+          .unwrap_or_else(|| RelaxedR1CSInstance::default(&*pp.ck_primary, &pp[idx].r1cs_shape))
+      })
+      .collect::<Vec<_>>();
+
+    // Prepare the list of primary relaxed R1CS witnesses (a default witness is provided for
+    // uninitialized circuits)
+    let r_W_primary: Vec<RelaxedR1CSWitness<E1>> = recursive_snark
+      .r_W_primary
+      .iter()
+      .enumerate()
+      .map(|(idx, r_W)| {
+        r_W
+          .clone()
+          .unwrap_or_else(|| RelaxedR1CSWitness::default(&pp[idx].r1cs_shape))
+      })
+      .collect::<Vec<_>>();
+
+    // Generate a primary SNARK proof for the list of primary circuits
+    let r_W_snark_primary = S1::prove(
+      &pp.ck_primary,
+      &pk.pk_primary,
+      pp.primary_r1cs_shapes(),
+      &r_U_primary,
+      &r_W_primary,
+    )?;
+
+    // Generate a cyclefold SNARK proof for the cyclefold circuit
+    let f_W_snark_cyclefold = S2::prove(
+      &pp.ck_cyclefold,
+      &pk.pk_cyclefold,
+      &pp.circuit_shape_cyclefold.r1cs_shape,
+      &recursive_snark.r_U_cyclefold,
+      &recursive_snark.r_W_cyclefold,
+    )?;
+
+    let compressed_snark = Self {
+      r_U_primary,
+      r_W_snark_primary,
+
+      r_U_cyclefold: recursive_snark.r_U_cyclefold.clone(),
+      f_W_snark_cyclefold,
+
+      num_steps: recursive_snark.i,
+      program_counter: recursive_snark.program_counter,
+
+      zn_primary: recursive_snark.zi_primary.clone(),
+    };
+
+    Ok(compressed_snark)
   }
 }
