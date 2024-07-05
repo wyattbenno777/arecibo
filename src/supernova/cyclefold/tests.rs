@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 use std::time::Instant;
 
 use crate::provider::PallasEngine;
-use crate::supernova::cyclefold::snark::PublicParams;
+use crate::supernova::cyclefold::PublicParams;
 use crate::traits::snark::default_ck_hint;
 use crate::traits::Engine;
 use crate::{
