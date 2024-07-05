@@ -18,8 +18,8 @@ use tap::TapOptional;
 use tracing::debug;
 
 use super::augmented_circuit::SuperNovaAugmentedCircuit;
-use super::snark::NonUniformCircuit;
-use super::snark::RecursiveSNARK;
+use super::NonUniformCircuit;
+use super::RecursiveSNARK;
 
 #[derive(Clone, Debug, Default)]
 struct CubicCircuit<F> {
