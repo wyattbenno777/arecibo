@@ -413,6 +413,121 @@ mod test {
     }
   }
 
+  #[derive(Clone)]
+  struct BigPowerCircuit<E> {
+    _p: PhantomData<E>,
+  }
+
+  impl<E: Engine> StepCircuit<E::Scalar> for BigPowerCircuit<E> {
+    fn arity(&self) -> usize {
+      1
+    }
+
+    fn circuit_index(&self) -> usize {
+      1
+    }
+
+    fn synthesize<CS: ConstraintSystem<E::Scalar>>(
+      &self,
+      cs: &mut CS,
+      _pc: Option<&AllocatedNum<E::Scalar>>,
+      z: &[AllocatedNum<E::Scalar>],
+    ) -> Result<
+      (
+        Option<AllocatedNum<E::Scalar>>,
+        Vec<AllocatedNum<E::Scalar>>,
+      ),
+      SynthesisError,
+    > {
+      let mut x = z[0].clone();
+      let mut y = x.clone();
+      for i in 0..10_000 {
+        y = x.square(cs.namespace(|| format!("x_sq_{i}")))?;
+        x = y.clone();
+      }
+
+      let next_pc = AllocatedNum::alloc(cs.namespace(|| "next_pc"), || Ok(E::Scalar::from(0u64)))?;
+
+      cs.enforce(
+        || "next_pc = 0",
+        |lc| lc + CS::one(),
+        |lc| lc + next_pc.get_variable(),
+        |lc| lc,
+      );
+
+      Ok((Some(next_pc), vec![y]))
+    }
+  }
+
+  #[derive(Clone)]
+  enum BigTestCircuit<E: Engine> {
+    Square(SquareCircuit<E>),
+    BigPower(BigPowerCircuit<E>),
+  }
+
+  impl<E: Engine> BigTestCircuit<E> {
+    fn new(num_steps: usize) -> Vec<Self> {
+      let mut circuits = Vec::new();
+
+      for idx in 0..num_steps {
+        if idx % 2 == 0 {
+          circuits.push(Self::Square(SquareCircuit { _p: PhantomData }))
+        } else {
+          circuits.push(Self::BigPower(BigPowerCircuit { _p: PhantomData }))
+        }
+      }
+
+      circuits
+    }
+  }
+
+  impl<E: Engine> StepCircuit<E::Scalar> for BigTestCircuit<E> {
+    fn arity(&self) -> usize {
+      1
+    }
+
+    fn circuit_index(&self) -> usize {
+      match self {
+        Self::Square(c) => c.circuit_index(),
+        Self::BigPower(c) => c.circuit_index(),
+      }
+    }
+
+    fn synthesize<CS: ConstraintSystem<E::Scalar>>(
+      &self,
+      cs: &mut CS,
+      pc: Option<&AllocatedNum<E::Scalar>>,
+      z: &[AllocatedNum<E::Scalar>],
+    ) -> Result<
+      (
+        Option<AllocatedNum<E::Scalar>>,
+        Vec<AllocatedNum<E::Scalar>>,
+      ),
+      SynthesisError,
+    > {
+      match self {
+        Self::Square(c) => c.synthesize(cs, pc, z),
+        Self::BigPower(c) => c.synthesize(cs, pc, z),
+      }
+    }
+  }
+
+  impl<E1: CurveCycleEquipped> NonUniformCircuit<E1> for BigTestCircuit<E1> {
+    type C1 = Self;
+
+    fn num_circuits(&self) -> usize {
+      2
+    }
+
+    fn primary_circuit(&self, circuit_index: usize) -> Self {
+      match circuit_index {
+        0 => Self::Square(SquareCircuit { _p: PhantomData }),
+        1 => Self::BigPower(BigPowerCircuit { _p: PhantomData }),
+        _ => panic!("Invalid circuit index"),
+      }
+    }
+  }
+
   fn test_compression_with<E1, S1, S2, F, C>(num_steps: usize, circuits_factory: F)
   where
     E1: CurveCycleEquipped,
@@ -428,7 +543,6 @@ mod test {
     let pp = PublicParams::setup(&test_circuits[0], &*S1::ck_floor(), &*S2::ck_floor());
 
     let z0_primary = vec![E1::Scalar::from(17u64)];
-    let z0_secondary = vec![<Dual<E1> as Engine>::Scalar::ZERO];
 
     let mut recursive_snark =
       RecursiveSNARK::new(&pp, &test_circuits[0], &test_circuits[0], &z0_primary).unwrap();
@@ -460,5 +574,20 @@ mod test {
     test_compression_with::<PallasEngine, S1<_>, S2<_>, _, _>(NUM_STEPS, TestCircuit::new);
     test_compression_with::<Bn256EngineIPA, S1<_>, S2<_>, _, _>(NUM_STEPS, TestCircuit::new);
     test_compression_with::<Secp256k1Engine, S1<_>, S2<_>, _, _>(NUM_STEPS, TestCircuit::new);
+  }
+
+  #[test]
+  fn test_compression_with_circuit_size_difference() {
+    const NUM_STEPS: usize = 4;
+
+    // ppSNARK
+    test_compression_with::<PallasEngine, S1PP<_>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
+    test_compression_with::<Bn256EngineIPA, S1PP<_>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
+    test_compression_with::<Secp256k1Engine, S1PP<_>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
+
+    // classic SNARK
+    test_compression_with::<PallasEngine, S1<_>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
+    test_compression_with::<Bn256EngineIPA, S1<_>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
+    test_compression_with::<Secp256k1Engine, S1<_>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
   }
 }
