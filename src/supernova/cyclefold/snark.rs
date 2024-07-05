@@ -50,7 +50,7 @@ where
   r_U_primary: Vec<RelaxedR1CSInstance<E1>>,
   r_W_snark_primary: S1,
 
-  r_U_cyclefold: RelaxedR1CSInstance<Dual<E1>>,
+  f_U_cyclefold: RelaxedR1CSInstance<Dual<E1>>,
   f_W_snark_cyclefold: S2,
 
   num_steps: usize,
@@ -142,7 +142,7 @@ where
       r_U_primary,
       r_W_snark_primary,
 
-      r_U_cyclefold: recursive_snark.r_U_cyclefold.clone(),
+      f_U_cyclefold: recursive_snark.r_U_cyclefold.clone(),
       f_W_snark_cyclefold,
 
       num_steps: recursive_snark.i,
@@ -152,5 +152,94 @@ where
     };
 
     Ok(compressed_snark)
+  }
+
+  /// Verify the correctness of the `CompressedSNARK`
+  pub fn verify(
+    &self,
+    vk: &VerifierKey<E1, S1, S2>,
+    z0_primary: &[E1::Scalar],
+  ) -> Result<Vec<E1::Scalar>, SuperNovaError> {
+    // let last_circuit_idx = field_as_usize(self.program_counter);
+
+    // let num_field_primary_ro = 3 // params_next, i_new, program_counter_new
+    // + 2 * pp[last_circuit_idx].F_arity // zo, z1
+    // + (7 + 2 * pp.augmented_circuit_params_primary.get_n_limbs()); // # 1 * (7 + [X0, X1]*#num_limb)
+
+    // // secondary circuit
+    // // NOTE: This count ensure the number of witnesses sent by the prover must equal the number of
+    // // NIVC circuits
+    // let num_field_secondary_ro = 2 // params_next, i_new
+    // + 2 * pp.circuit_shape_secondary.F_arity // zo, z1
+    // + pp.circuit_shapes.len() * (7 + 2 * pp.augmented_circuit_params_primary.get_n_limbs()); // #num_augment
+
+    // // Compute the primary and secondary hashes given the digest, program counter, instances, and
+    // // witnesses provided by the prover
+    let (hash_primary, hash_cyclefold) = {
+      //   let mut hasher =
+      //     <Dual<E1> as Engine>::RO::new(pp.ro_consts_secondary.clone(), num_field_primary_ro);
+
+      //   hasher.absorb(pp.digest());
+      //   hasher.absorb(E1::Scalar::from(self.num_steps as u64));
+      //   hasher.absorb(self.program_counter);
+
+      //   for e in z0_primary {
+      //     hasher.absorb(*e);
+      //   }
+
+      //   for e in &self.zn_primary {
+      //     hasher.absorb(*e);
+      //   }
+
+      //   self.r_U_secondary.absorb_in_ro(&mut hasher);
+
+      //   let mut hasher2 =
+      //     <E1 as Engine>::RO::new(pp.ro_consts_primary.clone(), num_field_secondary_ro);
+
+      //   hasher2.absorb(scalar_as_base::<E1>(pp.digest()));
+      //   hasher2.absorb(<Dual<E1> as Engine>::Scalar::from(self.num_steps as u64));
+
+      //   for e in z0_secondary {
+      //     hasher2.absorb(*e);
+      //   }
+
+      //   for e in &self.zn_secondary {
+      //     hasher2.absorb(*e);
+      //   }
+
+      //   self.r_U_primary.iter().for_each(|U| {
+      //     U.absorb_in_ro(&mut hasher2);
+      //   });
+
+      //   (
+      //     hasher.squeeze(NUM_HASH_BITS),
+      //     hasher2.squeeze(NUM_HASH_BITS),
+      //   )
+    };
+
+    // // Compare the computed hashes with the public IO of the last invocation of `prove_step`
+    // if hash_primary != self.l_u_secondary.X[0] {
+    //   return Err(NovaError::ProofVerifyError.into());
+    // }
+
+    // if hash_secondary != scalar_as_base::<Dual<E1>>(self.l_u_secondary.X[1]) {
+    //   return Err(NovaError::ProofVerifyError.into());
+    // }
+
+    // Verify the primary SNARK
+    let res_primary = self
+      .r_W_snark_primary
+      .verify(&vk.vk_primary, &self.r_U_primary);
+
+    // Verify the cyclefold SNARK
+    let res_cyclefold = self
+      .f_W_snark_cyclefold
+      .verify(&vk.vk_cyclefold, &self.f_U_cyclefold);
+
+    res_primary?;
+
+    res_cyclefold?;
+
+    Ok(self.zn_primary.clone())
   }
 }
