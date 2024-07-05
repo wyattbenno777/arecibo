@@ -29,7 +29,7 @@ where
 }
 
 /// A type that holds the verifier key for `CompressedSNARK`
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct VerifierKey<E1, S1, S2>
 where
   E1: CurveCycleEquipped,
