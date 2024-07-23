@@ -7,7 +7,7 @@ use crate::traits::{
   commitment::{ZKCommitmentEngineTrait, CommitmentTrait, Len},
   TranscriptEngineTrait,
 };
-use crate::{Commitment, CommitmentKey, CompressedCommitment, provider::Bn256EngineZKPedersen};
+use crate::{Commitment, CommitmentKey, CompressedCommitment};
 use ff::Field;
 use rand::rngs::OsRng;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -17,18 +17,18 @@ use crate::Engine;
 pub(in crate::spartan) mod engine;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct ZKSumcheckProof {
-  comm_polys: Vec<CompressedCommitment<Bn256EngineZKPedersen>>,
-  comm_evals: Vec<CompressedCommitment<Bn256EngineZKPedersen>>,
-  proofs: Vec<DotProductProof>,
+pub(crate) struct ZKSumcheckProof<E: Engine> {
+  comm_polys: Vec<CompressedCommitment<E>>,
+  comm_evals: Vec<CompressedCommitment<E>>,
+  proofs: Vec<DotProductProof<E>>,
 }
 
-impl ZKSumcheckProof {
+impl<E: Engine> ZKSumcheckProof<E> where E::CE: ZKCommitmentEngineTrait<E> {
   #[allow(dead_code)]
   pub fn new(
-    comm_polys: Vec<CompressedCommitment<Bn256EngineZKPedersen>>,
-    comm_evals: Vec<CompressedCommitment<Bn256EngineZKPedersen>>,
-    proofs: Vec<DotProductProof>,
+    comm_polys: Vec<CompressedCommitment<E>>,
+    comm_evals: Vec<CompressedCommitment<E>>,
+    proofs: Vec<DotProductProof<E>>,
   ) -> Self {
     Self {
       comm_polys,
@@ -40,13 +40,13 @@ impl ZKSumcheckProof {
   #[allow(dead_code)]
   pub fn verify(
     &self,
-    comm_claim: &CompressedCommitment<Bn256EngineZKPedersen>,
+    comm_claim: &CompressedCommitment<E>,
     num_rounds: usize,
     degree_bound: usize,
-    ck_1: &CommitmentKey<Bn256EngineZKPedersen>, // generator of size 1
-    ck_n: &CommitmentKey<Bn256EngineZKPedersen>, // generators of size n
-    transcript: &mut <Bn256EngineZKPedersen as Engine>::TE,
-  ) -> Result<(CompressedCommitment<Bn256EngineZKPedersen>, Vec<<Bn256EngineZKPedersen as Engine>::Scalar>), NovaError> {
+    ck_1: &CommitmentKey<E>, // generator of size 1
+    ck_n: &CommitmentKey<E>, // generators of size n
+    transcript: &mut <E as Engine>::TE,
+  ) -> Result<(CompressedCommitment<E>, Vec<<E as Engine>::Scalar>), NovaError> {
     // verify degree bound
     if ck_n.length() != degree_bound + 1 {
       return Err(NovaError::InvalidSumcheckProof);
@@ -87,8 +87,8 @@ impl ZKSumcheckProof {
         let w0 = transcript.squeeze(b"combine_two_claims_to_one_0")?;
         let w1 = transcript.squeeze(b"combine_two_claims_to_one_1")?;
 
-        let decompressed_comm_claim_per_round = Commitment::<Bn256EngineZKPedersen>::decompress(comm_claim_per_round)?;
-        let decompressed_comm_eval = Commitment::<Bn256EngineZKPedersen>::decompress(comm_eval)?;
+        let decompressed_comm_claim_per_round = Commitment::<E>::decompress(comm_claim_per_round)?;
+        let decompressed_comm_eval = Commitment::<E>::decompress(comm_eval)?;
 
         // compute a weighted sum of the RHS
         let comm_target = decompressed_comm_claim_per_round * w0 + decompressed_comm_eval * w1;
@@ -97,14 +97,14 @@ impl ZKSumcheckProof {
         let a = {
           // the vector to use for decommit for sum-check test
           let a_sc = {
-            let mut a = vec![<Bn256EngineZKPedersen as Engine>::Scalar::ONE; degree_bound + 1];
-            a[0] += <Bn256EngineZKPedersen as Engine>::Scalar::ONE;
+            let mut a = vec![<E as Engine>::Scalar::ONE; degree_bound + 1];
+            a[0] += <E as Engine>::Scalar::ONE;
             a
           };
 
           // the vector to use to decommit for evaluation
           let a_eval = {
-            let mut a = vec![<Bn256EngineZKPedersen as Engine>::Scalar::ONE; degree_bound + 1];
+            let mut a = vec![<E as Engine>::Scalar::ONE; degree_bound + 1];
             for j in 1..a.len() {
               a[j] = a[j - 1] * r_i;
             }
@@ -115,7 +115,7 @@ impl ZKSumcheckProof {
           assert_eq!(a_sc.len(), a_eval.len());
           (0..a_sc.len())
             .map(|i| w0 * a_sc[i] + w1 * a_eval[i])
-            .collect::<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>>()
+            .collect::<Vec<<E as Engine>::Scalar>>()
         };
 
         self.proofs[i]
@@ -142,33 +142,33 @@ impl ZKSumcheckProof {
 
   #[allow(dead_code)]
   pub fn prove_quad<F>(
-    claim: &<Bn256EngineZKPedersen as Engine>::Scalar,
-    blind_claim: &<Bn256EngineZKPedersen as Engine>::Scalar,
+    claim: &<E as Engine>::Scalar,
+    blind_claim: &<E as Engine>::Scalar,
     num_rounds: usize,
-    poly_A: &mut MultilinearPolynomial<<Bn256EngineZKPedersen as Engine>::Scalar>,
-    poly_B: &mut MultilinearPolynomial<<Bn256EngineZKPedersen as Engine>::Scalar>,
+    poly_A: &mut MultilinearPolynomial<<E as Engine>::Scalar>,
+    poly_B: &mut MultilinearPolynomial<<E as Engine>::Scalar>,
     comb_func: F,
-    ck_1: &CommitmentKey<Bn256EngineZKPedersen>, // generator of size 1
-    ck_n: &CommitmentKey<Bn256EngineZKPedersen>, // generators of size n
-    transcript: &mut <Bn256EngineZKPedersen as Engine>::TE,
-) -> Result<(ZKSumcheckProof, Vec<<Bn256EngineZKPedersen as Engine>::Scalar>, Vec<<Bn256EngineZKPedersen as Engine>::Scalar>, <Bn256EngineZKPedersen as Engine>::Scalar), NovaError>
+    ck_1: &CommitmentKey<E>, // generator of size 1
+    ck_n: &CommitmentKey<E>, // generators of size n
+    transcript: &mut <E as Engine>::TE,
+) -> Result<(ZKSumcheckProof<E>, Vec<<E as Engine>::Scalar>, Vec<<E as Engine>::Scalar>, <E as Engine>::Scalar), NovaError>
 where
-    F: Fn(&<Bn256EngineZKPedersen as Engine>::Scalar, &<Bn256EngineZKPedersen as Engine>::Scalar) -> <Bn256EngineZKPedersen as Engine>::Scalar,
+    F: Fn(&<E as Engine>::Scalar, &<E as Engine>::Scalar) -> <E as Engine>::Scalar,
 {
     let (blinds_poly, blinds_evals) = {
         (
             (0..num_rounds)
-                .map(|_i| <Bn256EngineZKPedersen as Engine>::Scalar::random(&mut OsRng))
-                .collect::<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>>(),
+                .map(|_i| <E as Engine>::Scalar::random(&mut OsRng))
+                .collect::<Vec<<E as Engine>::Scalar>>(),
             (0..num_rounds)
-                .map(|_i| <Bn256EngineZKPedersen as Engine>::Scalar::random(&mut OsRng))
-                .collect::<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>>(),
+                .map(|_i| <E as Engine>::Scalar::random(&mut OsRng))
+                .collect::<Vec<<E as Engine>::Scalar>>(),
         )
     };
 
     let mut claim_per_round = *claim;
     let mut comm_claim_per_round =
-        <Bn256EngineZKPedersen as Engine>::CE::zkcommit(ck_1, &[claim_per_round], blind_claim).compress();
+        <E as Engine>::CE::zkcommit(ck_1, &[claim_per_round], blind_claim).compress();
 
     let mut r = Vec::new();
     let mut comm_polys = Vec::new();
@@ -177,8 +177,8 @@ where
 
     for j in 0..num_rounds {
       let (poly, comm_poly) = {
-          let mut eval_point_0 = <Bn256EngineZKPedersen as Engine>::Scalar::ZERO;
-          let mut eval_point_2 = <Bn256EngineZKPedersen as Engine>::Scalar::ZERO;
+          let mut eval_point_0 = <E as Engine>::Scalar::ZERO;
+          let mut eval_point_2 = <E as Engine>::Scalar::ZERO;
 
           let len = poly_A.len() / 2;
           for i in 0..len {
@@ -193,7 +193,7 @@ where
 
           let evals = vec![eval_point_0, claim_per_round - eval_point_0, eval_point_2];
           let poly = UniPoly::from_evals(&evals);
-          let comm_poly = <Bn256EngineZKPedersen as Engine>::CE::zkcommit(ck_n, &poly.coeffs, &blinds_poly[j]).compress();
+          let comm_poly = <E as Engine>::CE::zkcommit(ck_n, &poly.coeffs, &blinds_poly[j]).compress();
           (poly, comm_poly)
       };
 
@@ -211,7 +211,7 @@ where
       // produce a proof of sum-check an of evaluation
       let (proof, claim_next_round, comm_claim_next_round) = {
           let eval = poly.evaluate(&r_j);
-          let comm_eval = <Bn256EngineZKPedersen as Engine>::CE::zkcommit(ck_1, &[eval], &blinds_evals[j]).compress();
+          let comm_eval = <E as Engine>::CE::zkcommit(ck_1, &[eval], &blinds_evals[j]).compress();
 
           // we need to prove the following under homomorphic commitments:
           // (1) poly(0) + poly(1) = claim_per_round
@@ -232,8 +232,8 @@ where
 
           // compute a weighted sum of the RHS
           let target = w0 * claim_per_round + w1 * eval;
-          let decompressed_comm_claim_per_round = Commitment::<Bn256EngineZKPedersen>::decompress(&comm_claim_per_round)?;
-          let decompressed_comm_eval = Commitment::<Bn256EngineZKPedersen>::decompress(&comm_eval)?;
+          let decompressed_comm_claim_per_round = Commitment::<E>::decompress(&comm_claim_per_round)?;
+          let decompressed_comm_eval = Commitment::<E>::decompress(&comm_eval)?;
 
           let comm_target =
               (decompressed_comm_claim_per_round * w0 + decompressed_comm_eval * w1).compress();
@@ -251,21 +251,21 @@ where
           };
 
           assert_eq!(
-              <Bn256EngineZKPedersen as Engine>::CE::zkcommit(ck_1, &[target], &blind).compress(),
+              <E as Engine>::CE::zkcommit(ck_1, &[target], &blind).compress(),
               comm_target
           );
 
           let a = {
               // the vector to use to decommit for sum-check test
               let a_sc = {
-                  let mut a = vec![<Bn256EngineZKPedersen as Engine>::Scalar::ONE; poly.degree() + 1];
-                  a[0] += <Bn256EngineZKPedersen as Engine>::Scalar::ONE;
+                  let mut a = vec![<E as Engine>::Scalar::ONE; poly.degree() + 1];
+                  a[0] += <E as Engine>::Scalar::ONE;
                   a
               };
 
               // the vector to use to decommit for evaluation
               let a_eval = {
-                  let mut a = vec![<Bn256EngineZKPedersen as Engine>::Scalar::ONE; poly.degree() + 1];
+                  let mut a = vec![<E as Engine>::Scalar::ONE; poly.degree() + 1];
                   for j in 1..a.len() {
                       a[j] = a[j - 1] * r_j;
                   }
@@ -276,7 +276,7 @@ where
               assert_eq!(a_sc.len(), a_eval.len());
               (0..a_sc.len())
                   .map(|i| w0 * a_sc[i] + w1 * a_eval[i])
-                  .collect::<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>>()
+                  .collect::<Vec<<E as Engine>::Scalar>>()
           };
 
           let (proof, _comm_poly, _comm_sc_eval) = DotProductProof::prove(
@@ -312,13 +312,13 @@ where
   #[allow(dead_code)]
   #[inline]
   fn compute_eval_points_cubic<F>(
-    poly_A: &MultilinearPolynomial<<Bn256EngineZKPedersen as Engine>::Scalar>,
-    poly_B: &MultilinearPolynomial<<Bn256EngineZKPedersen as Engine>::Scalar>,
-    poly_C: &MultilinearPolynomial<<Bn256EngineZKPedersen as Engine>::Scalar>,
+    poly_A: &MultilinearPolynomial<<E as Engine>::Scalar>,
+    poly_B: &MultilinearPolynomial<<E as Engine>::Scalar>,
+    poly_C: &MultilinearPolynomial<<E as Engine>::Scalar>,
     comb_func: &F,
-  ) -> (<Bn256EngineZKPedersen as Engine>::Scalar, <Bn256EngineZKPedersen as Engine>::Scalar, <Bn256EngineZKPedersen as Engine>::Scalar)
+  ) -> (<E as Engine>::Scalar, <E as Engine>::Scalar, <E as Engine>::Scalar)
   where
-    F: Fn(&<Bn256EngineZKPedersen as Engine>::Scalar, &<Bn256EngineZKPedersen as Engine>::Scalar, &<Bn256EngineZKPedersen as Engine>::Scalar) -> <Bn256EngineZKPedersen as Engine>::Scalar + Sync,
+    F: Fn(&<E as Engine>::Scalar, &<E as Engine>::Scalar, &<E as Engine>::Scalar) -> <E as Engine>::Scalar + Sync,
   {
     let len = poly_A.len() / 2;
     (0..len)
@@ -353,7 +353,7 @@ where
         (eval_point_0, eval_point_2, eval_point_3)
       })
       .reduce(
-        || (<Bn256EngineZKPedersen as Engine>::Scalar::ZERO, <Bn256EngineZKPedersen as Engine>::Scalar::ZERO, <Bn256EngineZKPedersen as Engine>::Scalar::ZERO),
+        || (<E as Engine>::Scalar::ZERO, <E as Engine>::Scalar::ZERO, <E as Engine>::Scalar::ZERO),
         |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2),
       )
   }
@@ -361,14 +361,14 @@ where
   #[allow(dead_code)]
   #[inline]
   fn compute_eval_points_cubic_with_additive_term<F>(
-    poly_A: &MultilinearPolynomial<<Bn256EngineZKPedersen as Engine>::Scalar>,
-    poly_B: &MultilinearPolynomial<<Bn256EngineZKPedersen as Engine>::Scalar>,
-    poly_C: &MultilinearPolynomial<<Bn256EngineZKPedersen as Engine>::Scalar>,
-    poly_D: &MultilinearPolynomial<<Bn256EngineZKPedersen as Engine>::Scalar>,
+    poly_A: &MultilinearPolynomial<<E as Engine>::Scalar>,
+    poly_B: &MultilinearPolynomial<<E as Engine>::Scalar>,
+    poly_C: &MultilinearPolynomial<<E as Engine>::Scalar>,
+    poly_D: &MultilinearPolynomial<<E as Engine>::Scalar>,
     comb_func: &F,
-  ) -> (<Bn256EngineZKPedersen as Engine>::Scalar, <Bn256EngineZKPedersen as Engine>::Scalar, <Bn256EngineZKPedersen as Engine>::Scalar)
+  ) -> (<E as Engine>::Scalar, <E as Engine>::Scalar, <E as Engine>::Scalar)
   where
-    F: Fn(&<Bn256EngineZKPedersen as Engine>::Scalar, &<Bn256EngineZKPedersen as Engine>::Scalar, &<Bn256EngineZKPedersen as Engine>::Scalar, &<Bn256EngineZKPedersen as Engine>::Scalar) -> <Bn256EngineZKPedersen as Engine>::Scalar + Sync,
+    F: Fn(&<E as Engine>::Scalar, &<E as Engine>::Scalar, &<E as Engine>::Scalar, &<E as Engine>::Scalar) -> <E as Engine>::Scalar + Sync,
   {
     let len = poly_A.len() / 2;
     (0..len)
@@ -408,42 +408,42 @@ where
         (eval_point_0, eval_point_2, eval_point_3)
       })
       .reduce(
-        || (<Bn256EngineZKPedersen as Engine>::Scalar::ZERO, <Bn256EngineZKPedersen as Engine>::Scalar::ZERO, <Bn256EngineZKPedersen as Engine>::Scalar::ZERO),
+        || (<E as Engine>::Scalar::ZERO, <E as Engine>::Scalar::ZERO, <E as Engine>::Scalar::ZERO),
         |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2),
       )
   }
 
   #[allow(dead_code)]
   pub fn prove_cubic_with_additive_term<F>(
-    claim: &<Bn256EngineZKPedersen as Engine>::Scalar,
-    blind_claim: &<Bn256EngineZKPedersen as Engine>::Scalar,
+    claim: &<E as Engine>::Scalar,
+    blind_claim: &<E as Engine>::Scalar,
     num_rounds: usize,
-    poly_A: &mut MultilinearPolynomial<<Bn256EngineZKPedersen as Engine>::Scalar>,
-    poly_B: &mut MultilinearPolynomial<<Bn256EngineZKPedersen as Engine>::Scalar>,
-    poly_C: &mut MultilinearPolynomial<<Bn256EngineZKPedersen as Engine>::Scalar>,
-    poly_D: &mut MultilinearPolynomial<<Bn256EngineZKPedersen as Engine>::Scalar>,
+    poly_A: &mut MultilinearPolynomial<<E as Engine>::Scalar>,
+    poly_B: &mut MultilinearPolynomial<<E as Engine>::Scalar>,
+    poly_C: &mut MultilinearPolynomial<<E as Engine>::Scalar>,
+    poly_D: &mut MultilinearPolynomial<<E as Engine>::Scalar>,
     comb_func: F,
-    ck_1: &CommitmentKey<Bn256EngineZKPedersen>, // generator of size 1
-    ck_n: &CommitmentKey<Bn256EngineZKPedersen>, // generators of size n
-    transcript: &mut <Bn256EngineZKPedersen as Engine>::TE,
-  ) -> Result<(ZKSumcheckProof, Vec<<Bn256EngineZKPedersen as Engine>::Scalar>, Vec<<Bn256EngineZKPedersen as Engine>::Scalar>, <Bn256EngineZKPedersen as Engine>::Scalar), NovaError>
+    ck_1: &CommitmentKey<E>, // generator of size 1
+    ck_n: &CommitmentKey<E>, // generators of size n
+    transcript: &mut <E as Engine>::TE,
+  ) -> Result<(ZKSumcheckProof<E>, Vec<<E as Engine>::Scalar>, Vec<<E as Engine>::Scalar>, <E as Engine>::Scalar), NovaError>
   where
-      F: Fn(&<Bn256EngineZKPedersen as Engine>::Scalar, &<Bn256EngineZKPedersen as Engine>::Scalar, &<Bn256EngineZKPedersen as Engine>::Scalar, &<Bn256EngineZKPedersen as Engine>::Scalar) -> <Bn256EngineZKPedersen as Engine>::Scalar,
+      F: Fn(&<E as Engine>::Scalar, &<E as Engine>::Scalar, &<E as Engine>::Scalar, &<E as Engine>::Scalar) -> <E as Engine>::Scalar,
   {
     let (blinds_poly, blinds_evals) = {
         (
             (0..num_rounds)
-                .map(|_i| <Bn256EngineZKPedersen as Engine>::Scalar::random(&mut OsRng))
-                .collect::<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>>(),
+                .map(|_i| <E as Engine>::Scalar::random(&mut OsRng))
+                .collect::<Vec<<E as Engine>::Scalar>>(),
             (0..num_rounds)
-                .map(|_i| <Bn256EngineZKPedersen as Engine>::Scalar::random(&mut OsRng))
-                .collect::<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>>(),
+                .map(|_i| <E as Engine>::Scalar::random(&mut OsRng))
+                .collect::<Vec<<E as Engine>::Scalar>>(),
         )
     };
 
     let mut claim_per_round = *claim;
     let mut comm_claim_per_round =
-        <Bn256EngineZKPedersen as Engine>::CE::zkcommit(ck_1, &[claim_per_round], blind_claim).compress();
+        <E as Engine>::CE::zkcommit(ck_1, &[claim_per_round], blind_claim).compress();
 
     let mut r = Vec::new();
     let mut comm_polys = Vec::new();
@@ -452,9 +452,9 @@ where
 
     for j in 0..num_rounds {
         let (poly, comm_poly) = {
-            let mut eval_point_0 = <Bn256EngineZKPedersen as Engine>::Scalar::ZERO;
-            let mut eval_point_2 = <Bn256EngineZKPedersen as Engine>::Scalar::ZERO;
-            let mut eval_point_3 = <Bn256EngineZKPedersen as Engine>::Scalar::ZERO;
+            let mut eval_point_0 = <E as Engine>::Scalar::ZERO;
+            let mut eval_point_2 = <E as Engine>::Scalar::ZERO;
+            let mut eval_point_3 = <E as Engine>::Scalar::ZERO;
 
             let len = poly_A.len() / 2;
 
@@ -498,7 +498,7 @@ where
             ];
 
             let poly = UniPoly::from_evals(&evals);
-            let comm_poly = <Bn256EngineZKPedersen as Engine>::CE::zkcommit(ck_n, &poly.coeffs, &blinds_poly[j]).compress();
+            let comm_poly = <E as Engine>::CE::zkcommit(ck_n, &poly.coeffs, &blinds_poly[j]).compress();
             (poly, comm_poly)
         };
 
@@ -518,7 +518,7 @@ where
         // produce a proof of sum-check and of evaluation
         let (proof, claim_next_round, comm_claim_next_round) = {
           let eval = poly.evaluate(&r_j);
-          let comm_eval = <Bn256EngineZKPedersen as Engine>::CE::zkcommit(ck_1, &[eval], &blinds_evals[j]).compress();
+          let comm_eval = <E as Engine>::CE::zkcommit(ck_1, &[eval], &blinds_evals[j]).compress();
 
           // we need to prove the following under homomorphic commitments:
           // (1) poly(0) + poly(1) = claim_per_round
@@ -537,8 +537,8 @@ where
           let w0 = transcript.squeeze(b"combine_two_claims_to_one_0")?;
           let w1 = transcript.squeeze(b"combine_two_claims_to_one_1")?;
 
-          let decompressed_comm_claim_per_round = Commitment::<Bn256EngineZKPedersen>::decompress(&comm_claim_per_round)?;
-          let decompressed_comm_eval = Commitment::<Bn256EngineZKPedersen>::decompress(&comm_eval)?;
+          let decompressed_comm_claim_per_round = Commitment::<E>::decompress(&comm_claim_per_round)?;
+          let decompressed_comm_eval = Commitment::<E>::decompress(&comm_eval)?;
 
           // compute a weighted sum of the RHS
           let target = claim_per_round * w0 + eval * w1;
@@ -558,21 +558,21 @@ where
           };
 
           assert_eq!(
-              <Bn256EngineZKPedersen as Engine>::CE::zkcommit(ck_1, &[target], &blind).compress(),
+              <E as Engine>::CE::zkcommit(ck_1, &[target], &blind).compress(),
               comm_target
           );
 
           let a = {
               // the vector to use to decommit for sum-check test
               let a_sc = {
-                  let mut a = vec![<Bn256EngineZKPedersen as Engine>::Scalar::ONE; poly.degree() + 1];
-                  a[0] += <Bn256EngineZKPedersen as Engine>::Scalar::ONE;
+                  let mut a = vec![<E as Engine>::Scalar::ONE; poly.degree() + 1];
+                  a[0] += <E as Engine>::Scalar::ONE;
                   a
               };
 
               // the vector to use to decommit for evaluation
               let a_eval = {
-                  let mut a = vec![<Bn256EngineZKPedersen as Engine>::Scalar::ONE; poly.degree() + 1];
+                  let mut a = vec![<E as Engine>::Scalar::ONE; poly.degree() + 1];
                   for j in 1..a.len() {
                       a[j] = a[j - 1] * r_j;
                   }
@@ -584,7 +584,7 @@ where
 
               (0..a_sc.len())
                   .map(|i| w0 * a_sc[i] + w1 * a_eval[i])
-                  .collect::<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>>()
+                  .collect::<Vec<<E as Engine>::Scalar>>()
           };
 
           let (proof, _comm_poly, _comm_sc_eval) = DotProductProof::prove(

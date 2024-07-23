@@ -163,8 +163,8 @@ impl<Scalar: PrimeField> SparsePolynomial<Scalar> {
   }
 }
 
-impl SparsePolynomial<halo2curves::bn256::Fr> {
-  pub fn new_zk(num_vars: usize, Z: Vec<halo2curves::bn256::Fr>) -> Self {
+impl<Scalar: PrimeField> SparsePolynomial<Scalar> {
+  pub fn new_zk(num_vars: usize, Z: Vec<Scalar>) -> Self {
       Self { num_vars, Z }
   }
 }

@@ -11,7 +11,7 @@ use crate::spartan::zksumcheck::ZKSumcheckProof;
 use crate::traits::commitment::CommitmentEngineTrait;
 use crate::{Commitment, CommitmentKey, Engine, NovaError};
 use crate::spartan::powers;
-use crate::spartan::zksumcheck::Bn256EngineZKPedersen;
+use crate::traits::commitment::ZKCommitmentEngineTrait;
 use itertools::Itertools;
 use std::marker::PhantomData;
 
@@ -57,9 +57,9 @@ impl<E: Engine> ExactSizeIterator for NaturalNumVec<E> {
 }
 
 /// Defines a trait for implementing sum-check in a generic manner
-pub trait ZKSumcheckEngine: Send + Sync {
+pub trait ZKSumcheckEngine<E: Engine>: Send + Sync {
   /// returns the initial claims
-  fn initial_claims(&self) -> Vec<<Bn256EngineZKPedersen as Engine>::Scalar>;
+  fn initial_claims(&self) -> Vec<<E as Engine>::Scalar>;
 
   /// degree of the sum-check polynomial
   fn degree(&self) -> usize;
@@ -68,13 +68,13 @@ pub trait ZKSumcheckEngine: Send + Sync {
   fn size(&self) -> usize;
 
   /// returns evaluation points at 0, 2, d-1 (where d is the degree of the sum-check polynomial)
-  fn evaluation_points(&self) -> Vec<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>>;
+  fn evaluation_points(&self) -> Vec<Vec<<E as Engine>::Scalar>>;
 
   /// bounds a variable in the constituent polynomials
-  fn bound(&mut self, r: &<Bn256EngineZKPedersen as Engine>::Scalar);
+  fn bound(&mut self, r: &<E as Engine>::Scalar);
 
   /// returns the final claims
-  fn final_claims(&self) -> Vec<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>>;
+  fn final_claims(&self) -> Vec<Vec<<E as Engine>::Scalar>>;
 }
 
 /// The [`WitnessBoundSumcheck`] ensures that the witness polynomial W defined over n = log(N) variables,
@@ -114,9 +114,9 @@ impl<E: Engine> WitnessBoundSumcheck<E> {
     }
   }
 }
-impl ZKSumcheckEngine for WitnessBoundSumcheck<Bn256EngineZKPedersen> {
-  fn initial_claims(&self) -> Vec<<Bn256EngineZKPedersen as Engine>::Scalar> {
-    vec![<Bn256EngineZKPedersen as Engine>::Scalar::ZERO]
+impl<E:Engine> ZKSumcheckEngine<E> for WitnessBoundSumcheck<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E> {
+  fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
+    vec![<E as Engine>::Scalar::ZERO]
   }
 
   fn degree(&self) -> usize {
@@ -128,13 +128,13 @@ impl ZKSumcheckEngine for WitnessBoundSumcheck<Bn256EngineZKPedersen> {
     self.poly_W.len()
   }
 
-  fn evaluation_points(&self) -> Vec<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>> {
-    let comb_func = |poly_A_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-                     poly_B_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-                     _: &<Bn256EngineZKPedersen as Engine>::Scalar|
-     -> <Bn256EngineZKPedersen as Engine>::Scalar { *poly_A_comp * *poly_B_comp };
+  fn evaluation_points(&self) -> Vec<Vec<<E as Engine>::Scalar>> {
+    let comb_func = |poly_A_comp: &<E as Engine>::Scalar,
+                     poly_B_comp: &<E as Engine>::Scalar,
+                     _: &<E as Engine>::Scalar|
+     -> <E as Engine>::Scalar { *poly_A_comp * *poly_B_comp };
 
-    let (eval_point_0, eval_point_2, eval_point_3) = ZKSumcheckProof::compute_eval_points_cubic(
+    let (eval_point_0, eval_point_2, eval_point_3) = ZKSumcheckProof::<E>::compute_eval_points_cubic(
       &self.poly_masked_eq,
       &self.poly_W,
       &self.poly_W, // unused
@@ -144,13 +144,13 @@ impl ZKSumcheckEngine for WitnessBoundSumcheck<Bn256EngineZKPedersen> {
     vec![vec![eval_point_0, eval_point_2, eval_point_3]]
   }
 
-  fn bound(&mut self, r: &<Bn256EngineZKPedersen as Engine>::Scalar) {
+  fn bound(&mut self, r: &<E as Engine>::Scalar) {
     [&mut self.poly_W, &mut self.poly_masked_eq]
       .par_iter_mut()
       .for_each(|poly| poly.bind_poly_var_top(r));
   }
 
-  fn final_claims(&self) -> Vec<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>> {
+  fn final_claims(&self) -> Vec<Vec<<E as Engine>::Scalar>> {
     vec![vec![self.poly_W[0], self.poly_masked_eq[0]]]
   }
 }
@@ -352,9 +352,9 @@ impl<E: Engine> MemorySumcheckInstance<E> {
   }
 }
 
-impl ZKSumcheckEngine for MemorySumcheckInstance<Bn256EngineZKPedersen> {
-  fn initial_claims(&self) -> Vec<<Bn256EngineZKPedersen as Engine>::Scalar> {
-    vec![<Bn256EngineZKPedersen as Engine>::Scalar::ZERO; 6]
+impl<E: Engine> ZKSumcheckEngine<E> for MemorySumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E> {
+  fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
+    vec![<E as Engine>::Scalar::ZERO; 6]
   }
 
   fn degree(&self) -> usize {
@@ -372,30 +372,30 @@ impl ZKSumcheckEngine for MemorySumcheckInstance<Bn256EngineZKPedersen> {
     self.w_plus_r_row.len()
   }
 
-  fn evaluation_points(&self) -> Vec<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>> {
-    let comb_func = |poly_A_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-                     poly_B_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-                     _poly_C_comp: &<Bn256EngineZKPedersen as Engine>::Scalar|
-     -> <Bn256EngineZKPedersen as Engine>::Scalar { *poly_A_comp - *poly_B_comp };
+  fn evaluation_points(&self) -> Vec<Vec<<E as Engine>::Scalar>> {
+    let comb_func = |poly_A_comp: &<E as Engine>::Scalar,
+                     poly_B_comp: &<E as Engine>::Scalar,
+                     _poly_C_comp: &<E as Engine>::Scalar|
+     -> <E as Engine>::Scalar { *poly_A_comp - *poly_B_comp };
 
     let comb_func2 =
-      |poly_A_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_B_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_C_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       _poly_D_comp: &<Bn256EngineZKPedersen as Engine>::Scalar|
-       -> <Bn256EngineZKPedersen as Engine>::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - <Bn256EngineZKPedersen as Engine>::Scalar::ONE) };
+      |poly_A_comp: &<E as Engine>::Scalar,
+       poly_B_comp: &<E as Engine>::Scalar,
+       poly_C_comp: &<E as Engine>::Scalar,
+       _poly_D_comp: &<E as Engine>::Scalar|
+       -> <E as Engine>::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - <E as Engine>::Scalar::ONE) };
 
     let comb_func3 =
-      |poly_A_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_B_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_C_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_D_comp: &<Bn256EngineZKPedersen as Engine>::Scalar|
-       -> <Bn256EngineZKPedersen as Engine>::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - *poly_D_comp) };
+      |poly_A_comp: &<E as Engine>::Scalar,
+       poly_B_comp: &<E as Engine>::Scalar,
+       poly_C_comp: &<E as Engine>::Scalar,
+       poly_D_comp: &<E as Engine>::Scalar|
+       -> <E as Engine>::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - *poly_D_comp) };
 
     // inv related evaluation points
     // 0 = ∑ TS[i]/(T[i] + r) - 1/(W[i] + r)
     let (eval_inv_0_row, eval_inv_2_row, eval_inv_3_row) =
-      ZKSumcheckProof::compute_eval_points_cubic(
+      ZKSumcheckProof::<E>::compute_eval_points_cubic(
         &self.t_plus_r_inv_row,
         &self.w_plus_r_inv_row,
         &self.poly_zero,
@@ -403,7 +403,7 @@ impl ZKSumcheckEngine for MemorySumcheckInstance<Bn256EngineZKPedersen> {
       );
 
     let (eval_inv_0_col, eval_inv_2_col, eval_inv_3_col) =
-      ZKSumcheckProof::compute_eval_points_cubic(
+      ZKSumcheckProof::<E>::compute_eval_points_cubic(
         &self.t_plus_r_inv_col,
         &self.w_plus_r_inv_col,
         &self.poly_zero,
@@ -413,7 +413,7 @@ impl ZKSumcheckEngine for MemorySumcheckInstance<Bn256EngineZKPedersen> {
     // row related evaluation points
     // 0 = ∑ eq[i] * (inv_T[i] * (T[i] + r) - TS[i]))
     let (eval_T_0_row, eval_T_2_row, eval_T_3_row) =
-      ZKSumcheckProof::compute_eval_points_cubic_with_additive_term(
+      ZKSumcheckProof::<E>::compute_eval_points_cubic_with_additive_term(
         &self.poly_eq,
         &self.t_plus_r_inv_row,
         &self.t_plus_r_row,
@@ -422,7 +422,7 @@ impl ZKSumcheckEngine for MemorySumcheckInstance<Bn256EngineZKPedersen> {
       );
     // 0 = ∑ eq[i] * (inv_W[i] * (T[i] + r) - 1))
     let (eval_W_0_row, eval_W_2_row, eval_W_3_row) =
-      ZKSumcheckProof::compute_eval_points_cubic_with_additive_term(
+      ZKSumcheckProof::<E>::compute_eval_points_cubic_with_additive_term(
         &self.poly_eq,
         &self.w_plus_r_inv_row,
         &self.w_plus_r_row,
@@ -432,7 +432,7 @@ impl ZKSumcheckEngine for MemorySumcheckInstance<Bn256EngineZKPedersen> {
 
     // column related evaluation points
     let (eval_T_0_col, eval_T_2_col, eval_T_3_col) =
-      ZKSumcheckProof::compute_eval_points_cubic_with_additive_term(
+      ZKSumcheckProof::<E>::compute_eval_points_cubic_with_additive_term(
         &self.poly_eq,
         &self.t_plus_r_inv_col,
         &self.t_plus_r_col,
@@ -440,7 +440,7 @@ impl ZKSumcheckEngine for MemorySumcheckInstance<Bn256EngineZKPedersen> {
         &comb_func3,
       );
     let (eval_W_0_col, eval_W_2_col, eval_W_3_col) =
-      ZKSumcheckProof::compute_eval_points_cubic_with_additive_term(
+      ZKSumcheckProof::<E>::compute_eval_points_cubic_with_additive_term(
         &self.poly_eq,
         &self.w_plus_r_inv_col,
         &self.w_plus_r_col,
@@ -458,7 +458,7 @@ impl ZKSumcheckEngine for MemorySumcheckInstance<Bn256EngineZKPedersen> {
     ]
   }
 
-  fn bound(&mut self, r: &<Bn256EngineZKPedersen as Engine>::Scalar) {
+  fn bound(&mut self, r: &<E as Engine>::Scalar) {
     [
       &mut self.t_plus_r_row,
       &mut self.t_plus_r_inv_row,
@@ -476,7 +476,7 @@ impl ZKSumcheckEngine for MemorySumcheckInstance<Bn256EngineZKPedersen> {
     .for_each(|poly| poly.bind_poly_var_top(r));
   }
 
-  fn final_claims(&self) -> Vec<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>> {
+  fn final_claims(&self) -> Vec<Vec<<E as Engine>::Scalar>> {
     let poly_row_final = vec![
       self.t_plus_r_inv_row[0],
       self.w_plus_r_inv_row[0],
@@ -527,9 +527,9 @@ impl<E: Engine> OuterSumcheckInstance<E> {
   }
 }
 
-impl ZKSumcheckEngine for OuterSumcheckInstance<Bn256EngineZKPedersen> {
-  fn initial_claims(&self) -> Vec<<Bn256EngineZKPedersen as Engine>::Scalar> {
-    vec![<Bn256EngineZKPedersen as Engine>::Scalar::ZERO, self.eval_Mz_at_tau]
+impl<E: Engine> ZKSumcheckEngine<E> for OuterSumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E> {
+  fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
+    vec![<E as Engine>::Scalar::ZERO, self.eval_Mz_at_tau]
   }
 
   fn degree(&self) -> usize {
@@ -544,16 +544,16 @@ impl ZKSumcheckEngine for OuterSumcheckInstance<Bn256EngineZKPedersen> {
     self.poly_tau.len()
   }
 
-  fn evaluation_points(&self) -> Vec<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>> {
+  fn evaluation_points(&self) -> Vec<Vec<<E as Engine>::Scalar>> {
     let comb_func =
-      |poly_A_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_B_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_C_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_D_comp: &<Bn256EngineZKPedersen as Engine>::Scalar|
-       -> <Bn256EngineZKPedersen as Engine>::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - *poly_D_comp) };
+      |poly_A_comp: &<E as Engine>::Scalar,
+       poly_B_comp: &<E as Engine>::Scalar,
+       poly_C_comp: &<E as Engine>::Scalar,
+       poly_D_comp: &<E as Engine>::Scalar|
+       -> <E as Engine>::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - *poly_D_comp) };
 
     let (eval_point_h_0, eval_point_h_2, eval_point_h_3) =
-      ZKSumcheckProof::compute_eval_points_cubic_with_additive_term(
+      ZKSumcheckProof::<E>::compute_eval_points_cubic_with_additive_term(
         &self.poly_tau,
         &self.poly_Az,
         &self.poly_Bz,
@@ -561,13 +561,13 @@ impl ZKSumcheckEngine for OuterSumcheckInstance<Bn256EngineZKPedersen> {
         &comb_func,
       );
 
-    let comb_func2 = |poly_A_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-                      poly_B_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-                      _poly_C_comp: &<Bn256EngineZKPedersen as Engine>::Scalar|
-     -> <Bn256EngineZKPedersen as Engine>::Scalar { *poly_A_comp * *poly_B_comp };
+    let comb_func2 = |poly_A_comp: &<E as Engine>::Scalar,
+                      poly_B_comp: &<E as Engine>::Scalar,
+                      _poly_C_comp: &<E as Engine>::Scalar|
+     -> <E as Engine>::Scalar { *poly_A_comp * *poly_B_comp };
 
     let (eval_point_e_0, eval_point_e_2, eval_point_e_3) =
-      ZKSumcheckProof::compute_eval_points_cubic(
+      ZKSumcheckProof::<E>::compute_eval_points_cubic(
         &self.poly_tau,
         &self.poly_Mz,
         &self.poly_zero,
@@ -580,7 +580,7 @@ impl ZKSumcheckEngine for OuterSumcheckInstance<Bn256EngineZKPedersen> {
     ]
   }
 
-  fn bound(&mut self, r: &<Bn256EngineZKPedersen as Engine>::Scalar) {
+  fn bound(&mut self, r: &<E as Engine>::Scalar) {
     [
       &mut self.poly_tau,
       &mut self.poly_Az,
@@ -592,7 +592,7 @@ impl ZKSumcheckEngine for OuterSumcheckInstance<Bn256EngineZKPedersen> {
     .for_each(|poly| poly.bind_poly_var_top(r));
   }
 
-  fn final_claims(&self) -> Vec<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>> {
+  fn final_claims(&self) -> Vec<Vec<<E as Engine>::Scalar>> {
     vec![vec![self.poly_Az[0], self.poly_Bz[0]]]
   }
 }
@@ -619,8 +619,8 @@ impl<E: Engine> InnerSumcheckInstance<E> {
     }
   }
 }
-impl ZKSumcheckEngine for InnerSumcheckInstance<Bn256EngineZKPedersen> {
-  fn initial_claims(&self) -> Vec<<Bn256EngineZKPedersen as Engine>::Scalar> {
+impl<E: Engine> ZKSumcheckEngine<E> for InnerSumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E> {
+  fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
     vec![self.claim]
   }
 
@@ -634,20 +634,20 @@ impl ZKSumcheckEngine for InnerSumcheckInstance<Bn256EngineZKPedersen> {
     self.poly_L_row.len()
   }
 
-  fn evaluation_points(&self) -> Vec<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>> {
+  fn evaluation_points(&self) -> Vec<Vec<<E as Engine>::Scalar>> {
     let (poly_A, poly_B, poly_C) = (&self.poly_L_row, &self.poly_L_col, &self.poly_val);
-    let comb_func = |poly_A_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-                     poly_B_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-                     poly_C_comp: &<Bn256EngineZKPedersen as Engine>::Scalar|
-     -> <Bn256EngineZKPedersen as Engine>::Scalar { *poly_A_comp * *poly_B_comp * *poly_C_comp };
+    let comb_func = |poly_A_comp: &<E as Engine>::Scalar,
+                     poly_B_comp: &<E as Engine>::Scalar,
+                     poly_C_comp: &<E as Engine>::Scalar|
+     -> <E as Engine>::Scalar { *poly_A_comp * *poly_B_comp * *poly_C_comp };
 
     let (eval_point_0, eval_point_2, eval_point_3) =
-      ZKSumcheckProof::compute_eval_points_cubic(poly_A, poly_B, poly_C, &comb_func);
+      ZKSumcheckProof::<E>::compute_eval_points_cubic(poly_A, poly_B, poly_C, &comb_func);
 
     vec![vec![eval_point_0, eval_point_2, eval_point_3]]
   }
 
-  fn bound(&mut self, r: &<Bn256EngineZKPedersen as Engine>::Scalar) {
+  fn bound(&mut self, r: &<E as Engine>::Scalar) {
     [
       &mut self.poly_L_row,
       &mut self.poly_L_col,
@@ -657,7 +657,7 @@ impl ZKSumcheckEngine for InnerSumcheckInstance<Bn256EngineZKPedersen> {
     .for_each(|poly| poly.bind_poly_var_top(r));
   }
 
-  fn final_claims(&self) -> Vec<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>> {
+  fn final_claims(&self) -> Vec<Vec<<E as Engine>::Scalar>> {
     vec![vec![self.poly_L_row[0], self.poly_L_col[0]]]
   }
 }
@@ -849,12 +849,12 @@ impl<E: Engine> LookupSumcheckInstance<E> {
   }
 }
 
-impl ZKSumcheckEngine for LookupSumcheckInstance<Bn256EngineZKPedersen> {
-  fn initial_claims(&self) -> Vec<<Bn256EngineZKPedersen as Engine>::Scalar> {
+impl<E: Engine> ZKSumcheckEngine<E> for LookupSumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E> {
+  fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
     vec![
       self.initial_claim.unwrap_or_default(),
-      <Bn256EngineZKPedersen as Engine>::Scalar::ZERO,
-      <Bn256EngineZKPedersen as Engine>::Scalar::ZERO,
+      <E as Engine>::Scalar::ZERO,
+      <E as Engine>::Scalar::ZERO,
     ]
   }
 
@@ -870,29 +870,29 @@ impl ZKSumcheckEngine for LookupSumcheckInstance<Bn256EngineZKPedersen> {
     self.w_plus_r.len()
   }
 
-  fn evaluation_points(&self) -> Vec<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>> {
-    let comb_func = |poly_A_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-                     poly_B_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-                     _poly_C_comp: &<Bn256EngineZKPedersen as Engine>::Scalar|
-     -> <Bn256EngineZKPedersen as Engine>::Scalar { *poly_A_comp - *poly_B_comp };
+  fn evaluation_points(&self) -> Vec<Vec<<E as Engine>::Scalar>> {
+    let comb_func = |poly_A_comp: &<E as Engine>::Scalar,
+                     poly_B_comp: &<E as Engine>::Scalar,
+                     _poly_C_comp: &<E as Engine>::Scalar|
+     -> <E as Engine>::Scalar { *poly_A_comp - *poly_B_comp };
 
     let comb_func2 =
-      |poly_A_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_B_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_C_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       _poly_D_comp: &<Bn256EngineZKPedersen as Engine>::Scalar|
-       -> <Bn256EngineZKPedersen as Engine>::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - <Bn256EngineZKPedersen as Engine>::Scalar::ONE) };
+      |poly_A_comp: &<E as Engine>::Scalar,
+       poly_B_comp: &<E as Engine>::Scalar,
+       poly_C_comp: &<E as Engine>::Scalar,
+       _poly_D_comp: &<E as Engine>::Scalar|
+       -> <E as Engine>::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - <E as Engine>::Scalar::ONE) };
 
     let comb_func3 =
-      |poly_A_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_B_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_C_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_D_comp: &<Bn256EngineZKPedersen as Engine>::Scalar|
-       -> <Bn256EngineZKPedersen as Engine>::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - *poly_D_comp) };
+      |poly_A_comp: &<E as Engine>::Scalar,
+       poly_B_comp: &<E as Engine>::Scalar,
+       poly_C_comp: &<E as Engine>::Scalar,
+       poly_D_comp: &<E as Engine>::Scalar|
+       -> <E as Engine>::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - *poly_D_comp) };
 
     // inv related evaluation points
     // v = ∑ TS[i]/(T[i] + r) - 1/(W[i] + r)
-    let (eval_inv_0, eval_inv_2, eval_inv_3) = ZKSumcheckProof::compute_eval_points_cubic(
+    let (eval_inv_0, eval_inv_2, eval_inv_3) = ZKSumcheckProof::<E>::compute_eval_points_cubic(
       &self.t_plus_r_inv,
       &self.w_plus_r_inv,
       &self.poly_zero,
@@ -902,7 +902,7 @@ impl ZKSumcheckEngine for LookupSumcheckInstance<Bn256EngineZKPedersen> {
     // evaluation points
     // 0 = ∑ eq[i] * (inv_T[i] * (T[i] + r) - TS[i]))
     let (eval_T_0, eval_T_2, eval_T_3) =
-      ZKSumcheckProof::compute_eval_points_cubic_with_additive_term(
+      ZKSumcheckProof::<E>::compute_eval_points_cubic_with_additive_term(
         &self.poly_eq,
         &self.t_plus_r_inv,
         &self.t_plus_r,
@@ -911,7 +911,7 @@ impl ZKSumcheckEngine for LookupSumcheckInstance<Bn256EngineZKPedersen> {
       );
     // 0 = ∑ eq[i] * (inv_W[i] * (W[i] + r) - 1))
     let (eval_W_0, eval_W_2, eval_W_3) =
-      ZKSumcheckProof::compute_eval_points_cubic_with_additive_term(
+      ZKSumcheckProof::<E>::compute_eval_points_cubic_with_additive_term(
         &self.poly_eq,
         &self.w_plus_r_inv,
         &self.w_plus_r,
@@ -926,7 +926,7 @@ impl ZKSumcheckEngine for LookupSumcheckInstance<Bn256EngineZKPedersen> {
     ]
   }
 
-  fn bound(&mut self, r: &<Bn256EngineZKPedersen as Engine>::Scalar) {
+  fn bound(&mut self, r: &<E as Engine>::Scalar) {
     [
       &mut self.t_plus_r,
       &mut self.t_plus_r_inv,
@@ -939,7 +939,7 @@ impl ZKSumcheckEngine for LookupSumcheckInstance<Bn256EngineZKPedersen> {
     .for_each(|poly| poly.bind_poly_var_top(r));
   }
 
-  fn final_claims(&self) -> Vec<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>> {
+  fn final_claims(&self) -> Vec<Vec<<E as Engine>::Scalar>> {
     let poly_final = vec![self.t_plus_r_inv[0], self.w_plus_r_inv[0], self.ts[0]];
 
     vec![poly_final]
