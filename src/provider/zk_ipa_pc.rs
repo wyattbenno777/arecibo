@@ -853,7 +853,7 @@ where
       &[self.z_1, (self.z_1 * a), self.z_2],
       &[
         c_hat.to_affine(),
-        CE::<E>::get_gens(&ck_y)[0].clone(),
+        CE::<E>::get_gens(&ck_y)[0],
         CE::<E>::get_blinding_gen(&ck_y),
       ],
     );

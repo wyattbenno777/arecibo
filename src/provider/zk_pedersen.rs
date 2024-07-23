@@ -249,7 +249,7 @@ where
     let blinding_label: &'static [u8] = Box::leak(blinding_label.into_boxed_slice());
 
     let blinding = E::GE::from_label(blinding_label, 1);
-    let h = blinding.first().unwrap().clone();
+    let h = *blinding.first().unwrap();
 
     Self::CommitmentKey {
       ck: E::GE::from_label(label, n.next_power_of_two()),
@@ -282,7 +282,7 @@ where
     let blinding_label: &'static [u8] = Box::leak(blinding_label.into_boxed_slice());
 
     let blinding = E::GE::from_label(blinding_label, 1);
-    let h = blinding.first().unwrap().clone();
+    let h = *blinding.first().unwrap();
 
     Self::CommitmentKey {
       ck: E::GE::from_label(label, n),
@@ -297,7 +297,7 @@ where
   ) -> Self::CommitmentKey {
     Self::CommitmentKey {
       ck: E::GE::from_label(label, n.next_power_of_two()),
-      h: h.clone(),
+      h: *h,
     }
   }
 
@@ -308,7 +308,7 @@ where
   ) -> Self::CommitmentKey {
     Self::CommitmentKey {
       ck: E::GE::from_label(label, n),
-      h: h.clone(),
+      h: *h,
     }
   }
 
@@ -324,7 +324,7 @@ where
   }
 
   fn get_blinding_gen(ck: &Self::CommitmentKey) -> <E::GE as PrimeCurve>::Affine {
-    ck.h.clone()
+    ck.h
   }
 
   fn zkcommit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment {
@@ -334,7 +334,7 @@ where
     scalars.push(*r);
 
     let mut bases = ck.ck[..v.len()].to_vec();
-    bases.push(ck.h.clone());
+    bases.push(ck.h);
 
     Commitment {
       comm: E::GE::vartime_multiscalar_mul(&scalars, &bases),
@@ -377,7 +377,7 @@ where
 {
   fn split_at(mut self, n: usize) -> (Self, Self) {
     let right = self.ck.split_off(n);
-    (self.clone(), Self { ck: right, h: self.h.clone() })
+    (self.clone(), Self { ck: right, h: self.h })
   }
 
   fn combine(&self, other: &Self) -> Self {
@@ -389,7 +389,7 @@ where
         .chain(other.ck.iter().cloned())
         .collect::<Vec<_>>()
     };
-    Self { ck, h: self.h.clone() }
+    Self { ck, h: self.h }
   }
 
   // combines the left and right halves of `self` using `w1` and `w2` as the weights
@@ -402,7 +402,7 @@ where
     let mut ck_affine = vec![<E::GE as PrimeCurve>::Affine::identity(); L.ck.len()];
     E::GE::batch_normalize(&ck_curve, &mut ck_affine);
 
-    Self { ck: ck_affine, h: self.h.clone(), }
+    Self { ck: ck_affine, h: self.h, }
   }
 
   /// Scales each element in `self` by `r`

@@ -1221,7 +1221,7 @@ where
       &pk.pk_ee,
       &mut transcript,
       &comm_vec,
-      &poly_vec.as_slice(),
+      poly_vec.as_slice(),
       &blind_poly_vec,
       &points,
       &eval_vec,
@@ -1490,8 +1490,7 @@ where
       let eval_t_plus_row = {
         let eval_addr_row = IdentityPolynomial::new(num_rounds_sc).evaluate(&rand_sc);
         let eval_val_row = taus_bound_rand_sc;
-        let eval_t = eval_addr_row + gamma * eval_val_row;
-        eval_t
+        eval_addr_row + gamma * eval_val_row
       };
 
       let eval_addr_col_t = IdentityPolynomial::new(num_rounds_sc).evaluate(&rand_sc);
