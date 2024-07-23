@@ -129,18 +129,6 @@ where
 
 #[test]
 fn test_pp_digest() {
-//   test_pp_digest_with::<PallasEngine, _, _, EE<_>, EE<_>>(
-//     &TrivialCircuit::default(),
-//     &TrivialCircuit::default(),
-//     &expect!["cbbc103130b77249bfb14b86f5e9800f29704ef06fd38ff0964dcc385ac62d00"],
-//   );
-
-//   test_pp_digest_with::<PallasEngine, _, _, EE<_>, EE<_>>(
-//     &CubicCircuit::default(),
-//     &TrivialCircuit::default(),
-//     &expect!["f1f9ba473c14dbf6ddb1b3dddb1b3e97547020f24879baaf5bf6ef02d2de1001"],
-//   );
-
   test_pp_digest_with::<Bn256EngineZKPedersen, _, _, EE<_>, EE<_>>(
     &TrivialCircuit::default(),
     &TrivialCircuit::default(),
@@ -152,18 +140,6 @@ fn test_pp_digest() {
     &TrivialCircuit::default(),
     &expect!["0e984618bb3661bbfd9f2e5f013255dd26d15c5311225d1b1aef26640819be02"],
   );
-
-//   test_pp_digest_with::<Secp256k1Engine, _, _, EE<_>, EE<_>>(
-//     &TrivialCircuit::default(),
-//     &TrivialCircuit::default(),
-//     &expect!["8a5dc9867538ade2691aa6e23fed408d399cde10e4cd9c92359f7adb81113b02"],
-//   );
-
-//   test_pp_digest_with::<Secp256k1Engine, _, _, EE<_>, EE<_>>(
-//     &CubicCircuit::default(),
-//     &TrivialCircuit::default(),
-//     &expect!["ffff2f5d3a9b5077ad861498b4b042029d8fe3a2fda36a38ad6e13ee4b41a703"],
-//   );
 }
 
 fn test_ivc_trivial_with<E1>()
@@ -349,76 +325,9 @@ where
     zn_secondary,
     vec![<Dual<E1> as Engine>::Scalar::from(2460515u64)]
   );
-
-  // // run the compressed snark
-  // // produce the prover and verifier keys for compressed snark
-  // let (pk, vk) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
-
-  // // produce a compressed SNARK
-  // let compressed_snark = CompressedSNARK::<_, S1, S2>::prove(&pp, &pk, &recursive_snark).unwrap();
-
-  // // verify the compressed SNARK
-  // compressed_snark
-  //   .verify(
-  //     &vk,
-  //     num_steps,
-  //     &[<E1 as Engine>::Scalar::ONE],
-  //     &[<Dual<E1> as Engine>::Scalar::ZERO],
-  //   )
-  //   .unwrap();
 }
 
-// fn test_ivc_nontrivial_with_compression_with<E1, EE1, EE2>()
-// where
-//   E1: CurveCycleEquipped,
-//   EE1: EvaluationEngineTrait<Bn256EngineZKPedersen>,
-//   EE2: EvaluationEngineTrait<Dual<Bn256EngineZKPedersen>>,
-//   // this is due to the reliance on Abomonation
-//   <E1::Scalar as PrimeField>::Repr: Abomonation,
-//   <<Dual<E1> as Engine>::Scalar as PrimeField>::Repr: Abomonation,
-// {
-//   test_ivc_nontrivial_with_some_compression_with::<E1, S<EE1>, S<EE2>>()
-// }
-
-// #[test]
-// fn test_ivc_nontrivial_with_compression() {
-// //   test_ivc_nontrivial_with_compression_with::<PallasEngine, EE<_>, EE<_>>();
-//   test_ivc_nontrivial_with_compression_with::<Bn256EngineZKPedersen, EE<_>, EE<_>>();
-// //   test_ivc_nontrivial_with_compression_with::<Secp256k1Engine, EE<_>, EE<_>>();
-// //   test_ivc_nontrivial_with_compression_with::<Bn256EngineZM, ZMPCS<Bn256, _>, EE<_>>();
-// //   test_ivc_nontrivial_with_compression_with::<
-// //     Bn256EngineKZG,
-// //     provider::hyperkzg::EvaluationEngine<Bn256, _>,
-// //     EE<_>,
-// //   >();
-// }
-
-// fn test_ivc_nontrivial_with_spark_compression_with<E1, EE1, EE2>()
-// where
-//   E1: CurveCycleEquipped,
-//   EE1: EvaluationEngineTrait<E1> + traits::zkevaluation::EvaluationEngineTrait<provider::Bn256EngineZKPedersen>,
-//   EE2: EvaluationEngineTrait<Dual<E1>> + traits::zkevaluation::EvaluationEngineTrait<provider::ZKGrumpkinEngine>,
-//   // this is due to the reliance on Abomonation
-//   <E1::Scalar as PrimeField>::Repr: Abomonation,
-//   <<Dual<E1> as Engine>::Scalar as PrimeField>::Repr: Abomonation,
-// {
-//   test_ivc_nontrivial_with_some_compression_with::<E1, SPrime<EE1>, SPrime<EE2>>()
-// }
-
-// #[test]
-// fn test_ivc_nontrivial_with_spark_compression() {
-// //   test_ivc_nontrivial_with_spark_compression_with::<PallasEngine, EE<_>, EE<_>>();
-//   test_ivc_nontrivial_with_spark_compression_with::<Bn256EngineZKPedersen, EE<_>, EE<_>>();
-// //   test_ivc_nontrivial_with_spark_compression_with::<Secp256k1Engine, EE<_>, EE<_>>();
-// //   test_ivc_nontrivial_with_spark_compression_with::<Bn256EngineZM, ZMPCS<Bn256, _>, EE<_>>();
-// //   test_ivc_nontrivial_with_spark_compression_with::<
-// //     Bn256EngineKZG,
-// //     provider::hyperkzg::EvaluationEngine<Bn256, _>,
-// //     EE<_>,
-// //   >();
-// }
-
-fn test_ivc_nondet_with_compression_with<E1, EE1, EE2>()
+fn test_ivc_nondet_without<E1, EE1, EE2>()
 where
   E1: CurveCycleEquipped,
   EE1: EvaluationEngineTrait<E1>,
@@ -530,26 +439,11 @@ where
   recursive_snark
     .verify(&pp, num_steps, &z0_primary, &z0_secondary)
     .unwrap();
-
-//   // produce the prover and verifier keys for compressed snark
-//   let (pk, vk) = CompressedSNARK::<_, S<E1, EE1>, S<_, EE2>>::setup(&pp).unwrap();
-
-//   // produce a compressed SNARK
-//   let compressed_snark =
-//     CompressedSNARK::<_, S<E1, EE1>, S<_, EE2>>::prove(&pp, &pk, &recursive_snark).unwrap();
-
-//   // verify the compressed SNARK
-//   compressed_snark
-//     .verify(&vk, num_steps, &z0_primary, &z0_secondary)
-//     .unwrap();
 }
 
 #[test]
-fn test_ivc_nondet_with_compression() {
-//   test_ivc_nondet_with_compression_with::<PallasEngine, EE<_>, EE<_>>();
-  test_ivc_nondet_with_compression_with::<Bn256EngineZKPedersen, EE<_>, EE<_>>();
-//   test_ivc_nondet_with_compression_with::<Secp256k1Engine, EE<_>, EE<_>>();
-//   test_ivc_nondet_with_compression_with::<Bn256EngineZM, ZMPCS<Bn256, _>, EE<_>>();
+fn test_ivc_nondet_with() {
+  test_ivc_nondet_without::<Bn256EngineZKPedersen, EE<_>, EE<_>>();
 }
 
 fn test_ivc_base_with<E1>()
@@ -601,9 +495,7 @@ where
 
 #[test]
 fn test_ivc_base() {
-//   test_ivc_base_with::<PallasEngine>();
   test_ivc_base_with::<Bn256EngineZKPedersen>();
-//   test_ivc_base_with::<Secp256k1Engine>();
 }
 
 fn test_setup_with<E1: CurveCycleEquipped>() {
