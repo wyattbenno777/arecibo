@@ -21,6 +21,7 @@ use crate::traits::commitment::ZKCommitmentEngineTrait;
 use rayon::prelude::*;
 use crate::traits::zkevaluation::GetEvalCommitmentsTrait;
 use core::ops::{Add, Sub, Mul};
+use crate::provider::zk_pedersen;
 
 use ff::Field;
 
@@ -144,9 +145,13 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE> RelaxedR1CSSNARKTrai
 where
   EE: EvaluationEngineTrait<E>,
   <E as Engine>::CE: ZKCommitmentEngineTrait<E>,
-  <E as Engine>::GE: DlogGroup,
-  E::CE: CommitmentEngineTrait<E>,
+  <E as Engine>::GE: DlogGroup<ScalarExt = E::Scalar>,
+  <E as Engine>::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>,
+  // <E::CE as CommitmentEngineTrait<E>>::Commitment: Sub<Output = <<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment>, 
+  // <<<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment as Sub>::Output as Mul<<E as Engine>::Scalar>>::Output: Add<<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment> 
+  <E::CE as CommitmentEngineTrait<E>>::Commitment: Add<Output = <<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment>, 
   <E::CE as CommitmentEngineTrait<E>>::Commitment: Sub<Output = <<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment>, 
+  // <E::CE as CommitmentEngineTrait<E>>::Commitment: Mul<<E as Engine>::Scalar, Output = <<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment>, 
   <<<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment as Sub>::Output as Mul<<E as Engine>::Scalar>>::Output: Add<<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment> 
 {
   type ProverKey = ProverKey<E, EE>;
@@ -567,7 +572,7 @@ where
         &vk.vk_ee,
         &mut transcript,
         &[U.comm_E, U.comm_W],
-        &[r_x, r_y[1..].to_vec()],
+        &[r_x.to_vec(), r_y[1..].to_vec()],
         &self.eval_arg,
     )?;
 

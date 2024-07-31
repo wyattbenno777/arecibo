@@ -386,6 +386,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
 where 
   <E as Engine>::CE: ZKCommitmentEngineTrait<E>, 
   <E as Engine>::GE: DlogGroup<ScalarExt = <E as Engine>::Scalar>,
+  E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>,
   <<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment: CommitmentTrait<E, CompressedCommitment = zk_pedersen::CompressedCommitment<E>>,
 {
   fn prove_helper<T1, T2, T3, T4>(
@@ -826,7 +827,7 @@ where
 
     let blind_prod_eval_L_row_eval_L_col = <E as Engine>::Scalar::random(&mut OsRng);
 
-    let (proof_prod_eval_L_row_eval_L_col, comm_eval_L_row, comm_eval_L_col, comm_prod_eval_L_row_eval_L_col) = {
+    let (proof_prod_eval_L_row_eval_L_col, comm_eval_L_row, comm_eval_L_col, comm_prod_eval_L_row_eval_L_col): (ProductProof<E>, _, _, _) = {
       let prod = eval_L_row * eval_L_col;
       ProductProof::prove(
         &pk.sumcheck_gens.ck_1,
@@ -871,7 +872,7 @@ where
 
     let blind_prod_eval_w_plus_r_inv_col_eval_L_col = <E as Engine>::Scalar::random(&mut OsRng);
 
-    let (proof_prod_eval_w_plus_r_inv_col_eval_L_col, comm_eval_w_plus_r_inv_col, _, comm_prod_eval_w_plus_r_inv_col_eval_L_col) = {
+    let (proof_prod_eval_w_plus_r_inv_col_eval_L_col, comm_eval_w_plus_r_inv_col, _, comm_prod_eval_w_plus_r_inv_col_eval_L_col): (ProductProof<E>, _, _, _) = {
       let prod = eval_w_plus_r_inv_col * eval_L_col;
       ProductProof::prove(
         &pk.sumcheck_gens.ck_1,
@@ -919,7 +920,7 @@ where
 
     let blind_prod_eval_row_eval_w_plus_r_inv_row = <E as Engine>::Scalar::random(&mut OsRng);
 
-    let (proof_prod_eval_row_eval_w_plus_r_inv_row, comm_eval_row, comm_eval_w_plus_r_inv_row, comm_prod_eval_row_eval_w_plus_r_inv_row) = {
+    let (proof_prod_eval_row_eval_w_plus_r_inv_row, comm_eval_row, comm_eval_w_plus_r_inv_row, comm_prod_eval_row_eval_w_plus_r_inv_row): (ProductProof<E>, _, _, _) = {
       let prod = eval_row * eval_w_plus_r_inv_row;
       ProductProof::prove(
         &pk.sumcheck_gens.ck_1,
@@ -943,7 +944,7 @@ where
 
     let blind_prod_eval_L_row_eval_L_col_eval_val_A = <E as Engine>::Scalar::random(&mut OsRng);
 
-    let (proof_prod_eval_L_row_eval_L_col_eval_val_A, _, comm_eval_val_A, comm_prod_eval_L_row_eval_L_col_eval_val_A) = {
+    let (proof_prod_eval_L_row_eval_L_col_eval_val_A, _, comm_eval_val_A, comm_prod_eval_L_row_eval_L_col_eval_val_A): (ProductProof<E>, _, _, _) = {
       let eval_L_row_eval_L_col = eval_L_row * eval_L_col;
       let prod = eval_L_row_eval_L_col * eval_val_A;
       ProductProof::prove(
@@ -960,7 +961,7 @@ where
 
     let blind_prod_eval_L_row_eval_L_col_eval_val_B = <E as Engine>::Scalar::random(&mut OsRng);
 
-    let (proof_prod_eval_L_row_eval_L_col_eval_val_B, _, comm_eval_val_B, comm_prod_eval_L_row_eval_L_col_eval_val_B) = {
+    let (proof_prod_eval_L_row_eval_L_col_eval_val_B, _, comm_eval_val_B, comm_prod_eval_L_row_eval_L_col_eval_val_B): (ProductProof<E>, _, _, _) = {
       let eval_L_row_eval_L_col = eval_L_row * eval_L_col;
       let prod = eval_L_row_eval_L_col * eval_val_B;
       ProductProof::prove(
@@ -977,7 +978,7 @@ where
 
     let blind_prod_eval_L_row_eval_L_col_eval_val_C = <E as Engine>::Scalar::random(&mut OsRng);
 
-    let (proof_prod_eval_L_row_eval_L_col_eval_val_C, _, comm_eval_val_C, comm_prod_eval_L_row_eval_L_col_eval_val_C) = {
+    let (proof_prod_eval_L_row_eval_L_col_eval_val_C, _, comm_eval_val_C, comm_prod_eval_L_row_eval_L_col_eval_val_C): (ProductProof<E>, _, _, _) = {
       let eval_L_row_eval_L_col = eval_L_row * eval_L_col;
       let prod = eval_L_row_eval_L_col * eval_val_C;
       ProductProof::prove(
@@ -994,7 +995,7 @@ where
 
     let blind_prod_eval_L_row_eval_w_plus_r_inv_row = <E as Engine>::Scalar::random(&mut OsRng);
 
-    let (proof_prod_eval_L_row_eval_w_plus_r_inv_row, _, _, comm_prod_eval_L_row_eval_w_plus_r_inv_row) = {
+    let (proof_prod_eval_L_row_eval_w_plus_r_inv_row, _, _, comm_prod_eval_L_row_eval_w_plus_r_inv_row): (ProductProof<E>, _, _, _) = {
       let prod = eval_L_row * eval_w_plus_r_inv_row;
       ProductProof::prove(
         &pk.sumcheck_gens.ck_1,
@@ -1046,7 +1047,7 @@ where
 
     let blind_prod_eval_t_plus_r_inv_col_eval_W_X = <E as Engine>::Scalar::random(&mut OsRng);
 
-    let (proof_prod_eval_t_plus_r_inv_col_eval_W_X, comm_eval_t_plus_r_inv_col, comm_eval_W_X, comm_prod_eval_t_plus_r_inv_col_eval_W_X) = {
+    let (proof_prod_eval_t_plus_r_inv_col_eval_W_X, comm_eval_t_plus_r_inv_col, comm_eval_W_X, comm_prod_eval_t_plus_r_inv_col_eval_W_X): (ProductProof<E>, _, _, _) = {
       let prod = eval_t_plus_r_inv_col * eval_W_X;
       ProductProof::prove(
         &pk.sumcheck_gens.ck_1,
@@ -1066,7 +1067,7 @@ where
 
     let blind_prod_eval_Az_eval_Bz = <E as Engine>::Scalar::random(&mut OsRng);
 
-    let (proof_prod_eval_Az_eval_Bz, comm_eval_Az, comm_eval_Bz, comm_prod_eval_Az_eval_Bz) = {
+    let (proof_prod_eval_Az_eval_Bz, comm_eval_Az, comm_eval_Bz, comm_prod_eval_Az_eval_Bz): (ProductProof<E>, CompressedCommitment<E>, CompressedCommitment<E>, CompressedCommitment<E>) = {
       let prod = eval_Az * eval_Bz;
       ProductProof::prove(
         &pk.sumcheck_gens.ck_1,
@@ -1101,7 +1102,7 @@ where
 
     let blind_prod_eval_w_plus_r_inv_col_eval_col = <E as Engine>::Scalar::random(&mut OsRng);
 
-    let (proof_prod_eval_w_plus_r_inv_col_eval_col, _, comm_eval_col, comm_prod_eval_w_plus_r_inv_col_eval_col) = {
+    let (proof_prod_eval_w_plus_r_inv_col_eval_col, _, comm_eval_col, comm_prod_eval_w_plus_r_inv_col_eval_col): (ProductProof<E>, _, _, _) = {
       let prod = eval_w_plus_r_inv_col * eval_col;
       ProductProof::prove(
         &pk.sumcheck_gens.ck_1,
