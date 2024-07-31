@@ -21,6 +21,7 @@ use group::{
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use core::iter::Sum;
 
 /// A type that holds commitment generators
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Abomonation)]
@@ -207,6 +208,22 @@ where
     Self {
       comm: self.comm + other.comm,
     }
+  }
+}
+
+impl<E> Sum for Commitment<E>
+where
+  E: Engine,
+  E::GE: DlogGroup<ScalarExt = E::Scalar>,
+{
+  fn sum<I>(iter: I) -> Self
+  where
+      I: Iterator<Item = Self>
+  {
+      iter.fold(Commitment::default(), |a, b| Self {
+        comm: a.comm + b.comm,
+
+      })
   }
 }
 
