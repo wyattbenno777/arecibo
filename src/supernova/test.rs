@@ -1,6 +1,7 @@
 use crate::gadgets::alloc_zero;
 use crate::provider::ipa_pc;
 use crate::provider::poseidon::PoseidonConstantsCircuit;
+use crate::provider::zk_ipa_pc;
 use crate::provider::Bn256EngineIPA;
 use crate::provider::Bn256EngineZKPedersen;
 use crate::provider::PallasEngine;
@@ -890,12 +891,12 @@ fn test_zk_trivial_nivc_with() {
   type E1 = Bn256EngineZKPedersen;
 
   // PCS to use
-  type EE1 = ipa_pc::EvaluationEngine<E1>;
+  type EE1 = zk_ipa_pc::EvaluationEngine<E1>;
   // PCS for secondary curve
   type EE2 = ipa_pc::EvaluationEngine<Dual<E1>>;
 
   // SNARK for primary NIVC
-  type S1 = spartan::batched::BatchedRelaxedR1CSSNARK<E1, EE1>;
+  type S1 = spartan::batched_zkppsnark::BatchedRelaxedR1CSSNARK<E1, EE1>;
   // SNARK for secondary NIVC
   type S2 = spartan::snark::RelaxedR1CSSNARK<Dual<E1>, EE2>;
 
@@ -974,15 +975,15 @@ fn test_zk_trivial_nivc_with() {
   assert!(recursive_snark_option.is_some());
 
   let recursive_snark = recursive_snark_option.unwrap();
-  // let (prover_key, verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
+  let (prover_key, verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
 
-  // // Proving the compressed SNARK
-  // println!("Producing compressed SNARK");
-  // let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
+  // Proving the compressed SNARK
+  println!("Producing compressed SNARK");
+  let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
 
-  // // Verifying the compressed SNARK
-  // println!("Verifying compressed SNARK");
-  // compressed_snark
-  //   .verify(&pp, &verifier_key, &z0_primary, &z0_secondary)
-  //   .unwrap();
+  // Verifying the compressed SNARK
+  println!("Verifying compressed SNARK");
+  compressed_snark
+    .verify(&pp, &verifier_key, &z0_primary, &z0_secondary)
+    .unwrap();
 }
