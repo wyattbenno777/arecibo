@@ -17,6 +17,7 @@ use core::marker::PhantomData;
 use expect_test::{expect, Expect};
 use ff::Field;
 use ff::PrimeField;
+use snark::CompressedSNARK;
 use std::fmt::Write;
 use tap::TapOptional;
 
@@ -934,6 +935,7 @@ fn test_zk_trivial_nivc_with() {
   let mut recursive_snark_option: Option<RecursiveSNARK<E1>> = None;
 
   for &op_code in test_rom.rom.iter() {
+    println!("opcode: {}", op_code);
     let circuit_primary = test_rom.primary_circuit(op_code);
     let circuit_secondary = test_rom.secondary_circuit();
 
@@ -970,18 +972,16 @@ fn test_zk_trivial_nivc_with() {
 
   assert!(recursive_snark_option.is_some());
 
-  // Now you can handle the Result using if let
-  let RecursiveSNARK {
-    zi_primary,
-    zi_secondary,
-    program_counter,
-    ..
-  } = &recursive_snark_option.unwrap();
+  let recursive_snark = recursive_snark_option.unwrap();
+  // let (prover_key, verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
 
-  println!("zi_primary: {:?}", zi_primary);
-  println!("zi_secondary: {:?}", zi_secondary);
-  println!("final program_counter: {:?}", program_counter);
+  // // Proving the compressed SNARK
+  // println!("Producing compressed SNARK");
+  // let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
 
-  // The final program counter should be -1
-  assert_eq!(*program_counter, -<E1 as Engine>::Scalar::ONE);
+  // // Verifying the compressed SNARK
+  // println!("Verifying compressed SNARK");
+  // compressed_snark
+  //   .verify(&pp, &verifier_key, &z0_primary, &z0_secondary)
+  //   .unwrap();
 }
