@@ -14,6 +14,8 @@ use crate::spartan::powers;
 use crate::traits::commitment::ZKCommitmentEngineTrait;
 use itertools::Itertools;
 use std::marker::PhantomData;
+use crate::spartan::zksumcheck::zk_pedersen;
+use crate::spartan::zksumcheck::DlogGroup;
 
 // Define a iterator over Natural number without allocated a whole size vector
 // it started from 0 instead of 1
@@ -114,7 +116,7 @@ impl<E: Engine> WitnessBoundSumcheck<E> {
     }
   }
 }
-impl<E:Engine> ZKSumcheckEngine<E> for WitnessBoundSumcheck<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E> {
+impl<E:Engine> ZKSumcheckEngine<E> for WitnessBoundSumcheck<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E>, E::GE: DlogGroup<ScalarExt = E::Scalar>,   E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>> {
   fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
     vec![<E as Engine>::Scalar::ZERO]
   }
@@ -352,7 +354,7 @@ impl<E: Engine> MemorySumcheckInstance<E> {
   }
 }
 
-impl<E: Engine> ZKSumcheckEngine<E> for MemorySumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E> {
+impl<E: Engine> ZKSumcheckEngine<E> for MemorySumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E>, E::GE: DlogGroup<ScalarExt = E::Scalar>,   E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>{
   fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
     vec![<E as Engine>::Scalar::ZERO; 6]
   }
@@ -527,7 +529,7 @@ impl<E: Engine> OuterSumcheckInstance<E> {
   }
 }
 
-impl<E: Engine> ZKSumcheckEngine<E> for OuterSumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E> {
+impl<E: Engine> ZKSumcheckEngine<E> for OuterSumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E>, E::GE: DlogGroup<ScalarExt = E::Scalar>,   E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>{
   fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
     vec![<E as Engine>::Scalar::ZERO, self.eval_Mz_at_tau]
   }
@@ -619,7 +621,7 @@ impl<E: Engine> InnerSumcheckInstance<E> {
     }
   }
 }
-impl<E: Engine> ZKSumcheckEngine<E> for InnerSumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E> {
+impl<E: Engine> ZKSumcheckEngine<E> for InnerSumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E>, E::GE: DlogGroup<ScalarExt = E::Scalar>,   E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>> {
   fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
     vec![self.claim]
   }
@@ -849,7 +851,7 @@ impl<E: Engine> LookupSumcheckInstance<E> {
   }
 }
 
-impl<E: Engine> ZKSumcheckEngine<E> for LookupSumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E> {
+impl<E: Engine> ZKSumcheckEngine<E> for LookupSumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E>, E::GE: DlogGroup<ScalarExt = E::Scalar>,   E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>> {
   fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
     vec![
       self.initial_claim.unwrap_or_default(),
