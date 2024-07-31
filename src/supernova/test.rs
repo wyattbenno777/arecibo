@@ -884,6 +884,7 @@ fn test_nivc_nondet() {
 }
 
 #[test]
+#[allow(unused)]
 fn test_zk_trivial_nivc_with() {
   // Curve cycle to prove on
   type E1 = Bn256EngineZKPedersen;
