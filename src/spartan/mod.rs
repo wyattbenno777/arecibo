@@ -8,6 +8,7 @@
 
 pub mod batched;
 pub mod batched_ppsnark;
+pub mod batched_zkppsnark;
 #[macro_use]
 mod macros;
 pub(crate) mod math;
