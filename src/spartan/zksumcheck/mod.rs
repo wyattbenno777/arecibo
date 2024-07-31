@@ -2,6 +2,7 @@
 #![allow(clippy::type_complexity)]
 use super::nizk::DotProductProof;
 use crate::errors::NovaError;
+use crate::provider::zk_pedersen;
 use crate::spartan::polys::{multilinear::MultilinearPolynomial, univariate::UniPoly};
 use crate::traits::{
   commitment::{ZKCommitmentEngineTrait, CommitmentTrait, Len},
@@ -13,6 +14,9 @@ use rand::rngs::OsRng;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use crate::Engine;
+use itertools::Itertools as _;
+use crate::provider::traits::DlogGroup;
+use crate::CommitmentEngineTrait;
 
 pub(in crate::spartan) mod engine;
 
@@ -23,7 +27,7 @@ pub(crate) struct ZKSumcheckProof<E: Engine> {
   proofs: Vec<DotProductProof<E>>,
 }
 
-impl<E: Engine> ZKSumcheckProof<E> where E::CE: ZKCommitmentEngineTrait<E> {
+impl<E: Engine> ZKSumcheckProof<E> where E::CE: ZKCommitmentEngineTrait<E>, E::GE: DlogGroup<ScalarExt = E::Scalar>,  E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>,{
   #[allow(dead_code)]
   pub fn new(
     comm_polys: Vec<CompressedCommitment<E>>,
@@ -35,6 +39,42 @@ impl<E: Engine> ZKSumcheckProof<E> where E::CE: ZKCommitmentEngineTrait<E> {
       comm_evals,
       proofs,
     }
+  }
+
+  pub fn verify_batch(
+    &self,
+    claims: &[CompressedCommitment<E>],
+    num_rounds: &[usize],
+    coeffs: &[E::Scalar],
+    degree_bound: usize,
+    ck_1: &CommitmentKey<E>, // generator of size 1
+    ck_n: &CommitmentKey<E>, // generators of size n
+    transcript: &mut E::TE,
+  ) -> Result<(CompressedCommitment<E>, Vec<<E as Engine>::Scalar>), NovaError> {
+    let num_instances = claims.len();
+    assert_eq!(num_rounds.len(), num_instances);
+    assert_eq!(coeffs.len(), num_instances);
+
+    // n = maxᵢ{nᵢ}
+    let num_rounds_max = *num_rounds.iter().max().unwrap();
+
+    // Random linear combination of claims,
+    // where each claim is scaled by 2^{n-nᵢ} to account for the padding.
+    //
+    // claim = ∑ᵢ coeffᵢ⋅2^{n-nᵢ}⋅cᵢ
+    let comm_claim = zip_with!(
+      (
+        zip_with!(iter, (claims, num_rounds), |claim, num_rounds| {
+          let scaling_factor = 1 << (num_rounds_max - num_rounds);
+          Commitment::<E>::decompress(&claim).unwrap() * E::Scalar::from(scaling_factor as u64)
+        }),
+        coeffs.iter()
+      ),
+      |scaled_claim, coeff| scaled_claim * *coeff
+    )
+    .sum::<zk_pedersen::Commitment::<E>>().compress();
+
+    self.verify(&comm_claim, num_rounds_max, degree_bound, ck_1, ck_n, transcript)
   }
 
   #[allow(dead_code)]
