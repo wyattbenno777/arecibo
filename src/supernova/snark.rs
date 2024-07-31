@@ -282,8 +282,10 @@ fn field_as_usize<F: PrimeField>(x: F) -> usize {
 mod test {
   use super::*;
   use crate::{
-    provider::{ipa_pc, Bn256EngineIPA, PallasEngine, Secp256k1Engine},
-    spartan::{batched, batched_ppsnark, snark::RelaxedR1CSSNARK},
+    provider::{
+      ipa_pc, zk_ipa_pc, Bn256EngineIPA, Bn256EngineZKPedersen, PallasEngine, Secp256k1Engine,
+    },
+    spartan::{self, batched, batched_ppsnark, snark::RelaxedR1CSSNARK},
     supernova::{circuit::TrivialSecondaryCircuit, NonUniformCircuit, StepCircuit},
   };
 
@@ -592,6 +594,7 @@ mod test {
     let secondary_circuit = TrivialSecondaryCircuit::default();
     let test_circuits = circuits_factory(num_steps);
 
+    println!("Producing PP...");
     let pp = PublicParams::setup(&test_circuits[0], &*S1::ck_floor(), &*S2::ck_floor());
 
     let z0_primary = vec![E1::Scalar::from(17u64)];
@@ -607,6 +610,7 @@ mod test {
     )
     .unwrap();
 
+    println!("Proving steps...");
     for circuit in test_circuits.iter().take(num_steps) {
       recursive_snark
         .prove_step(&pp, circuit, &secondary_circuit)
@@ -619,6 +623,7 @@ mod test {
 
     let (prover_key, verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
 
+    println!("Proving compressed SNARK...");
     let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
 
     compressed_snark
@@ -640,6 +645,26 @@ mod test {
     test_compression_with::<PallasEngine, S1<_>, S2<_>, _, _>(NUM_STEPS, TestCircuit::new);
     test_compression_with::<Bn256EngineIPA, S1<_>, S2<_>, _, _>(NUM_STEPS, TestCircuit::new);
     test_compression_with::<Secp256k1Engine, S1<_>, S2<_>, _, _>(NUM_STEPS, TestCircuit::new);
+  }
+
+  #[test]
+  fn test_zk_nivc_trivial_with_compression() {
+    const NUM_STEPS: usize = 6;
+    // Curve cycle to prove on
+    type E1 = Bn256EngineZKPedersen;
+
+    // PCS to use
+    type EE1 = zk_ipa_pc::EvaluationEngine<E1>;
+    // PCS for secondary curve
+    type EE2 = ipa_pc::EvaluationEngine<Dual<E1>>;
+
+    // SNARK for primary NIVC
+    type S1 = spartan::batched_zkppsnark::BatchedRelaxedR1CSSNARK<E1, EE1>;
+    // SNARK for secondary NIVC
+    type S2 = spartan::snark::RelaxedR1CSSNARK<Dual<E1>, EE2>;
+
+    // ppSNARK
+    test_compression_with::<E1, S1, S2, _, _>(NUM_STEPS, TestCircuit::new);
   }
 
   #[test]
