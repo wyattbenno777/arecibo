@@ -1,9 +1,12 @@
 use crate::gadgets::alloc_zero;
+use crate::provider::ipa_pc;
 use crate::provider::poseidon::PoseidonConstantsCircuit;
 use crate::provider::Bn256EngineIPA;
+use crate::provider::Bn256EngineZKPedersen;
 use crate::provider::PallasEngine;
 use crate::provider::Secp256k1Engine;
 use crate::provider::VestaEngine;
+use crate::spartan;
 use crate::supernova::circuit::{StepCircuit, TrivialSecondaryCircuit, TrivialTestCircuit};
 use crate::traits::snark::default_ck_hint;
 use crate::{bellpepper::test_shape_cs::TestShapeCS, gadgets::alloc_one};
@@ -877,4 +880,108 @@ fn test_nivc_nondet() {
   test_nivc_nondet_with::<PallasEngine>();
   test_nivc_nondet_with::<Bn256EngineIPA>();
   test_nivc_nondet_with::<Secp256k1Engine>();
+}
+
+#[test]
+fn test_zk_trivial_nivc_with() {
+  // Curve cycle to prove on
+  type E1 = Bn256EngineZKPedersen;
+
+  // PCS to use
+  type EE1 = ipa_pc::EvaluationEngine<E1>;
+  // PCS for secondary curve
+  type EE2 = ipa_pc::EvaluationEngine<Dual<E1>>;
+
+  // SNARK for primary NIVC
+  type S1 = spartan::batched::BatchedRelaxedR1CSSNARK<E1, EE1>;
+  // SNARK for secondary NIVC
+  type S2 = spartan::snark::RelaxedR1CSSNARK<Dual<E1>, EE2>;
+
+  // Here demo a simple RAM machine
+  // - with 2 argumented circuit
+  // - each argumented circuit contains primary and secondary circuit
+  // - a memory commitment via a public IO `rom` (like a program) to constraint the sequence execution
+
+  // This test also ready to add more argumented circuit and ROM can be arbitrary length
+
+  // ROM is for constraints the sequence of execution order for opcode
+
+  // TODO: replace with memory commitment along with suggestion from Supernova 4.4 optimisations
+
+  // This is mostly done with the existing Nova code. With additions of U_i[] and program_counter checks
+  // in the augmented circuit.
+
+  let rom = vec![
+    OPCODE_1, OPCODE_1, OPCODE_0, OPCODE_0, OPCODE_1, OPCODE_1, OPCODE_0, OPCODE_0, OPCODE_1,
+    OPCODE_1,
+  ]; // Rom can be arbitrary length.
+
+  let test_rom = TestROM::<E1>::new(rom);
+
+  let pp = PublicParams::setup(&test_rom, &*default_ck_hint(), &*default_ck_hint());
+
+  // extend z0_primary/secondary with rom content
+  let mut z0_primary = vec![<E1 as Engine>::Scalar::ONE];
+  z0_primary.push(<E1 as Engine>::Scalar::ZERO); // rom_index = 0
+  z0_primary.extend(
+    test_rom
+      .rom
+      .iter()
+      .map(|opcode| <E1 as Engine>::Scalar::from(*opcode as u64)),
+  );
+  let z0_secondary = vec![<Dual<E1> as Engine>::Scalar::ONE];
+
+  let mut recursive_snark_option: Option<RecursiveSNARK<E1>> = None;
+
+  for &op_code in test_rom.rom.iter() {
+    let circuit_primary = test_rom.primary_circuit(op_code);
+    let circuit_secondary = test_rom.secondary_circuit();
+
+    let mut recursive_snark = recursive_snark_option.unwrap_or_else(|| {
+      RecursiveSNARK::new(
+        &pp,
+        &test_rom,
+        &circuit_primary,
+        &circuit_secondary,
+        &z0_primary,
+        &z0_secondary,
+      )
+      .unwrap()
+    });
+
+    recursive_snark
+      .prove_step(&pp, &circuit_primary, &circuit_secondary)
+      .unwrap();
+    recursive_snark
+      .verify(&pp, &z0_primary, &z0_secondary)
+      .map_err(|err| {
+        print_constraints_name_on_error_index(
+          &err,
+          &pp,
+          &circuit_primary,
+          &circuit_secondary,
+          test_rom.num_circuits(),
+        )
+      })
+      .unwrap();
+
+    recursive_snark_option = Some(recursive_snark)
+  }
+
+  assert!(recursive_snark_option.is_some());
+
+  // Now you can handle the Result using if let
+  let RecursiveSNARK {
+    zi_primary,
+    zi_secondary,
+    program_counter,
+    ..
+  } = &recursive_snark_option.unwrap();
+
+  println!("zi_primary: {:?}", zi_primary);
+  println!("zi_secondary: {:?}", zi_secondary);
+  println!("final program_counter: {:?}", program_counter);
+
+  // The final program counter should be -1
+  assert_eq!(*program_counter, -<E1 as Engine>::Scalar::ONE);
 }

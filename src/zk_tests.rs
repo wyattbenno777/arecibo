@@ -577,3 +577,7 @@ fn test_setup_with<E1: CurveCycleEquipped>() {
 fn test_setup() {
   test_setup_with::<Bn256EngineZKPedersen>();
 }
+
+
+#[test]
+fn test_zk_nivc_compression() {}
