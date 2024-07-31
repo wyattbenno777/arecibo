@@ -7,7 +7,7 @@ use arecibo::{
     snark::RelaxedR1CSSNARKTrait,
     Engine, Group,
   },
-  CompressedSNARK, PublicParams, RecursiveSNARK,
+  CompressedSNARK, PublicParams, RecursiveSNARK, StepCounterType,
 };
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::Field;
@@ -36,6 +36,7 @@ type S2 = arecibo::spartan::snark::RelaxedR1CSSNARK<E2, EE2>; // non-preprocessi
 struct HashChainCircuit<G: Group> {
   num_elts_per_step: usize,
   x_i: Vec<G::Scalar>,
+  counter_type: StepCounterType,
 }
 
 impl<G: Group> HashChainCircuit<G> {
@@ -49,6 +50,7 @@ impl<G: Group> HashChainCircuit<G> {
     Self {
       num_elts_per_step,
       x_i,
+      counter_type: StepCounterType::Incremental,
     }
   }
 }
@@ -56,6 +58,11 @@ impl<G: Group> HashChainCircuit<G> {
 impl<G: Group> StepCircuit<G::Scalar> for HashChainCircuit<G> {
   fn arity(&self) -> usize {
     1
+  }
+
+  
+  fn get_counter_type(&self) -> StepCounterType {
+    self.counter_type
   }
 
   fn synthesize<CS: ConstraintSystem<G::Scalar>>(

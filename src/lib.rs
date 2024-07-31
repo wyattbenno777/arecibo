@@ -16,6 +16,10 @@ mod circuit;
 mod digest;
 mod nifs;
 
+#[cfg(test)]
+#[allow(unused)]
+mod zk_tests;
+
 // public modules
 pub mod constants;
 pub mod errors;

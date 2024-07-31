@@ -8,11 +8,13 @@
 
 pub mod batched;
 pub mod batched_ppsnark;
+pub mod batched_zkppsnark;
 #[macro_use]
 mod macros;
 pub(crate) mod math;
 pub mod polys;
 pub mod ppsnark;
+pub mod zkppsnark;
 pub mod lookup_ppsnark;
 pub mod snark;
 mod sumcheck;

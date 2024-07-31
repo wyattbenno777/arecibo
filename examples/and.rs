@@ -8,7 +8,7 @@ use arecibo::{
     snark::RelaxedR1CSSNARKTrait,
     Engine, Group,
   },
-  CompressedSNARK, PublicParams, RecursiveSNARK,
+  CompressedSNARK, PublicParams, RecursiveSNARK, StepCounterType,
 };
 use bellpepper_core::{
   boolean::AllocatedBit, num::AllocatedNum, ConstraintSystem, LinearCombination, SynthesisError,
@@ -52,6 +52,7 @@ impl<G: Group> AndInstance<G> {
 #[derive(Clone, Debug)]
 struct AndCircuit<G: Group> {
   batch: Vec<AndInstance<G>>,
+  counter_type: StepCounterType,
 }
 
 impl<G: Group> AndCircuit<G> {
@@ -61,7 +62,10 @@ impl<G: Group> AndCircuit<G> {
     for _ in 0..num_ops_per_step {
       batch.push(AndInstance::new());
     }
-    Self { batch }
+    Self { 
+      batch,
+      counter_type: StepCounterType::Incremental,
+    }
   }
 }
 
@@ -127,6 +131,10 @@ where
 impl<G: Group> StepCircuit<G::Scalar> for AndCircuit<G> {
   fn arity(&self) -> usize {
     1
+  }
+  
+  fn get_counter_type(&self) -> StepCounterType {
+    self.counter_type
   }
 
   fn synthesize<CS: ConstraintSystem<G::Scalar>>(

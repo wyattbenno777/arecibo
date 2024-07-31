@@ -10,7 +10,7 @@ use arecibo::{
     snark::RelaxedR1CSSNARKTrait,
     Engine, Group,
   },
-  CompressedSNARK, PublicParams, RecursiveSNARK,
+  CompressedSNARK, PublicParams, RecursiveSNARK, StepCounterType,
 };
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::Field;
@@ -131,11 +131,16 @@ impl<G: Group> MinRootIteration<G> {
 #[derive(Clone, Debug, PartialEq)]
 struct MinRootCircuit<G: Group> {
   seq: Vec<MinRootIteration<G>>,
+  counter_type: StepCounterType,
 }
 
 impl<G: Group> StepCircuit<G::Scalar> for MinRootCircuit<G> {
   fn arity(&self) -> usize {
     2
+  }
+  
+  fn get_counter_type(&self) -> StepCounterType {
+    self.counter_type
   }
 
   fn synthesize<CS: ConstraintSystem<G::Scalar>>(
@@ -213,6 +218,7 @@ fn main() {
         };
         num_iters_per_step
       ],
+      counter_type: StepCounterType::Incremental,
     };
 
     let circuit_secondary = TrivialCircuit::default();
@@ -295,6 +301,7 @@ fn main() {
             y_i_plus_1: minroot_iterations[i * num_iters_per_step + j].y_i_plus_1,
           })
           .collect::<Vec<_>>(),
+        counter_type: StepCounterType::Incremental,
       })
       .collect::<Vec<_>>();
 

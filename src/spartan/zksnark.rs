@@ -2,51 +2,47 @@
 //! over the polynomial commitment and evaluation argument (i.e., a PCS)
 
 use crate::{
-  digest::{DigestComputer, SimpleDigestible},
-  errors::NovaError,
-  r1cs::{R1CSShape, RelaxedR1CSInstance, ZKRelaxedR1CSWitness},
-  spartan::{
+  digest::{DigestComputer, SimpleDigestible}, errors::NovaError, r1cs::{R1CSShape, RelaxedR1CSInstance, ZKRelaxedR1CSWitness}, spartan::{
     compute_eval_table_sparse,
     nizk::{EqualityProof, KnowledgeProof, ProductProof},
-    polys::{eq::EqPolynomial, multilinear::MultilinearPolynomial, multilinear::SparsePolynomial},
+    polys::{eq::EqPolynomial, multilinear::{MultilinearPolynomial, SparsePolynomial}},
     zksumcheck::ZKSumcheckProof,
     SparseMatrix,
-  },
-  traits::{
-    zkevaluation::EvaluationEngineTrait,
-    zksnark::{DigestHelperTrait, RelaxedR1CSSNARKTrait},
-    Engine, TranscriptEngineTrait,
-  },
-  Commitment, CommitmentKey, CompressedCommitment, provider::Bn256EngineZKPedersen, CommitmentTrait
+  }, traits::{
+    commitment::CommitmentEngineTrait, zkevaluation::EvaluationEngineTrait, zksnark::{DigestHelperTrait, RelaxedR1CSSNARKTrait}, Engine, TranscriptEngineTrait
+  }, Commitment, CommitmentKey, CommitmentTrait, CompressedCommitment
 };
 use once_cell::sync::OnceCell;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
+use crate::provider::traits::DlogGroup;
 use std::sync::Arc;
 use crate::traits::commitment::ZKCommitmentEngineTrait;
 use rayon::prelude::*;
 use crate::traits::zkevaluation::GetEvalCommitmentsTrait;
+use core::ops::{Add, Sub, Mul};
+use crate::provider::zk_pedersen;
 
 use ff::Field;
 
 ///A type that represents generators for commitments used in sumcheck
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(bound = "")]
-pub struct SumcheckGens {
+pub struct SumcheckGens<E: Engine> {
   /// 1 Generator
-  pub ck_1: CommitmentKey<Bn256EngineZKPedersen>,
+  pub ck_1: CommitmentKey<E>,
   /// 3 Generators
-  pub ck_3: CommitmentKey<Bn256EngineZKPedersen>,
+  pub ck_3: CommitmentKey<E>,
   /// 4 Generators
-  pub ck_4: CommitmentKey<Bn256EngineZKPedersen>,
+  pub ck_4: CommitmentKey<E>,
 }
 
-impl SumcheckGens {
+impl<E: Engine> SumcheckGens<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E>, <E as Engine>::GE: DlogGroup {
   /// Creates new generators for sumcheck
-  pub fn new(label: &'static [u8], scalar_gen: &CommitmentKey<Bn256EngineZKPedersen>) -> Self {
+  pub fn new(label: &'static [u8], scalar_gen: &CommitmentKey<E>) -> Self {
     let ck_1 = scalar_gen.clone();
-    let ck_3 = <Bn256EngineZKPedersen as Engine>::CE::setup_exact_with_blinding(label, 3, &<Bn256EngineZKPedersen as Engine>::CE::get_blinding_gen(&ck_1));
-    let ck_4 = <Bn256EngineZKPedersen as Engine>::CE::setup_exact_with_blinding(label, 4, &<Bn256EngineZKPedersen as Engine>::CE::get_blinding_gen(&ck_1));
+    let ck_3 = <E as Engine>::CE::setup_exact_with_blinding(label, 3, &<E as Engine>::CE::get_blinding_gen(&ck_1));
+    let ck_4 = <E as Engine>::CE::setup_exact_with_blinding(label, 4, &<E as Engine>::CE::get_blinding_gen(&ck_1));
 
     Self { ck_1, ck_3, ck_4 }
   }
@@ -55,40 +51,42 @@ impl SumcheckGens {
 /// A type that represents the prover's key
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct ProverKey<EE>
+pub struct ProverKey<E: Engine, EE>
 where
-  EE: EvaluationEngineTrait<Bn256EngineZKPedersen>,
+  EE: EvaluationEngineTrait<E>,
 {
   pk_ee: EE::ProverKey,
-  sumcheck_gens: SumcheckGens,
-  vk_digest: <Bn256EngineZKPedersen as Engine>::Scalar, // digest of the verifier's key
+  sumcheck_gens: SumcheckGens<E>,
+  vk_digest: <E as Engine>::Scalar, // digest of the verifier's key
 }
 
 /// A type that represents the verifier's key
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct VerifierKey<EE>
+pub struct VerifierKey<E: Engine, EE>
 where
-  EE: EvaluationEngineTrait<Bn256EngineZKPedersen>,
+  EE: EvaluationEngineTrait<E>,
 {
   vk_ee: EE::VerifierKey,
-  sumcheck_gens: SumcheckGens,
-  S: R1CSShape<Bn256EngineZKPedersen>,
+  sumcheck_gens: SumcheckGens<E>,
+  S: R1CSShape<E>,
   #[serde(skip, default = "OnceCell::new")]
-  digest: OnceCell<<Bn256EngineZKPedersen as Engine>::Scalar>,
+  digest: OnceCell<<E as Engine>::Scalar>,
 }
 
-impl<EE> SimpleDigestible for VerifierKey<EE>
+impl<E: Engine, EE> SimpleDigestible for VerifierKey<E, EE>
 where
-  EE: EvaluationEngineTrait<Bn256EngineZKPedersen>,
+  EE: EvaluationEngineTrait<E>,
 {
 }
 
-impl<EE> VerifierKey<EE>
+impl<E: Engine, EE> VerifierKey<E, EE>
 where
-  EE: EvaluationEngineTrait<Bn256EngineZKPedersen>,
+  EE: EvaluationEngineTrait<E>,
+  <E as Engine>::GE: DlogGroup,
+  <E as Engine>::CE: ZKCommitmentEngineTrait<E>,
 {
-  fn new(shape: R1CSShape<Bn256EngineZKPedersen>, vk_ee: EE::VerifierKey) -> Self {
+  fn new(shape: R1CSShape<E>, vk_ee: EE::VerifierKey) -> Self {
     let scalar_gen = EE::get_scalar_gen_vk(vk_ee.clone());
 
     VerifierKey {
@@ -100,16 +98,16 @@ where
   }
 }
 
-impl<EE> DigestHelperTrait<Bn256EngineZKPedersen> for VerifierKey<EE>
+impl<E: Engine, EE> DigestHelperTrait<E> for VerifierKey<E, EE>
 where
-  EE: EvaluationEngineTrait<Bn256EngineZKPedersen>,
+  EE: EvaluationEngineTrait<E>,
 {
   /// Returns the digest of the verifier's key.
-  fn digest(&self) -> <Bn256EngineZKPedersen as Engine>::Scalar {
+  fn digest(&self) -> <E as Engine>::Scalar {
     self
       .digest
       .get_or_try_init(|| {
-        let dc = DigestComputer::<<Bn256EngineZKPedersen as Engine>::Scalar, _>::new(self);
+        let dc = DigestComputer::<<E as Engine>::Scalar, _>::new(self);
         dc.digest()
       })
       .cloned()
@@ -121,47 +119,59 @@ where
 /// The proof is produced using Spartan's combination of the sum-check and
 /// the commitment to a vector viewed as a polynomial commitment
 #[derive(Serialize, Deserialize)]
-#[serde(bound = "")]
-pub struct RelaxedR1CSSNARK<EE>
+#[serde(bound(
+  deserialize = "E: Deserialize<'de>"
+))]
+pub struct RelaxedR1CSSNARK<E: Engine + Serialize, EE>
 where
-  EE: EvaluationEngineTrait<Bn256EngineZKPedersen>,
+  EE: EvaluationEngineTrait<E>,
+  <E as Engine>::CE: ZKCommitmentEngineTrait<E>,
 {
-  sc_proof_outer: ZKSumcheckProof,
+  sc_proof_outer: ZKSumcheckProof<E>,
   claims_outer: (
-    CompressedCommitment<Bn256EngineZKPedersen>,
-    CompressedCommitment<Bn256EngineZKPedersen>,
-    CompressedCommitment<Bn256EngineZKPedersen>,
-    CompressedCommitment<Bn256EngineZKPedersen>,
+    CompressedCommitment<E>,
+    CompressedCommitment<E>,
+    CompressedCommitment<E>,
+    CompressedCommitment<E>,
   ),
-  sc_proof_inner: ZKSumcheckProof,
-  pok_claims_inner: (KnowledgeProof, ProductProof),
-  proof_eq_sc_outer: EqualityProof,
-  proof_eq_sc_inner: EqualityProof,
+  sc_proof_inner: ZKSumcheckProof<E>,
+  pok_claims_inner: (KnowledgeProof<E>, ProductProof<E>),
+  proof_eq_sc_outer: EqualityProof<E>,
+  proof_eq_sc_inner: EqualityProof<E>,
   eval_arg: EE::EvaluationArgument,
 }
 
-impl<EE> RelaxedR1CSSNARKTrait<Bn256EngineZKPedersen> for RelaxedR1CSSNARK<EE>
+impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE> RelaxedR1CSSNARKTrait<E> for RelaxedR1CSSNARK<E, EE>
 where
-  EE: EvaluationEngineTrait<Bn256EngineZKPedersen>,
+  EE: EvaluationEngineTrait<E>,
+  <E as Engine>::CE: ZKCommitmentEngineTrait<E>,
+  <E as Engine>::GE: DlogGroup<ScalarExt = E::Scalar>,
+  <E as Engine>::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>,
+  // <E::CE as CommitmentEngineTrait<E>>::Commitment: Sub<Output = <<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment>, 
+  // <<<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment as Sub>::Output as Mul<<E as Engine>::Scalar>>::Output: Add<<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment> 
+  <E::CE as CommitmentEngineTrait<E>>::Commitment: Add<Output = <<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment>, 
+  <E::CE as CommitmentEngineTrait<E>>::Commitment: Sub<Output = <<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment>, 
+  // <E::CE as CommitmentEngineTrait<E>>::Commitment: Mul<<E as Engine>::Scalar, Output = <<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment>, 
+  <<<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment as Sub>::Output as Mul<<E as Engine>::Scalar>>::Output: Add<<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment> 
 {
-  type ProverKey = ProverKey<EE>;
-  type VerifierKey = VerifierKey<EE>;
+  type ProverKey = ProverKey<E, EE>;
+  type VerifierKey = VerifierKey<E, EE>;
 
   #[allow(dead_code)]
   fn setup(
-    ck: Arc<CommitmentKey<Bn256EngineZKPedersen>>,
-    S: &R1CSShape<Bn256EngineZKPedersen>,
+    ck: Arc<CommitmentKey<E>>,
+    S: &R1CSShape<E>,
   ) -> Result<(Self::ProverKey, Self::VerifierKey), crate::errors::NovaError> {
     let (pk_ee, vk_ee) = EE::setup(ck);
 
     let S = S.pad();
 
-    let vk: VerifierKey<EE> = VerifierKey::new(S, vk_ee);
+    let vk: VerifierKey<E, EE> = VerifierKey::new(S, vk_ee);
 
     let scalar_gen = EE::get_scalar_gen_pk(pk_ee.clone());
     let pk = ProverKey {
       pk_ee,
-      sumcheck_gens: SumcheckGens::new(b"gens_s", &scalar_gen),
+      sumcheck_gens: SumcheckGens::<E>::new(b"gens_s", &scalar_gen),
       vk_digest: vk.digest(),
     };
 
@@ -171,11 +181,11 @@ where
   /// produces a succinct proof of satisfiability of a RelaxedR1CS instance
   #[allow(dead_code)]
   fn prove(
-    ck: &CommitmentKey<Bn256EngineZKPedersen>,
+    ck: &CommitmentKey<E>,
     pk: &Self::ProverKey,
-    S: &R1CSShape<Bn256EngineZKPedersen>,
-    U: &RelaxedR1CSInstance<Bn256EngineZKPedersen>,
-    W: &ZKRelaxedR1CSWitness<Bn256EngineZKPedersen>,
+    S: &R1CSShape<E>,
+    U: &RelaxedR1CSInstance<E>,
+    W: &ZKRelaxedR1CSWitness<E>,
   ) -> Result<Self, NovaError>{
     
     // pad the R1CSShape
@@ -184,7 +194,7 @@ where
     assert!(S.is_regular_shape());
 
     let W = W.pad(&S); // pad the witness
-    let mut transcript = <Bn256EngineZKPedersen as Engine>::TE::new(b"RelaxedR1CSSNARK");
+    let mut transcript = <E as Engine>::TE::new(b"RelaxedR1CSSNARK");
 
     // append the digest of vk (which includes R1CS matrices) and the RelaxedR1CSInstance to the transcript
     transcript.absorb(b"vk", &pk.vk_digest);
@@ -210,7 +220,7 @@ where
       let (poly_Az, poly_Bz, poly_Cz) = S.multiply_vec(&z)?;
       let poly_uCz_E = (0..S.num_cons)
         .map(|i| U.u * poly_Cz[i] + W.E[i])
-        .collect::<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>>();
+        .collect::<Vec<<E as Engine>::Scalar>>();
       (
         MultilinearPolynomial::new(poly_Az),
         MultilinearPolynomial::new(poly_Bz),
@@ -220,16 +230,16 @@ where
     };
 
     let comb_func_outer =
-      |poly_A_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_B_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_C_comp: &<Bn256EngineZKPedersen as Engine>::Scalar,
-       poly_D_comp: &<Bn256EngineZKPedersen as Engine>::Scalar|
-       -> <Bn256EngineZKPedersen as Engine>::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - *poly_D_comp) };
+      |poly_A_comp: &<E as Engine>::Scalar,
+       poly_B_comp: &<E as Engine>::Scalar,
+       poly_C_comp: &<E as Engine>::Scalar,
+       poly_D_comp: &<E as Engine>::Scalar|
+       -> <E as Engine>::Scalar { *poly_A_comp * (*poly_B_comp * *poly_C_comp - *poly_D_comp) };
 
     let (sc_proof_outer, r_x, _claims_outer, blind_claim_post_outer) =
       ZKSumcheckProof::prove_cubic_with_additive_term(
-        &<Bn256EngineZKPedersen as Engine>::Scalar::ZERO, // claim is zero
-        &<Bn256EngineZKPedersen as Engine>::Scalar::ZERO, // blind for claim is also zero
+        &<E as Engine>::Scalar::ZERO, // claim is zero
+        &<E as Engine>::Scalar::ZERO, // blind for claim is also zero
         num_rounds_x,
         &mut poly_tau,
         &mut poly_Az,
@@ -251,14 +261,14 @@ where
       let Cz_claim = poly_Cz.evaluate(&r_x);
 
       let (Az_blind, Bz_blind, Cz_blind, prod_Az_Bz_blind) = (
-        <Bn256EngineZKPedersen as Engine>::Scalar::random(&mut OsRng),
-        <Bn256EngineZKPedersen as Engine>::Scalar::random(&mut OsRng),
-        <Bn256EngineZKPedersen as Engine>::Scalar::random(&mut OsRng),
-        <Bn256EngineZKPedersen as Engine>::Scalar::random(&mut OsRng),
+        <E as Engine>::Scalar::random(&mut OsRng),
+        <E as Engine>::Scalar::random(&mut OsRng),
+        <E as Engine>::Scalar::random(&mut OsRng),
+        <E as Engine>::Scalar::random(&mut OsRng),
       );
 
       let (pok_Cz_claim, comm_Cz_claim) = {
-        KnowledgeProof::prove(
+        KnowledgeProof::<E>::prove(
           &pk.sumcheck_gens.ck_1,
           &mut transcript,
           &Cz_claim,
@@ -268,7 +278,7 @@ where
 
       let (proof_prod, comm_Az_claim, comm_Bz_claim, comm_prod_Az_Bz_claims) = {
         let prod = *Az_claim * *Bz_claim;
-        ProductProof::prove(
+        ProductProof::<E>::prove(
           &pk.sumcheck_gens.ck_1,
           &mut transcript,
           Az_claim,
@@ -286,8 +296,8 @@ where
 
       // Evaluate E at r_x. We do this to compute blind and claim of outer sumcheck
       let eval_E = MultilinearPolynomial::new(W.E.clone()).evaluate(&r_x);
-      let blind_eval_E = <Bn256EngineZKPedersen as Engine>::Scalar::random(&mut OsRng);
-      let comm_eval_E = <Bn256EngineZKPedersen as Engine>::CE::zkcommit(
+      let blind_eval_E = <E as Engine>::Scalar::random(&mut OsRng);
+      let comm_eval_E = <E as Engine>::CE::zkcommit(
         &EE::get_scalar_gen_pk(pk.pk_ee.clone()),
         &[eval_E],
         &blind_eval_E,
@@ -299,7 +309,7 @@ where
         *taus_bound_rx * (prod_Az_Bz_blind - (U.u * Cz_blind + blind_eval_E));
       let claim_post_outer = *taus_bound_rx * (*Az_claim * *Bz_claim - (U.u * Cz_claim + eval_E));
 
-      let (proof_eq_sc_outer, _C1, _C2) = EqualityProof::prove(
+      let (proof_eq_sc_outer, _C1, _C2) = EqualityProof::<E>::prove(
         &pk.sumcheck_gens.ck_1,
         &mut transcript,
         &claim_post_outer,
@@ -310,7 +320,7 @@ where
 
 
       // Combine the three claims into a single claim
-      let r: <Bn256EngineZKPedersen as Engine>::Scalar = transcript.squeeze(b"r")?;
+      let r: <E as Engine>::Scalar = transcript.squeeze(b"r")?;
       let claim_inner_joint = *Az_claim + r * Bz_claim + r * r * Cz_claim;
       let blind_claim_inner_joint = Az_blind + r * Bz_blind + r * r * Cz_blind;
 
@@ -325,20 +335,20 @@ where
         (0..evals_A.len())
           .into_par_iter()
           .map(|i| evals_A[i] + r * evals_B[i] + r * r * evals_C[i])
-          .collect::<Vec<<Bn256EngineZKPedersen as Engine>::Scalar>>()
+          .collect::<Vec<<E as Engine>::Scalar>>()
       };
 
       let poly_z = {
-        z.resize(S.num_vars * 2, <Bn256EngineZKPedersen as Engine>::Scalar::ZERO);
+        z.resize(S.num_vars * 2, <E as Engine>::Scalar::ZERO);
         z
       };
 
-      let comb_func = |poly_A_comp: &<Bn256EngineZKPedersen as Engine>::Scalar, poly_B_comp: &<Bn256EngineZKPedersen as Engine>::Scalar| -> <Bn256EngineZKPedersen as Engine>::Scalar {
+      let comb_func = |poly_A_comp: &<E as Engine>::Scalar, poly_B_comp: &<E as Engine>::Scalar| -> <E as Engine>::Scalar {
         *poly_A_comp * *poly_B_comp
       };
 
       let (sc_proof_inner, r_y, claims_inner, blind_claim_postsc_inner) =
-        ZKSumcheckProof::prove_quad(
+        ZKSumcheckProof::<E>::prove_quad(
           &claim_inner_joint,
           &blind_claim_inner_joint,
           num_rounds_y,
@@ -351,8 +361,8 @@ where
         )?;
 
       let eval_W = MultilinearPolynomial::new(W.W.clone()).evaluate(&r_y[1..]);
-      let blind_eval_W = <Bn256EngineZKPedersen as Engine>::Scalar::random(&mut OsRng);
-      let comm_eval_W = <Bn256EngineZKPedersen as Engine>::CE::zkcommit(
+      let blind_eval_W = <E as Engine>::Scalar::random(&mut OsRng);
+      let comm_eval_W = <E as Engine>::CE::zkcommit(
         &EE::get_scalar_gen_pk(pk.pk_ee.clone()),
         &[eval_W],
         &blind_eval_W,
@@ -361,11 +371,11 @@ where
       transcript.absorb(b"comm_eval_W", &comm_eval_W);
 
       // prove the final step of inner sumcheck
-      let blind_eval_Z_at_ry = (<Bn256EngineZKPedersen as Engine>::Scalar::ONE - r_y[0]) * blind_eval_W;
+      let blind_eval_Z_at_ry = (<E as Engine>::Scalar::ONE - r_y[0]) * blind_eval_W;
       let blind_expected_claim_post_inner = claims_inner[1] * blind_eval_Z_at_ry;
       let claim_post_inner = claims_inner[0] * claims_inner[1];
 
-      let (proof_eq_sc_inner, _C1, _C2) = EqualityProof::prove(
+      let (proof_eq_sc_inner, _C1, _C2) = EqualityProof::<E>::prove(
         &EE::get_scalar_gen_pk(pk.pk_ee.clone()),
         &mut transcript,
         &claim_post_inner,
@@ -405,8 +415,8 @@ where
   }
 
   /// verifies a proof of satisfiability of a RelaxedR1CS instance
-  fn verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<Bn256EngineZKPedersen>) -> Result<(), NovaError> {
-    let mut transcript = <Bn256EngineZKPedersen as Engine>::TE::new(b"RelaxedR1CSSNARK");
+  fn verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<E>) -> Result<(), NovaError> {
+    let mut transcript = <E as Engine>::TE::new(b"RelaxedR1CSSNARK");
 
     // append the digest of vk (which includes R1CS matrices) and the RelaxedR1CSInstance to the transcript
     transcript.absorb(b"vk", &vk.digest());
@@ -424,7 +434,7 @@ where
 
     // outer sum-check
     let claim_outer_comm =
-        <Bn256EngineZKPedersen as Engine>::CE::zkcommit(&vk.sumcheck_gens.ck_1, &[<Bn256EngineZKPedersen as Engine>::Scalar::ZERO], &<Bn256EngineZKPedersen as Engine>::Scalar::ZERO).compress();
+        <E as Engine>::CE::zkcommit(&vk.sumcheck_gens.ck_1, &[<E as Engine>::Scalar::ZERO], &<E as Engine>::Scalar::ZERO).compress();
 
     let (comm_claim_post_outer, r_x) = self.sc_proof_outer.verify(
         &claim_outer_comm,
@@ -453,9 +463,9 @@ where
     transcript.absorb(b"comm_eval_E", &comm_eval_E);
 
     let taus_bound_rx = tau.evaluate(&r_x);
-    let comm_expected_claim_post_outer = ((Commitment::<Bn256EngineZKPedersen>::decompress(comm_prod_Az_Bz_claims)?
-        - (Commitment::<Bn256EngineZKPedersen>::decompress(comm_Cz_claim)? * U.u
-            + Commitment::<Bn256EngineZKPedersen>::decompress(&comm_eval_E)?))
+    let comm_expected_claim_post_outer = ((Commitment::<E>::decompress(comm_prod_Az_Bz_claims)?
+        - (Commitment::<E>::decompress(comm_Cz_claim)? * U.u
+            + Commitment::<E>::decompress(&comm_eval_E)?))
         * taus_bound_rx)
         .compress();
 
@@ -470,12 +480,12 @@ where
     // inner sum-check
 
     // derive three public challenges and then derive a joint claim
-    let r: <Bn256EngineZKPedersen as Engine>::Scalar = transcript.squeeze(b"r")?;
+    let r: <E as Engine>::Scalar = transcript.squeeze(b"r")?;
 
     // comm_Az_claim + r * comm_Bz_claim + r * r * comm_Cz_claim;
-    let comm_claim_inner = (Commitment::<Bn256EngineZKPedersen>::decompress(comm_Az_claim)?
-        + Commitment::<Bn256EngineZKPedersen>::decompress(comm_Bz_claim)? * r
-        + Commitment::<Bn256EngineZKPedersen>::decompress(comm_Cz_claim)? * r * r)
+    let comm_claim_inner = (Commitment::<E>::decompress(comm_Az_claim)?
+        + Commitment::<E>::decompress(comm_Bz_claim)? * r
+        + Commitment::<E>::decompress(comm_Cz_claim)? * r * r)
         .compress();
 
     // verify the joint claim with a sum-check protocol
@@ -494,44 +504,44 @@ where
     
     // verify claim_inner_final
     let comm_eval_Z = {
-        let eval_X = {
+        let eval_X: E::Scalar = {
             // constant term
             let mut poly_X = vec![(0, U.u)];
             //remaining inputs
             poly_X.extend(
                 (0..U.X.len())
                     .map(|i| (i + 1, U.X[i]))
-                    .collect::<Vec<(usize, <Bn256EngineZKPedersen as Engine>::Scalar)>>(),
+                    .collect::<Vec<(usize, <E as Engine>::Scalar)>>(),
             );
             SparsePolynomial::new_zk((vk.S.num_vars as f64).log2() as usize, poly_X.iter().map(|(_, x)| *x).collect())
             .evaluate(&r_y[1..])
         };
 
 
-        Commitment::<Bn256EngineZKPedersen>::decompress(&comm_eval_W)? * (<Bn256EngineZKPedersen as Engine>::Scalar::ONE - r_y[0])
-            + <Bn256EngineZKPedersen as Engine>::CE::zkcommit(
+        Commitment::<E>::decompress(&comm_eval_W)? * (<E as Engine>::Scalar::ONE - r_y[0])
+            + <E as Engine>::CE::zkcommit(
                 &EE::get_scalar_gen_vk(vk.vk_ee.clone()),
                 &[eval_X],
-                &<Bn256EngineZKPedersen as Engine>::Scalar::ZERO,
+                &<E as Engine>::Scalar::ZERO,
             ) * r_y[0]
     };
 
     
     // perform the final check in the second sum-check protocol
 
-    let evaluate_as_sparse_polynomial = |S: &R1CSShape<Bn256EngineZKPedersen>,
-                                        r_x: &[<Bn256EngineZKPedersen as Engine>::Scalar],
-                                        r_y: &[<Bn256EngineZKPedersen as Engine>::Scalar]|
-    -> (<Bn256EngineZKPedersen as Engine>::Scalar, <Bn256EngineZKPedersen as Engine>::Scalar, <Bn256EngineZKPedersen as Engine>::Scalar) {
+    let evaluate_as_sparse_polynomial = |S: &R1CSShape<E>,
+                                        r_x: &[<E as Engine>::Scalar],
+                                        r_y: &[<E as Engine>::Scalar]|
+    -> (<E as Engine>::Scalar, <E as Engine>::Scalar, <E as Engine>::Scalar) {
         let evaluate_with_table =
-            |M: &SparseMatrix<<Bn256EngineZKPedersen as Engine>::Scalar>, T_x: &[<Bn256EngineZKPedersen as Engine>::Scalar], T_y: &[<Bn256EngineZKPedersen as Engine>::Scalar]| -> <Bn256EngineZKPedersen as Engine>::Scalar {
+            |M: &SparseMatrix<<E as Engine>::Scalar>, T_x: &[<E as Engine>::Scalar], T_y: &[<E as Engine>::Scalar]| -> <E as Engine>::Scalar {
                 M.indptr
                     .par_windows(2)
                     .enumerate()
                     .map(|(row_idx, ptrs)| {
                         M.get_row_unchecked(ptrs.try_into().unwrap())
                             .map(|(val, col_idx)| T_x[row_idx] * T_y[*col_idx] * val)
-                            .sum::<<Bn256EngineZKPedersen as Engine>::Scalar>()
+                            .sum::<<E as Engine>::Scalar>()
                     })
                     .sum()
             };
@@ -562,7 +572,7 @@ where
         &vk.vk_ee,
         &mut transcript,
         &[U.comm_E, U.comm_W],
-        &[r_x, r_y[1..].to_vec()],
+        &[r_x.to_vec(), r_y[1..].to_vec()],
         &self.eval_arg,
     )?;
 
