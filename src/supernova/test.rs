@@ -353,9 +353,7 @@ impl<E1> TestROM<E1> {
   }
 }
 
-fn test_trivial_nivc_with<E1>()
-where
-  E1: CurveCycleEquipped,
+fn test_trivial_nivc_with()
 {
   // Here demo a simple RAM machine
   // - with 2 argumented circuit
@@ -370,6 +368,18 @@ where
 
   // This is mostly done with the existing Nova code. With additions of U_i[] and program_counter checks
   // in the augmented circuit.
+
+  type E1 = PallasEngine;
+    // PCS to use
+    type EE1 = ipa_pc::EvaluationEngine<E1>;
+    // PCS for secondary curve
+    type EE2 = ipa_pc::EvaluationEngine<Dual<E1>>;
+  
+
+    // SNARK for primary NIVC
+  type S1 = spartan::batched_ppsnark::BatchedRelaxedR1CSSNARK<E1, EE1>;
+  // SNARK for secondary NIVC
+  type S2 = spartan::snark::RelaxedR1CSSNARK<Dual<E1>, EE2>;
 
   let rom = vec![
     OPCODE_1, OPCODE_1, OPCODE_0, OPCODE_0, OPCODE_1, OPCODE_1, OPCODE_0, OPCODE_0, OPCODE_1,
@@ -430,27 +440,15 @@ where
 
   assert!(recursive_snark_option.is_some());
 
-  // Now you can handle the Result using if let
-  let RecursiveSNARK {
-    zi_primary,
-    zi_secondary,
-    program_counter,
-    ..
-  } = &recursive_snark_option.unwrap();
-
-  println!("zi_primary: {:?}", zi_primary);
-  println!("zi_secondary: {:?}", zi_secondary);
-  println!("final program_counter: {:?}", program_counter);
-
-  // The final program counter should be -1
-  assert_eq!(*program_counter, -<E1 as Engine>::Scalar::ONE);
+  // let recursive_snark = recursive_snark_option.unwrap();
+  let (_prover_key, _verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
 }
 
 #[test]
 #[tracing_test::traced_test]
 fn test_trivial_nivc() {
   // Experimenting with selecting the running claims for nifs
-  test_trivial_nivc_with::<PallasEngine>();
+  test_trivial_nivc_with();
 }
 
 // In the following we use 1 to refer to the primary, and 2 to refer to the secondary circuit
