@@ -18,6 +18,11 @@ use crate::{
   },
   Commitment, CommitmentKey, R1CSWithArity,
 };
+use crate::r1cs::ZKRelaxedR1CSWitness;
+use crate::r1cs::ZKR1CSWitness;
+use crate::bellpepper::r1cs::ZKNovaWitness;
+use crate::traits;
+use crate::traits::commitment::ZKCommitmentEngineTrait;
 
 #[cfg(feature = "abomonate")]
 use abomonation::Abomonation;
@@ -1204,7 +1209,663 @@ fn num_ro_inputs(num_circuits: usize, num_limbs: usize, arity: usize, is_primary
 
 pub mod error;
 pub mod snark;
+pub mod zksnark;
+
 mod utils;
 
 #[cfg(test)]
 mod test;
+
+
+
+/// A SNARK that proves the correct execution of an non-uniform incremental computation
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct ZKRecursiveSNARK<E1>
+where
+  E1: CurveCycleEquipped,
+{
+  // Cached digest of the public parameters
+  pp_digest: E1::Scalar,
+  num_augmented_circuits: usize,
+
+  // Number of iterations performed up to now
+  i: usize,
+
+  // Inputs and outputs of the primary circuits
+  z0_primary: Vec<E1::Scalar>,
+  zi_primary: Vec<E1::Scalar>,
+
+  // Proven circuit index, and current program counter
+  proven_circuit_index: usize,
+  program_counter: E1::Scalar,
+
+  /// Buffer for memory needed by the primary fold-step
+  buffer_primary: ResourceBuffer<E1>,
+  /// Buffer for memory needed by the secondary fold-step
+  buffer_secondary: ResourceBuffer<Dual<E1>>,
+
+  // Relaxed instances for the primary circuits
+  // Entries are `None` if the circuit has not been executed yet
+  r_W_primary: Vec<Option<ZKRelaxedR1CSWitness<E1>>>,
+  r_U_primary: Vec<Option<RelaxedR1CSInstance<E1>>>,
+
+  // Inputs and outputs of the secondary circuit
+  z0_secondary: Vec<<Dual<E1> as Engine>::Scalar>,
+  zi_secondary: Vec<<Dual<E1> as Engine>::Scalar>,
+  // Relaxed instance for the secondary circuit
+  r_W_secondary: ZKRelaxedR1CSWitness<Dual<E1>>,
+  r_U_secondary: RelaxedR1CSInstance<Dual<E1>>,
+  // Proof for the secondary circuit to be accumulated into r_secondary in the next iteration
+  l_w_secondary: ZKR1CSWitness<Dual<E1>>,
+  l_u_secondary: R1CSInstance<Dual<E1>>,
+}
+
+impl<E1> ZKRecursiveSNARK<E1>
+where
+  E1: CurveCycleEquipped,
+  <E1 as traits::Engine>::CE: ZKCommitmentEngineTrait<E1>,
+  <<E1 as CurveCycleEquipped>::Secondary as traits::Engine>::CE: ZKCommitmentEngineTrait<<E1 as CurveCycleEquipped>::Secondary>,
+{
+  /// iterate base step to get new instance of recursive SNARK
+  #[allow(clippy::too_many_arguments)]
+  pub fn new<C0: NonUniformCircuit<E1>>(
+    pp: &PublicParams<E1>,
+    non_uniform_circuit: &C0,
+    c_primary: &C0::C1,
+    c_secondary: &C0::C2,
+    z0_primary: &[E1::Scalar],
+    z0_secondary: &[<Dual<E1> as Engine>::Scalar],
+  ) -> Result<Self, SuperNovaError> {
+    let num_augmented_circuits = non_uniform_circuit.num_circuits();
+    let circuit_index = non_uniform_circuit.initial_circuit_index();
+
+    let r1cs_secondary = &pp.circuit_shape_secondary.r1cs_shape;
+
+    // check the length of the secondary initial input
+    if z0_secondary.len() != pp.circuit_shape_secondary.F_arity {
+      return Err(SuperNovaError::NovaError(
+        NovaError::InvalidStepOutputLength,
+      ));
+    }
+
+    // check the arity of all the primary circuits match the initial input length
+    pp.circuit_shapes.iter().try_for_each(|circuit| {
+      if circuit.F_arity != z0_primary.len() {
+        return Err(SuperNovaError::NovaError(
+          NovaError::InvalidStepOutputLength,
+        ));
+      }
+      Ok(())
+    })?;
+
+    // base case for the primary
+    let mut cs_primary = SatisfyingAssignment::<E1>::new();
+    let program_counter = E1::Scalar::from(circuit_index as u64);
+    let inputs_primary: SuperNovaAugmentedCircuitInputs<'_, Dual<E1>> =
+      SuperNovaAugmentedCircuitInputs::new(
+        scalar_as_base::<E1>(pp.digest()),
+        E1::Scalar::ZERO,
+        z0_primary,
+        None,                  // zi = None for basecase
+        None,                  // U = [None], since no previous proofs have been computed
+        None,                  // u = None since we are not verifying a secondary circuit
+        None,                  // T = None since there is not proof to fold
+        Some(program_counter), // pc = initial_program_counter for primary circuit
+        E1::Scalar::ZERO,      // u_index is always zero for the primary circuit
+      );
+
+    let circuit_primary: SuperNovaAugmentedCircuit<'_, Dual<E1>, C0::C1> =
+      SuperNovaAugmentedCircuit::new(
+        &pp.augmented_circuit_params_primary,
+        Some(inputs_primary),
+        c_primary,
+        pp.ro_consts_circuit_primary.clone(),
+        num_augmented_circuits,
+      );
+
+    let (zi_primary_pc_next, zi_primary) =
+      circuit_primary.synthesize(&mut cs_primary).map_err(|err| {
+        debug!("err {:?}", err);
+        NovaError::from(err)
+      })?;
+    if zi_primary.len() != pp[circuit_index].F_arity {
+      return Err(SuperNovaError::NovaError(
+        NovaError::InvalidStepOutputLength,
+      ));
+    }
+    let (u_primary, w_primary) = cs_primary
+      .r1cs_instance_and_zkwitness(&pp[circuit_index].r1cs_shape, &pp.ck_primary)
+      .map_err(|err| {
+        debug!("err {:?}", err);
+        err
+      })?;
+
+    // base case for the secondary
+    let mut cs_secondary = SatisfyingAssignment::<Dual<E1>>::new();
+    let u_primary_index = <Dual<E1> as Engine>::Scalar::from(circuit_index as u64);
+    let inputs_secondary: SuperNovaAugmentedCircuitInputs<'_, E1> =
+      SuperNovaAugmentedCircuitInputs::new(
+        pp.digest(),
+        <Dual<E1> as Engine>::Scalar::ZERO,
+        z0_secondary,
+        None,             // zi = None for basecase
+        None,             // U = Empty list of accumulators for the primary circuits
+        Some(&u_primary), // Proof for first iteration of current primary circuit
+        None,             // T = None, since we just copy u_primary rather than fold it
+        None,             // program_counter is always None for secondary circuit
+        u_primary_index,  // index of the circuit proof u_primary
+      );
+
+    let circuit_secondary: SuperNovaAugmentedCircuit<'_, E1, C0::C2> =
+      SuperNovaAugmentedCircuit::new(
+        &pp.augmented_circuit_params_secondary,
+        Some(inputs_secondary),
+        c_secondary,
+        pp.ro_consts_circuit_secondary.clone(),
+        num_augmented_circuits,
+      );
+    let (_, zi_secondary) = circuit_secondary
+      .synthesize(&mut cs_secondary)
+      .map_err(NovaError::from)?;
+    if zi_secondary.len() != pp.circuit_shape_secondary.F_arity {
+      return Err(NovaError::InvalidStepOutputLength.into());
+    }
+    let (u_secondary, w_secondary) = cs_secondary
+      .r1cs_instance_and_zkwitness(r1cs_secondary, &pp.ck_secondary)
+      .map_err(|_| SuperNovaError::NovaError(NovaError::UnSat))?;
+
+    // IVC proof for the primary circuit
+    let l_w_primary = w_primary;
+    let l_u_primary = u_primary;
+    let r_W_primary =
+      ZKRelaxedR1CSWitness::from_r1cs_witness(&pp[circuit_index].r1cs_shape, l_w_primary);
+
+    let r_U_primary = RelaxedR1CSInstance::from_r1cs_instance(
+      &*pp.ck_primary,
+      &pp[circuit_index].r1cs_shape,
+      l_u_primary,
+    );
+
+    // IVC proof of the secondary circuit
+    let l_w_secondary = w_secondary;
+    let l_u_secondary = u_secondary;
+
+    // Initialize relaxed instance/witness pair for the secondary circuit proofs
+    let r_W_secondary = ZKRelaxedR1CSWitness::<Dual<E1>>::default(r1cs_secondary);
+    let r_U_secondary = RelaxedR1CSInstance::default(&*pp.ck_secondary, r1cs_secondary);
+
+    // Outputs of the two circuits and next program counter thus far.
+    let zi_primary = zi_primary
+      .iter()
+      .map(|v| {
+        v.get_value()
+          .ok_or(NovaError::from(SynthesisError::AssignmentMissing).into())
+      })
+      .collect::<Result<Vec<<E1 as Engine>::Scalar>, SuperNovaError>>()?;
+    let zi_primary_pc_next = zi_primary_pc_next
+      .expect("zi_primary_pc_next missing")
+      .get_value()
+      .ok_or::<SuperNovaError>(NovaError::from(SynthesisError::AssignmentMissing).into())?;
+    let zi_secondary = zi_secondary
+      .iter()
+      .map(|v| {
+        v.get_value()
+          .ok_or(NovaError::from(SynthesisError::AssignmentMissing).into())
+      })
+      .collect::<Result<Vec<<Dual<E1> as Engine>::Scalar>, SuperNovaError>>()?;
+
+    // handle the base case by initialize U_next in next round
+    let r_W_primary_initial_list = (0..num_augmented_circuits)
+      .map(|i| (i == circuit_index).then(|| r_W_primary.clone()))
+      .collect::<Vec<Option<ZKRelaxedR1CSWitness<E1>>>>();
+
+    let r_U_primary_initial_list = (0..num_augmented_circuits)
+      .map(|i| (i == circuit_index).then(|| r_U_primary.clone()))
+      .collect::<Vec<Option<RelaxedR1CSInstance<E1>>>>();
+
+    // find the largest length r1cs shape for the buffer size
+    let max_num_cons = pp
+      .circuit_shapes
+      .iter()
+      .map(|circuit| circuit.r1cs_shape.num_cons)
+      .max()
+      .unwrap();
+
+    let buffer_primary = ResourceBuffer {
+      l_w: None,
+      l_u: None,
+      ABC_Z_1: R1CSResult::default(max_num_cons),
+      ABC_Z_2: R1CSResult::default(max_num_cons),
+      T: r1cs::default_T::<E1>(max_num_cons),
+    };
+
+    let buffer_secondary = ResourceBuffer {
+      l_w: None,
+      l_u: None,
+      ABC_Z_1: R1CSResult::default(r1cs_secondary.num_cons),
+      ABC_Z_2: R1CSResult::default(r1cs_secondary.num_cons),
+      T: r1cs::default_T::<Dual<E1>>(r1cs_secondary.num_cons),
+    };
+
+    Ok(Self {
+      pp_digest: pp.digest(),
+      num_augmented_circuits,
+      i: 0_usize, // after base case, next iteration start from 1
+      z0_primary: z0_primary.to_vec(),
+      zi_primary,
+
+      proven_circuit_index: circuit_index,
+      program_counter: zi_primary_pc_next,
+
+      buffer_primary,
+      buffer_secondary,
+
+      r_W_primary: r_W_primary_initial_list,
+      r_U_primary: r_U_primary_initial_list,
+      z0_secondary: z0_secondary.to_vec(),
+      zi_secondary,
+      r_W_secondary,
+      r_U_secondary,
+      l_w_secondary,
+      l_u_secondary,
+    })
+  }
+
+  /// Inputs of the primary circuits
+  pub fn z0_primary(&self) -> &Vec<E1::Scalar> {
+    &self.z0_primary
+  }
+
+  /// Outputs of the primary circuits
+  pub fn zi_primary(&self) -> &Vec<E1::Scalar> {
+    &self.zi_primary
+  }
+
+  /// executing a step of the incremental computation
+  #[allow(clippy::too_many_arguments)]
+  #[tracing::instrument(skip_all, name = "supernova::RecursiveSNARK::prove_step")]
+  pub fn prove_step<C1: StepCircuit<E1::Scalar>, C2: StepCircuit<<Dual<E1> as Engine>::Scalar>>(
+    &mut self,
+    pp: &PublicParams<E1>,
+    c_primary: &C1,
+    c_secondary: &C2,
+  ) -> Result<(), SuperNovaError> {
+    // First step was already done in the constructor
+    if self.i == 0 {
+      self.i = 1;
+      return Ok(());
+    }
+
+    // save the inputs before proceeding to the `i+1`th step
+    let r_U_primary_i = self.r_U_primary.clone();
+    // Create single-entry accumulator list for the secondary circuit to hand to SuperNovaAugmentedCircuitInputs
+    let r_U_secondary_i = vec![Some(self.r_U_secondary.clone())];
+    let l_u_secondary_i = self.l_u_secondary.clone();
+
+    let circuit_index = c_primary.circuit_index();
+    assert_eq!(self.program_counter, E1::Scalar::from(circuit_index as u64));
+
+    // fold the secondary circuit's instance
+    let (nifs_secondary, _) =  crate::zknifs::NIFS::prove_mut(
+      &*pp.ck_secondary,
+      &pp.ro_consts_secondary,
+      &scalar_as_base::<E1>(self.pp_digest),
+      &pp.circuit_shape_secondary.r1cs_shape,
+      &mut self.r_U_secondary,
+      &mut self.r_W_secondary,
+      &self.l_u_secondary,
+      &self.l_w_secondary,
+      &mut self.buffer_secondary.T,
+      &mut self.buffer_secondary.ABC_Z_1,
+      &mut self.buffer_secondary.ABC_Z_2,
+    )
+    .map_err(SuperNovaError::NovaError)?;
+
+    let mut cs_primary = SatisfyingAssignment::<E1>::with_capacity(
+      pp[circuit_index].r1cs_shape.num_io + 1,
+      pp[circuit_index].r1cs_shape.num_vars,
+    );
+    let T = Commitment::<Dual<E1>>::decompress(&nifs_secondary.comm_T)
+      .map_err(SuperNovaError::NovaError)?;
+    let inputs_primary: SuperNovaAugmentedCircuitInputs<'_, Dual<E1>> =
+      SuperNovaAugmentedCircuitInputs::new(
+        scalar_as_base::<E1>(self.pp_digest),
+        E1::Scalar::from(self.i as u64),
+        &self.z0_primary,
+        Some(&self.zi_primary),
+        Some(&r_U_secondary_i),
+        Some(&l_u_secondary_i),
+        Some(&T),
+        Some(self.program_counter),
+        E1::Scalar::ZERO,
+      );
+
+    let circuit_primary: SuperNovaAugmentedCircuit<'_, Dual<E1>, C1> =
+      SuperNovaAugmentedCircuit::new(
+        &pp.augmented_circuit_params_primary,
+        Some(inputs_primary),
+        c_primary,
+        pp.ro_consts_circuit_primary.clone(),
+        self.num_augmented_circuits,
+      );
+
+    let (zi_primary_pc_next, zi_primary) = circuit_primary
+      .synthesize(&mut cs_primary)
+      .map_err(NovaError::from)?;
+    if zi_primary.len() != pp[circuit_index].F_arity {
+      return Err(SuperNovaError::NovaError(
+        NovaError::InvalidInitialInputLength,
+      ));
+    }
+
+    let (l_u_primary, l_w_primary) = cs_primary
+      .r1cs_instance_and_zkwitness(&pp[circuit_index].r1cs_shape, &pp.ck_primary)
+      .map_err(SuperNovaError::NovaError)?;
+
+    let (r_U_primary, r_W_primary) = if let (Some(Some(r_U_primary)), Some(Some(r_W_primary))) = (
+      self.r_U_primary.get_mut(circuit_index),
+      self.r_W_primary.get_mut(circuit_index),
+    ) {
+      (r_U_primary, r_W_primary)
+    } else {
+      self.r_U_primary[circuit_index] = Some(RelaxedR1CSInstance::default(
+        &*pp.ck_primary,
+        &pp[circuit_index].r1cs_shape,
+      ));
+      self.r_W_primary[circuit_index] =
+        Some(ZKRelaxedR1CSWitness::default(&pp[circuit_index].r1cs_shape));
+      (
+        self.r_U_primary[circuit_index].as_mut().unwrap(),
+        self.r_W_primary[circuit_index].as_mut().unwrap(),
+      )
+    };
+
+    let (nifs_primary, _) = crate::zknifs::NIFS::prove_mut(
+      &*pp.ck_primary,
+      &pp.ro_consts_primary,
+      &self.pp_digest,
+      &pp[circuit_index].r1cs_shape,
+      r_U_primary,
+      r_W_primary,
+      &l_u_primary,
+      &l_w_primary,
+      &mut self.buffer_primary.T,
+      &mut self.buffer_primary.ABC_Z_1,
+      &mut self.buffer_primary.ABC_Z_2,
+    )
+    .map_err(SuperNovaError::NovaError)?;
+
+    let mut cs_secondary = SatisfyingAssignment::<Dual<E1>>::with_capacity(
+      pp.circuit_shape_secondary.r1cs_shape.num_io + 1,
+      pp.circuit_shape_secondary.r1cs_shape.num_vars,
+    );
+    let binding =
+      Commitment::<E1>::decompress(&nifs_primary.comm_T).map_err(SuperNovaError::NovaError)?;
+    let inputs_secondary: SuperNovaAugmentedCircuitInputs<'_, E1> =
+      SuperNovaAugmentedCircuitInputs::new(
+        self.pp_digest,
+        <Dual<E1> as Engine>::Scalar::from(self.i as u64),
+        &self.z0_secondary,
+        Some(&self.zi_secondary),
+        Some(&r_U_primary_i),
+        Some(&l_u_primary),
+        Some(&binding),
+        None, // pc is always None for secondary circuit
+        <Dual<E1> as Engine>::Scalar::from(circuit_index as u64),
+      );
+
+    let circuit_secondary: SuperNovaAugmentedCircuit<'_, E1, C2> = SuperNovaAugmentedCircuit::new(
+      &pp.augmented_circuit_params_secondary,
+      Some(inputs_secondary),
+      c_secondary,
+      pp.ro_consts_circuit_secondary.clone(),
+      self.num_augmented_circuits,
+    );
+    let (_, zi_secondary) = circuit_secondary
+      .synthesize(&mut cs_secondary)
+      .map_err(NovaError::from)?;
+    if zi_secondary.len() != pp.circuit_shape_secondary.F_arity {
+      return Err(SuperNovaError::NovaError(
+        NovaError::InvalidInitialInputLength,
+      ));
+    }
+
+    let (l_u_secondary_next, l_w_secondary_next) = cs_secondary
+      .r1cs_instance_and_zkwitness(&pp.circuit_shape_secondary.r1cs_shape, &pp.ck_secondary)?;
+
+    // update the running instances and witnesses
+    let zi_primary = zi_primary
+      .iter()
+      .map(|v| {
+        v.get_value()
+          .ok_or(NovaError::from(SynthesisError::AssignmentMissing).into())
+      })
+      .collect::<Result<Vec<<E1 as Engine>::Scalar>, SuperNovaError>>()?;
+    let zi_primary_pc_next = zi_primary_pc_next
+      .expect("zi_primary_pc_next missing")
+      .get_value()
+      .ok_or::<SuperNovaError>(NovaError::from(SynthesisError::AssignmentMissing).into())?;
+    let zi_secondary = zi_secondary
+      .iter()
+      .map(|v| {
+        v.get_value()
+          .ok_or(NovaError::from(SynthesisError::AssignmentMissing).into())
+      })
+      .collect::<Result<Vec<<Dual<E1> as Engine>::Scalar>, SuperNovaError>>()?;
+
+    if zi_primary.len() != pp[circuit_index].F_arity
+      || zi_secondary.len() != pp.circuit_shape_secondary.F_arity
+    {
+      return Err(SuperNovaError::NovaError(
+        NovaError::InvalidStepOutputLength,
+      ));
+    }
+
+    self.l_w_secondary = l_w_secondary_next;
+    self.l_u_secondary = l_u_secondary_next;
+    self.i += 1;
+    self.zi_primary = zi_primary;
+    self.zi_secondary = zi_secondary;
+    self.proven_circuit_index = circuit_index;
+    self.program_counter = zi_primary_pc_next;
+    Ok(())
+  }
+
+  /// verify recursive snark
+  pub fn verify(
+    &self,
+    pp: &PublicParams<E1>,
+    z0_primary: &[E1::Scalar],
+    z0_secondary: &[<Dual<E1> as Engine>::Scalar],
+  ) -> Result<(Vec<E1::Scalar>, Vec<<Dual<E1> as Engine>::Scalar>), SuperNovaError> {
+    // number of steps cannot be zero
+    if self.i == 0 {
+      debug!("must verify on valid RecursiveSNARK where i > 0");
+      return Err(SuperNovaError::NovaError(NovaError::ProofVerifyError));
+    }
+
+    // Check lengths of r_primary
+    if self.r_U_primary.len() != self.num_augmented_circuits
+      || self.r_W_primary.len() != self.num_augmented_circuits
+    {
+      debug!("r_primary length mismatch");
+      return Err(SuperNovaError::NovaError(NovaError::ProofVerifyError));
+    }
+
+    // Check that there are no missing instance/witness pairs
+    self
+      .r_U_primary
+      .iter()
+      .zip_eq(self.r_W_primary.iter())
+      .enumerate()
+      .try_for_each(|(i, (u, w))| match (u, w) {
+        (Some(_), Some(_)) | (None, None) => Ok(()),
+        _ => {
+          debug!("r_primary[{:?}]: mismatched instance/witness pair", i);
+          Err(SuperNovaError::NovaError(NovaError::ProofVerifyError))
+        }
+      })?;
+
+    let circuit_index = self.proven_circuit_index;
+
+    // check we have an instance/witness pair for the circuit_index
+    if self.r_U_primary[circuit_index].is_none() {
+      debug!(
+        "r_primary[{:?}]: instance/witness pair is missing",
+        circuit_index
+      );
+      return Err(SuperNovaError::NovaError(NovaError::ProofVerifyError));
+    }
+
+    // check the (relaxed) R1CS instances public outputs.
+    {
+      for (i, r_U_primary_i) in self.r_U_primary.iter().enumerate() {
+        if let Some(u) = r_U_primary_i {
+          if u.X.len() != 2 {
+            debug!(
+              "r_U_primary[{:?}] got instance length {:?} != 2",
+              i,
+              u.X.len(),
+            );
+            return Err(SuperNovaError::NovaError(NovaError::ProofVerifyError));
+          }
+        }
+      }
+
+      if self.l_u_secondary.X.len() != 2 {
+        debug!(
+          "l_U_secondary got instance length {:?} != 2",
+          self.l_u_secondary.X.len(),
+        );
+        return Err(SuperNovaError::NovaError(NovaError::ProofVerifyError));
+      }
+
+      if self.r_U_secondary.X.len() != 2 {
+        debug!(
+          "r_U_secondary got instance length {:?} != 2",
+          self.r_U_secondary.X.len(),
+        );
+        return Err(SuperNovaError::NovaError(NovaError::ProofVerifyError));
+      }
+    }
+
+    let hash_primary = {
+      let num_absorbs = num_ro_inputs(
+        self.num_augmented_circuits,
+        pp.augmented_circuit_params_primary.get_n_limbs(),
+        pp[circuit_index].F_arity,
+        true, // is_primary
+      );
+
+      let mut hasher = <Dual<E1> as Engine>::RO::new(pp.ro_consts_secondary.clone(), num_absorbs);
+      hasher.absorb(self.pp_digest);
+      hasher.absorb(E1::Scalar::from(self.i as u64));
+      hasher.absorb(self.program_counter);
+
+      for e in z0_primary {
+        hasher.absorb(*e);
+      }
+      for e in &self.zi_primary {
+        hasher.absorb(*e);
+      }
+
+      self.r_U_secondary.absorb_in_ro(&mut hasher);
+      hasher.squeeze(NUM_HASH_BITS)
+    };
+
+    let hash_secondary = {
+      let num_absorbs = num_ro_inputs(
+        self.num_augmented_circuits,
+        pp.augmented_circuit_params_secondary.get_n_limbs(),
+        pp.circuit_shape_secondary.F_arity,
+        false, // is_primary
+      );
+      let mut hasher = <E1 as Engine>::RO::new(pp.ro_consts_primary.clone(), num_absorbs);
+      hasher.absorb(scalar_as_base::<E1>(self.pp_digest));
+      hasher.absorb(<Dual<E1> as Engine>::Scalar::from(self.i as u64));
+
+      for e in z0_secondary {
+        hasher.absorb(*e);
+      }
+      for e in &self.zi_secondary {
+        hasher.absorb(*e);
+      }
+
+      self.r_U_primary.iter().enumerate().for_each(|(i, U)| {
+        U.as_ref()
+          .unwrap_or(&RelaxedR1CSInstance::default(
+            &*pp.ck_primary,
+            &pp[i].r1cs_shape,
+          ))
+          .absorb_in_ro(&mut hasher);
+      });
+      hasher.squeeze(NUM_HASH_BITS)
+    };
+
+    if hash_primary != self.l_u_secondary.X[0] {
+      debug!(
+        "hash_primary {:?} not equal l_u_secondary.X[0] {:?}",
+        hash_primary, self.l_u_secondary.X[0]
+      );
+      return Err(SuperNovaError::NovaError(NovaError::ProofVerifyError));
+    }
+    if hash_secondary != scalar_as_base::<Dual<E1>>(self.l_u_secondary.X[1]) {
+      debug!(
+        "hash_secondary {:?} not equal l_u_secondary.X[1] {:?}",
+        hash_secondary, self.l_u_secondary.X[1]
+      );
+      return Err(SuperNovaError::NovaError(NovaError::ProofVerifyError));
+    }
+
+    // check the satisfiability of all instance/witness pairs
+    let (res_r_primary, (res_r_secondary, res_l_secondary)) = rayon::join(
+      || {
+        self
+          .r_U_primary
+          .par_iter()
+          .zip_eq(self.r_W_primary.par_iter())
+          .enumerate()
+          .try_for_each(|(i, (u, w))| {
+            if let (Some(u), Some(w)) = (u, w) {
+              pp[i].r1cs_shape.is_sat_relaxed_zk(&pp.ck_primary, u, w)?
+            }
+            Ok(())
+          })
+      },
+      || {
+        rayon::join(
+          || {
+            pp.circuit_shape_secondary.r1cs_shape.is_sat_relaxed_zk(
+              &pp.ck_secondary,
+              &self.r_U_secondary,
+              &self.r_W_secondary,
+            )
+          },
+          || {
+            pp.circuit_shape_secondary.r1cs_shape.is_sat_zk(
+              &pp.ck_secondary,
+              &self.l_u_secondary,
+              &self.l_w_secondary,
+            )
+          },
+        )
+      },
+    );
+
+    res_r_primary.map_err(|err| match err {
+      NovaError::UnSatIndex(i) => SuperNovaError::UnSatIndex("r_primary", i),
+      e => SuperNovaError::NovaError(e),
+    })?;
+    res_r_secondary.map_err(|err| match err {
+      NovaError::UnSatIndex(i) => SuperNovaError::UnSatIndex("r_secondary", i),
+      e => SuperNovaError::NovaError(e),
+    })?;
+    res_l_secondary.map_err(|err| match err {
+      NovaError::UnSatIndex(i) => SuperNovaError::UnSatIndex("l_secondary", i),
+      e => SuperNovaError::NovaError(e),
+    })?;
+
+    Ok((self.zi_primary.clone(), self.zi_secondary.clone()))
+  }
+}
