@@ -27,11 +27,14 @@ use crate::{
   traits::{
     commitment::{CommitmentEngineTrait, CommitmentTrait, Len, ZKCommitmentEngineTrait},
     zkevaluation::EvaluationEngineTrait,
-    snark::{BatchedRelaxedR1CSSNARKTrait, DigestHelperTrait, RelaxedR1CSSNARKTrait},
+    zksnark::{BatchedRelaxedR1CSSNARKTrait, DigestHelperTrait, RelaxedR1CSSNARKTrait},
     Engine, TranscriptEngineTrait,
   },
   zip_with, zip_with_for_each, Commitment, CommitmentKey, CompressedCommitment,
 };
+use crate::r1cs::ZKRelaxedR1CSWitness;
+use crate::spartan::nizk::EqualityProof;
+use crate::spartan::nizk::DotProductProof;
 use crate::spartan::nizk::ProductProof;
 use core::ops::{Add, Sub, Mul};
 use crate::spartan::zksnark::SumcheckGens;
@@ -51,7 +54,12 @@ use super::zksumcheck::ZKSumcheckProof;
 use unzip_n::unzip_n;
 
 unzip_n!(pub 3);
+unzip_n!(pub 4);
 unzip_n!(pub 5);
+unzip_n!(pub 6);
+unzip_n!(pub 12);
+
+
 
 /// A type that represents the prover's key
 #[derive(Debug)]
@@ -76,7 +84,7 @@ pub struct VerifierKey<E: Engine, EE: EvaluationEngineTrait<E>>  {
 }
 impl<E: Engine, EE: EvaluationEngineTrait<E>> VerifierKey<E, EE>
 where 
-  <E as Engine>::CE: CommitmentEngineTrait<E>,
+  // <E as Engine>::CE: CommitmentEngineTrait<E>,
   <E as Engine>::GE: DlogGroup,
   <E as Engine>::CE: ZKCommitmentEngineTrait<E>,
 {
@@ -120,7 +128,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> DigestHelperTrait<E> for VerifierK
 #[serde(bound(
   deserialize = "E: Deserialize<'de>"
 ))]
-pub struct BatchedRelaxedR1CSSNARK<E: Engine + Serialize, EE: EvaluationEngineTrait<E>> {
+pub struct BatchedRelaxedR1CSSNARK<E: Engine + Serialize, EE: EvaluationEngineTrait<E>> where <E as Engine>::CE: ZKCommitmentEngineTrait<E> {
   // commitment to oracles: the first three are for Az, Bz, Cz,
   // and the last two are for memory reads
   comms_Az_Bz_Cz: Vec<[CompressedCommitment<E>; 3]>,
@@ -159,7 +167,22 @@ pub struct BatchedRelaxedR1CSSNARK<E: Engine + Serialize, EE: EvaluationEngineTr
   prods_comms_w_plus_r_inv_row_L_row: Vec<(ProductProof<E>, CompressedCommitment<E>)>,
   prods_comms_w_plus_r_inv_row_L_col: Vec<(ProductProof<E>, CompressedCommitment<E>)>,
   prods_comms_t_plus_r_inv_col_Z: Vec<(ProductProof<E>, CompressedCommitment<E>)>,
+  prods_comms_t_plus_r_inv_col_W: Vec<(ProductProof<E>, CompressedCommitment<E>)>,
 
+
+  comm_claim: CompressedCommitment<E>,
+
+  claim_zero: CompressedCommitment<E>,
+  claim_one: CompressedCommitment<E>,
+
+  comm_evals_Mz: Vec<CompressedCommitment<E>>,
+
+  comm_E_vec: Vec<CompressedCommitment<E>>,
+  comm_W_vec: Vec<CompressedCommitment<E>>,
+
+  comm_eval_last: CompressedCommitment<E>,
+
+  proof_eq_sc_inner: EqualityProof<E>,
 
   // a PCS evaluation argument
   eval_arg: EE::EvaluationArgument,
@@ -171,7 +194,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
   EE: EvaluationEngineTrait<E>,
   <E as Engine>::CE: ZKCommitmentEngineTrait<E>,
   <E as Engine>::GE: DlogGroup<ScalarExt = E::Scalar>,
-  E::CE: CommitmentEngineTrait<E>,
+  E::CE: ZKCommitmentEngineTrait<E>,
   E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>,
   <E::CE as CommitmentEngineTrait<E>>::Commitment: Add<Output = <<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment>, 
   <E::CE as CommitmentEngineTrait<E>>::Commitment: Sub<Output = <<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment>, 
@@ -229,7 +252,9 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
     pk: &Self::ProverKey,
     S: Vec<&R1CSShape<E>>,
     U: &[RelaxedR1CSInstance<E>],
-    W: &[RelaxedR1CSWitness<E>],
+    // W: &[ZKRelaxedR1CSWitness<E>],
+    W: &[ZKRelaxedR1CSWitness<E>],
+
   ) -> Result<Self, NovaError> {
     // Pad shapes so that num_vars = num_cons = Nᵢ and check the sizes are correct
     let S = S.par_iter().map(|s| s.pad()).collect::<Vec<_>>();
@@ -242,7 +267,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
     let num_instances = U.len();
 
     // Pad [(Wᵢ,Eᵢ)] to the next power of 2 (not to Ni)
-    let W = zip_with!(par_iter, (W, S), |w, s| w.pad(s)).collect::<Vec<RelaxedR1CSWitness<E>>>();
+    let W = zip_with!(par_iter, (W, S), |w, s| w.pad(s)).collect::<Vec<ZKRelaxedR1CSWitness<E>>>();
 
     // number of rounds of sum-check
     let num_rounds_sc = N_max.log_2();
@@ -267,7 +292,8 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
 
     // Move polys_W and polys_E, as well as U.u out of U
     let (comms_W_E, us): (Vec<_>, Vec<_>) = U.iter().map(|U| ([U.comm_W, U.comm_E], U.u)).unzip();
-    let (polys_W, polys_E): (Vec<_>, Vec<_>) = W.into_iter().map(|w| (w.W, w.E)).unzip();
+    let r_W_E: Vec<_>= W.iter().map(|W| [W.r_W, W.r_E]).collect();
+    let (polys_W, polys_E): (Vec<_>, Vec<_>) = W.clone().into_iter().map(|w| (w.W, w.E)).unzip();
 
     // Compute [Az, Bz, Cz]
     let mut polys_Az_Bz_Cz = zip_with!(par_iter, (polys_Z, S), |z, s| {
@@ -276,23 +302,26 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
     })
     .collect::<Result<Vec<_>, NovaError>>()?;
 
-    let blind_Az = <E as Engine>::Scalar::random(&mut OsRng);
-
-    let blind_Bz = <E as Engine>::Scalar::random(&mut OsRng);
-
-    let blind_Cz = <E as Engine>::Scalar::random(&mut OsRng);
 
     // Commit to [Az, Bz, Cz] and add to transcript
-    let comms_Az_Bz_Cz = polys_Az_Bz_Cz
+    let (comms_Az_Bz_Cz, blind_polys_Az_Bz_Cz): (Vec<_>, Vec<_>) = polys_Az_Bz_Cz
       .par_iter()
       .map(|[Az, Bz, Cz]| {
+        
+        let blind_Az = <E as Engine>::Scalar::random(&mut OsRng);
+
+        let blind_Bz = <E as Engine>::Scalar::random(&mut OsRng);
+
+        let blind_Cz = <E as Engine>::Scalar::random(&mut OsRng);
+
+
         let (comm_Az, (comm_Bz, comm_Cz)) = rayon::join(
           || E::CE::zkcommit(ck, Az, &blind_Az),
           || rayon::join(|| E::CE::zkcommit(ck, Bz, &blind_Bz), || E::CE::zkcommit(ck, Cz, &blind_Cz)),
         );
-        [comm_Az, comm_Bz, comm_Cz]
+        ([comm_Az, comm_Bz, comm_Cz], [blind_Az, blind_Bz, blind_Cz])
       })
-      .collect::<Vec<_>>();
+      .collect::<Vec<_>>().into_iter().unzip();
     comms_Az_Bz_Cz
       .iter()
       .for_each(|comms| transcript.absorb(b"c", &comms.as_slice()));
@@ -342,18 +371,21 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
     )
     .collect::<Vec<_>>();
 
-    let comm_evals_Az_Bz_Cz_at_tau =  evals_Az_Bz_Cz_at_tau.iter().map(|e| {
-      e.iter().map(|eval| {
+    let (comm_evals_Az_Bz_Cz_at_tau, blind_evals_Az_Bz_Cz_at_tau): (Vec<[CompressedCommitment<E>; 3]>, Vec<[E::Scalar; 3]>) =  evals_Az_Bz_Cz_at_tau.iter().map(|e| {
+      let (comms, blinds): (Vec<CompressedCommitment::<E>>, Vec<E::Scalar>) = e.iter().map(|eval| {
         let blind_eval = <E as Engine>::Scalar::random(&mut OsRng);
-        E::CE::zkcommit(ck, &[*eval], &blind_eval).compress()
-      }).collect::<Vec<_>>()
-      .try_into()
-      .unwrap()
-    }).collect::<Vec<_>>();
+        let comm_eval = E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*eval], &blind_eval).compress();
+        (comm_eval, blind_eval)
+      }).collect::<Vec<_>>().into_iter().unzip();
+
+      (comms.try_into()
+      .unwrap(), blinds.try_into()
+      .unwrap())
+    }).collect::<Vec<([CompressedCommitment<E>; 3], [E::Scalar; 3])>>().into_iter().unzip();
 
     // absorb the claimed evaluations into the transcript
     for evals in evals_Az_Bz_Cz_at_tau.iter() {
-      transcript.absorb(b"e", &evals.as_slice());
+      // transcript.absorb(b"e", &evals.as_slice());
     }
 
     // Pad Zᵢ, E to Nᵢ
@@ -377,6 +409,16 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
       })
       .collect::<Vec<_>>();
 
+    let (comm_E_vec, blind_polys_E): (Vec<_>, Vec<_>) = polys_E
+    .par_iter()
+    .map(|E| {
+      
+      let blind_E = <E as Engine>::Scalar::random(&mut OsRng);
+      let comm_E = E::CE::zkcommit(ck, E, &blind_E).compress();
+      (comm_E, blind_E)
+    })
+    .collect::<Vec<_>>().into_iter().unzip();
+
     let polys_W = polys_W
       .into_par_iter()
       .zip_eq(Nis.par_iter())
@@ -385,6 +427,17 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         poly_W
       })
       .collect::<Vec<_>>();
+
+    let (comm_W_vec, blind_polys_W): (Vec<_>, Vec<_>) = polys_W
+    .par_iter()
+    .map(|W| {
+      
+      let blind_W = <E as Engine>::Scalar::random(&mut OsRng);
+      let comm_W = E::CE::zkcommit(ck, W, &blind_W).compress();
+      (comm_W, blind_W)
+    })
+    .collect::<Vec<_>>().into_iter().unzip();
+
 
     // (2) send commitments to the following two oracles
     // L_row(i) = eq(tau, row(i)) for all i in [0..Nᵢ]
@@ -413,17 +466,19 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
     )
     .collect::<Vec<_>>();
 
-    let blind_L_row = <E as Engine>::Scalar::random(&mut OsRng);
-    let blind_L_col = <E as Engine>::Scalar::random(&mut OsRng);
 
-    let comms_L_row_col = polys_L_row_col
+
+    let (comms_L_row_col, blind_polys_L_row_col): (Vec<_>, Vec<_>) = polys_L_row_col
       .par_iter()
       .map(|[L_row, L_col]| {
+        let blind_L_row = <E as Engine>::Scalar::random(&mut OsRng);
+        let blind_L_col = <E as Engine>::Scalar::random(&mut OsRng);
+
         let (comm_L_row, comm_L_col) =
           rayon::join(|| E::CE::zkcommit(ck, L_row, &blind_L_row), || E::CE::zkcommit(ck, L_col, &blind_L_col));
-        [comm_L_row, comm_L_col]
+        ([comm_L_row, comm_L_col], [blind_L_row, blind_L_col])
       })
-      .collect::<Vec<_>>();
+      .collect::<Vec<_>>().into_iter().unzip();
 
     // absorb commitments to L_row and L_col in the transcript
     for comms in comms_L_row_col.iter() {
@@ -457,6 +512,22 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
     )
     .collect();
 
+    
+    let blind_evals_Mz: Vec<_> = zip_with!(
+      iter,
+      (comms_Az_Bz_Cz, blind_evals_Az_Bz_Cz_at_tau),
+      |comm_Az_Bz_Cz, blind_evals_Az_Bz_Cz_at_tau| {
+        let u = PolyEvalInstance::<E>::batch(
+          comm_Az_Bz_Cz.as_slice(),
+          vec![], // ignored by the function
+          blind_evals_Az_Bz_Cz_at_tau.as_slice(),
+          &c,
+        );
+        u.e
+      }
+    )
+    .collect();
+
     // we now need to prove three claims for each instance
     // (outer)
     //   0 = \sum_x poly_tau(x) * (poly_Az(x) * poly_Bz(x) - poly_uCz_E(x))
@@ -473,9 +544,10 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         polys_Mz.into_par_iter(),
         polys_tau.par_iter(),
         evals_Mz.par_iter(),
+        blind_evals_Mz.par_iter(),
         us.par_iter()
       ),
-      |poly_ABC, poly_E, poly_Mz, poly_tau, eval_Mz, u| {
+      |poly_ABC, poly_E, poly_Mz, poly_tau, eval_Mz, blind_evals_Mz, u| {
         let [poly_Az, poly_Bz, poly_Cz] = poly_ABC;
         let poly_uCz_E = zip_with!(par_iter, (poly_Cz, poly_E), |cz, e| *u * cz + e).collect();
         OuterSumcheckInstance::new(
@@ -485,6 +557,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
           poly_uCz_E,
           poly_Mz, // Mz = Az + c * Bz + c^2 * Cz
           eval_Mz, // eval_Az_at_tau + c * eval_Az_at_tau + c^2 * eval_Cz_at_tau
+          blind_evals_Mz,
         )
       }
     )
@@ -492,8 +565,8 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
 
     let inner_sc_inst = zip_with!(
       par_iter,
-      (pk.S_repr, evals_Mz, polys_L_row_col),
-      |s_repr, eval_Mz, poly_L| {
+      (pk.S_repr, evals_Mz, blind_evals_Mz, polys_L_row_col),
+      |s_repr, eval_Mz, blind_evals_Mz, poly_L| {
         let [poly_L_row, poly_L_col] = poly_L;
         let c_square = c.square();
         let val = zip_with!(
@@ -505,6 +578,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
 
         InnerSumcheckInstance::new(
           *eval_Mz,
+          *blind_evals_Mz,
           MultilinearPolynomial::new(poly_L_row.clone()),
           MultilinearPolynomial::new(poly_L_col.clone()),
           MultilinearPolynomial::new(val),
@@ -513,24 +587,83 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
     )
     .collect::<Vec<_>>();
 
+  
+    let tau_coords = all_taus;
+
+    // Compute eval_Mz = eval_Az_at_tau + c * eval_Bz_at_tau + c^2 * eval_Cz_at_tau
+    let evals_Mz: Vec<_> = zip_with!(
+      iter,
+      (comms_Az_Bz_Cz, evals_Az_Bz_Cz_at_tau),
+      |comm_Az_Bz_Cz, evals_Az_Bz_Cz_at_tau| {
+        let u = PolyEvalInstance::<E>::batch(
+          comm_Az_Bz_Cz.as_slice(),
+          tau_coords.clone(),
+          evals_Az_Bz_Cz_at_tau.as_slice(),
+          &c,
+        );
+        u.e
+      }
+    )
+    .collect();
+
+    let blind_evals_Mz: Vec<_> = zip_with!(
+      iter,
+      (comms_Az_Bz_Cz, blind_evals_Az_Bz_Cz_at_tau),
+      |comm_Az_Bz_Cz, blind_evals_Az_Bz_Cz_at_tau| {
+        let u = PolyEvalInstance::<E>::batch(
+          comm_Az_Bz_Cz.as_slice(),
+          tau_coords.clone(),
+          blind_evals_Az_Bz_Cz_at_tau.as_slice(),
+          &c,
+        );
+        u.e
+      }
+    )
+    .collect();
+
+    let num_claims_per_instance = 10;
+
+    let claims = evals_Mz
+    .iter()
+    .flat_map(|&eval_Mz| {
+      let mut claims = vec![E::Scalar::ZERO; num_claims_per_instance];
+      claims[7] = eval_Mz;
+      claims[8] = eval_Mz;
+      claims.into_iter()
+    })
+    .collect::<Vec<_>>();
+
+    let blind_claims = blind_evals_Mz
+    .iter()
+    .flat_map(|&blind_evals_Mz| {
+      let mut claims = vec![E::Scalar::ZERO; num_claims_per_instance];
+      claims[7] = blind_evals_Mz;
+      claims[8] = blind_evals_Mz;
+      claims.into_iter()
+    })
+    .collect::<Vec<_>>();
+
+    let gamma = transcript.squeeze(b"g")?;
+    let r = transcript.squeeze(b"r")?;
+
+    let rho = transcript.squeeze(b"r")?;
     // a third sum-check instance to prove the read-only memory claim
     // we now need to prove that L_row and L_col are well-formed
-    let (mem_sc_inst, comms_mem_oracles, _polys_mem_oracles) = {
-      let gamma = transcript.squeeze(b"g")?;
-      let r = transcript.squeeze(b"r")?;
+    let (mem_sc_inst, comms_mem_oracles, polys_mem_oracles, blind_polys_mem_oracles) = {
+ 
 
       // We start by computing oracles and auxiliary polynomials to help prove the claim
       // oracles correspond to [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col]
-      let (comms_mem_oracles, polys_mem_oracles, mem_aux) = pk
+      let (comms_mem_oracles, polys_mem_oracles, mem_aux, blind_polys_mem_oracles) = pk
         .S_repr
         .iter()
         .zip_eq(polys_tau.iter())
         .zip_eq(polys_Z.iter())
         .zip_eq(polys_L_row_col.iter())
         .try_fold(
-          (Vec::new(), Vec::new(), Vec::new()),
-          |(mut comms, mut polys, mut aux), (((s_repr, poly_tau), poly_Z), [L_row, L_col])| {
-            let (comm, poly, a) = MemorySumcheckInstance::<E>::compute_oracles(
+          (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+          |(mut comms, mut polys, mut aux, mut blinds_polys_mem_oracles), (((s_repr, poly_tau), poly_Z), [L_row, L_col])| {
+            let (comm, poly, a, blind_polys_mem_oracles) = MemorySumcheckInstance::<E>::compute_oracles(
               ck,
               &r,
               &gamma,
@@ -547,10 +680,45 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
             comms.push(comm);
             polys.push(poly);
             aux.push(a);
+            blinds_polys_mem_oracles.push(blind_polys_mem_oracles);
 
-            Ok::<_, NovaError>((comms, polys, aux))
+            Ok::<_, NovaError>((comms, polys, aux, blinds_polys_mem_oracles))
           },
         )?;
+
+        // let (_, blind_polys_mem_oracles): (Vec<_>, Vec<_>) = polys_mem_oracles
+        //   .par_iter()
+        //   .map(|[
+        //     t_plus_r_inv_row,
+        //     w_plus_r_inv_row,
+        //     t_plus_r_inv_col,
+        //     w_plus_r_inv_col,
+        //   ]| {
+            
+        //     let blind_t_plus_r_inv_row = <E as Engine>::Scalar::random(&mut OsRng);
+        //     let blind_w_plus_r_inv_row = <E as Engine>::Scalar::random(&mut OsRng);
+        //     let blind_t_plus_r_inv_col = <E as Engine>::Scalar::random(&mut OsRng);
+        //     let blind_w_plus_r_inv_col = <E as Engine>::Scalar::random(&mut OsRng);
+
+        //     let comm_t_plus_r_inv_row = E::CE::zkcommit(ck, t_plus_r_inv_row, &blind_t_plus_r_inv_row);
+        //     let comm_w_plus_r_inv_row = E::CE::zkcommit(ck, w_plus_r_inv_row, &blind_w_plus_r_inv_row);
+        //     let comm_t_plus_r_inv_col = E::CE::zkcommit(ck, t_plus_r_inv_col, &blind_t_plus_r_inv_col);
+        //     let comm_w_plus_r_inv_col = E::CE::zkcommit(ck, w_plus_r_inv_col, &blind_w_plus_r_inv_col);
+
+
+        //     ([
+        //       comm_t_plus_r_inv_row,
+        //       comm_w_plus_r_inv_row,
+        //       comm_t_plus_r_inv_col,
+        //       comm_w_plus_r_inv_col,
+        //     ], [
+        //       blind_t_plus_r_inv_row,
+        //       blind_w_plus_r_inv_row,
+        //       blind_t_plus_r_inv_col,
+        //       blind_w_plus_r_inv_col,
+        //     ])
+        //   })
+        //   .collect::<Vec<_>>().into_iter().unzip();
 
       // Commit to oracles
       for comms in comms_mem_oracles.iter() {
@@ -558,7 +726,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
       }
 
       // Sample new random variable for eq polynomial
-      let rho = transcript.squeeze(b"r")?;
+
       let all_rhos = PowPolynomial::squares(&rho, N_max.log_2());
 
       let instances = zip_with!(
@@ -579,7 +747,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         }
       )
       .collect::<Vec<_>>();
-      (instances, comms_mem_oracles, polys_mem_oracles)
+      (instances, comms_mem_oracles, polys_mem_oracles, blind_polys_mem_oracles)
     };
 
     let witness_sc_inst = zip_with!(par_iter, (polys_W, S), |poly_W, S| {
@@ -589,21 +757,44 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
 
     // Run batched Sumcheck for the 3 claims for all instances.
     // Note that the polynomials for claims relating to instance i have size Ni.
-    let (sc, rand_sc, claims_outer, claims_inner, claims_mem, claims_witness) = Self::prove_helper(
+    let (
+      sc, rand_sc, claims_outer, 
+      claims_inner, claims_mem, claims_witness, comm_claim, eval_last, comm_eval_last, 
+      blind_eval_last, s_powers, blind_claim_postsc_inner) = Self::prove_helper(
       ck,
       num_rounds_sc,
       mem_sc_inst,
       outer_sc_inst,
       inner_sc_inst,
       witness_sc_inst,
+      &pk.sumcheck_gens.ck_1,
+      &pk.sumcheck_gens.ck_4,
       &mut transcript,
     )?;
 
     // number of rounds of sum-check
-    let num_rounds = pk.S_comm.iter().map(|s| s.N.log_2()).collect::<Vec<_>>();
+    let num_rounds = pk.S_comm.iter().map(|s| s.N.log_2()).collect::<Vec<_>>().clone();
     let num_rounds_max = *num_rounds.iter().max().unwrap();
 
-    let (evals_Az_Bz_Cz_W_E, evals_L_row_col, evals_mem_oracle, evals_mem_preprocessed, comm_evals_Az_Bz_Cz_W_E, prod_comm_Az_Bz, comm_evals_L_row_col, prod_comm_L_row_L_col, comm_evals_mem_oracle, comm_evals_mem_preprocessed, _, prod_comm_L_row_L_col_val_A_B_C, comm_z_vec, prods_comms_w_plus_r_inv_row_blind_row, prods_comms_w_plus_r_inv_row_blind_col, prods_comms_w_plus_r_inv_row_L_row, prods_comms_w_plus_r_inv_row_L_col, prods_comms_t_plus_r_inv_col_Z) = {
+    let (
+      evals_Az_Bz_Cz_W_E, 
+      evals_L_row_col, 
+      evals_mem_oracle, 
+      evals_mem_preprocessed, comm_evals_Az_Bz_Cz_W_E, blind_evals_Az_Bz_Cz_W_E, prod_comm_Az_Bz, comm_evals_L_row_col, 
+      blind_evals_L_row_col, prod_comm_L_row_L_col, comm_evals_mem_oracle, blind_evals_mem_oracle, comm_evals_mem_preprocessed, 
+      blind_evals_mem_preprocessed, _, prod_comm_L_row_L_col_val_A_B_C, comm_z_vec, prods_comms_w_plus_r_inv_row_blind_row, 
+      prods_comms_w_plus_r_inv_row_blind_col, prods_comms_w_plus_r_inv_row_L_row, prods_comms_w_plus_r_inv_row_L_col, 
+      prods_comms_t_plus_r_inv_col_Z,
+      prods_comms_t_plus_r_inv_col_W,
+      blind_w_plus_r_inv_row_row,
+      blind_w_plus_r_inv_col_col,
+      blind_w_plus_r_inv_row_L_row,
+      blind_w_plus_r_inv_col_L_col,
+      blind_t_plus_r_inv_col_z,
+      blind_t_plus_r_inv_col_w,
+      blind_L_row_L_col_val_A_B_C,
+      blind_Az_Bz,
+    ) = {
       let evals_Az_Bz = claims_outer
         .into_iter()
         .map(|claims| [claims[0][0], claims[0][1]])
@@ -617,7 +808,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         })
         .collect::<Vec<_>>();
 
-        let (comm_evals_L_row_col, blinds_L_row_L_col, prod_comm_L_row_L_col): (Vec<_>, Vec<_>, Vec<_>) =  evals_L_row_col.iter().map(|[L_row, L_col]| {
+        let (comm_evals_L_row_col, blinds_L_row_L_col, blinds_prod_L_row_L_col, prod_comm_L_row_L_col): (Vec<_>, Vec<_>, Vec<_>, Vec<_>) =  evals_L_row_col.iter().map(|[L_row, L_col]| {
           let blind_L_row = <E as Engine>::Scalar::random(&mut OsRng);
           let blind_L_col = <E as Engine>::Scalar::random(&mut OsRng);
           let blind_prod_L_row_L_col = <E as Engine>::Scalar::random(&mut OsRng);
@@ -635,7 +826,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
               &blind_prod_L_row_L_col,
             )
           }.unwrap();
-          ([comm_L_row, comm_L_col], [blind_L_row, blind_L_col], (proof_prod_L_row_L_col, comm_prod_L_row_L_col))
+          ([comm_L_row, comm_L_col], [blind_L_row, blind_L_col], blind_prod_L_row_L_col, (proof_prod_L_row_L_col, comm_prod_L_row_L_col))
         }).collect::<Vec<_>>().into_iter().unzip_n_vec();
 
       let (evals_mem_oracle, evals_mem_ts): (Vec<_>, Vec<_>) = claims_mem
@@ -650,23 +841,30 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         })
         .unzip();
 
-        let (comm_evals_mem_oracle, blind_evals_mem_oracle): (Vec<_>, Vec<_>) =  evals_mem_oracle.iter().map(|e| {
+        let (comm_evals_mem_oracle, blind_evals_mem_oracle, _blind_polys_mem_oracles): (Vec<_>, Vec<_>, Vec<_>) =  evals_mem_oracle.iter().map(|e| {
           let [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col] = e;
 
           let blind_t_plus_r_inv_row = <E as Engine>::Scalar::random(&mut OsRng);
-          let comm_t_plus_r_inv_row = E::CE::zkcommit(ck, &[*t_plus_r_inv_row], &blind_t_plus_r_inv_row).compress();
+          let comm_t_plus_r_inv_row = E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*t_plus_r_inv_row], &blind_t_plus_r_inv_row).compress();
 
           let blind_w_plus_r_inv_row = <E as Engine>::Scalar::random(&mut OsRng);
-          let comm_w_plus_r_inv_row = E::CE::zkcommit(ck, &[*w_plus_r_inv_row], &blind_w_plus_r_inv_row).compress();
+          let comm_w_plus_r_inv_row = E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*w_plus_r_inv_row], &blind_w_plus_r_inv_row).compress();
 
           let blind_t_plus_r_inv_col = <E as Engine>::Scalar::random(&mut OsRng);
-          let comm_t_plus_r_inv_col = E::CE::zkcommit(ck, &[*t_plus_r_inv_col], &blind_t_plus_r_inv_col).compress();
+          let comm_t_plus_r_inv_col = E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*t_plus_r_inv_col], &blind_t_plus_r_inv_col).compress();
 
           let blind_w_plus_r_inv_col = <E as Engine>::Scalar::random(&mut OsRng);
-          let comm_w_plus_r_inv_col = E::CE::zkcommit(ck, &[*w_plus_r_inv_col], &blind_w_plus_r_inv_col).compress();
+          let comm_w_plus_r_inv_col = E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*w_plus_r_inv_col], &blind_w_plus_r_inv_col).compress();
 
-          ([comm_t_plus_r_inv_row, comm_w_plus_r_inv_row, comm_t_plus_r_inv_col, comm_w_plus_r_inv_col], [blind_w_plus_r_inv_row, blind_t_plus_r_inv_col, blind_w_plus_r_inv_col])
-        }).collect::<Vec<_>>().into_iter().unzip();
+          ([comm_t_plus_r_inv_row, comm_w_plus_r_inv_row, comm_t_plus_r_inv_col, comm_w_plus_r_inv_col], 
+            [blind_t_plus_r_inv_row, blind_w_plus_r_inv_row, blind_t_plus_r_inv_col, blind_w_plus_r_inv_col],
+            [
+              blind_t_plus_r_inv_row,
+              blind_w_plus_r_inv_row,
+              blind_t_plus_r_inv_col,
+              blind_w_plus_r_inv_col,
+            ])
+        }).collect::<Vec<_>>().into_iter().unzip_n_vec();
 
       let evals_W = claims_witness
         .into_iter()
@@ -733,13 +931,17 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
       // let tau = transcript.squeeze(b"t")?;
       // let tau_coords = PowPolynomial::new(&tau, num_rounds_max).coordinates();  
 
-      let (comm_evals_Az_Bz_Cz_W_E, prod_comm_Az_Bz, _): (Vec<_>, Vec<_>, Vec<_>) =  evals_Az_Bz_Cz_W_E.iter().map(|[Az, Bz, Cz, W, E]| {
+      let (comm_evals_Az_Bz_Cz_W_E, prod_comm_Az_Bz, blind_evals_Az_Bz_Cz_W_E, blind_Az_Bz): (Vec<_>, Vec<_>, Vec<_>, Vec<_>) =  evals_Az_Bz_Cz_W_E.iter().map(|[Az, Bz, Cz, W, E]| {
         // e.iter().map(|eval| {
         //   let blind_eval = <E as Engine>::Scalar::random(&mut OsRng);
         //   E::CE::zkcommit(ck, &[*eval], &blind_eval).compress()
         // }).collect::<Vec<_>>()
         // .try_into()
         // .unwrap()
+
+        let blind_Az = <E as Engine>::Scalar::random(&mut OsRng);
+        let blind_Bz = <E as Engine>::Scalar::random(&mut OsRng);
+
 
         let blind_prod_Az_Bz = <E as Engine>::Scalar::random(&mut OsRng);
         let (proof_prod_eval_Az_eval_Bz, comm_Az, comm_Bz, comm_prod_eval_Az_eval_Bz): (ProductProof<E>, CompressedCommitment<E>, CompressedCommitment<E>, CompressedCommitment<E>) = {
@@ -757,14 +959,14 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         }.unwrap();
 
         let blind_Cz = <E as Engine>::Scalar::random(&mut OsRng);
-        let comm_Cz = E::CE::zkcommit(ck, &[*Cz], &blind_Cz).compress();
+        let comm_Cz = E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*Cz], &blind_Cz).compress();
 
         let blind_W = <E as Engine>::Scalar::random(&mut OsRng);
-        let comm_W = E::CE::zkcommit(ck, &[*W], &blind_W).compress();
+        let comm_W = E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*W], &blind_W).compress();
 
         let blind_E = <E as Engine>::Scalar::random(&mut OsRng);
-        let comm_E = E::CE::zkcommit(ck, &[*E], &blind_E).compress();
-        ([comm_Az, comm_Bz, comm_Cz, comm_W, comm_E], (proof_prod_eval_Az_eval_Bz, comm_prod_eval_Az_eval_Bz), [blind_Az, blind_Bz, blind_prod_Az_Bz])
+        let comm_E = E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*E], &blind_E).compress();
+        ([comm_Az, comm_Bz, comm_Cz, comm_W, comm_E], (proof_prod_eval_Az_eval_Bz, comm_prod_eval_Az_eval_Bz), [blind_Az, blind_Bz, blind_Cz, blind_W, blind_E], blind_prod_Az_Bz)
       }).collect::<Vec<_>>().into_iter().unzip_n_vec();
 
       // [val_A, val_B, val_C, row, col, ts_row, ts_col]
@@ -780,13 +982,25 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
 
 
 
-      let (comm_evals_mem_preprocessed, blind_row_col, prod_comm_L_row_L_col_val_A_B_C): (Vec<_>, Vec<_>, Vec<_>) =  evals_mem_preprocessed.iter().enumerate().map(|(i, [val_A, val_B, val_C, row, col, ts_row, ts_col])| {
+      let (
+        comm_evals_mem_preprocessed, 
+        blind_evals_mem_preprocessed, 
+        blind_row_col, 
+        prod_comm_L_row_L_col_val_A_B_C,
+        blind_L_row_L_col_val_A_B_C
+      ): (Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>) =  evals_mem_preprocessed.iter().enumerate().map(
+        |(i, [val_A, val_B, val_C, row, col, ts_row, ts_col])| {
+        println!("evals_L_row_col i is {}", i);
         let [L_row, L_col] = evals_L_row_col[i];
+
+        let pl_s_comm_i = pk.S_comm[i].clone();
+
         let L_row_L_col = L_row * L_col;
 
-        let blind_val_A = <E as Engine>::Scalar::random(&mut OsRng);
+        // let blind_val_A = <E as Engine>::Scalar::random(&mut OsRng);
+        let blind_val_A = pl_s_comm_i.r_comm_val_A;
 
-        let blind_L_row_L_col = <E as Engine>::Scalar::random(&mut OsRng);
+        let blind_L_row_L_col = blinds_prod_L_row_L_col[i];
 
         let blind_prod_L_row_L_col_val_A = <E as Engine>::Scalar::random(&mut OsRng);
         let (proof_prod_L_row_L_col_val_A, _, comm_val_A, comm_prod_L_row_L_col_val_A): (ProductProof<E>, CompressedCommitment<E>, CompressedCommitment<E>, CompressedCommitment<E>) = {
@@ -804,7 +1018,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
           )
         }.unwrap();
 
-        let blind_val_B = <E as Engine>::Scalar::random(&mut OsRng);
+        let blind_val_B = pl_s_comm_i.r_comm_val_B;
 
         let blind_prod_L_row_L_col_val_B = <E as Engine>::Scalar::random(&mut OsRng);
         let (proof_prod_L_row_L_col_val_B, _, comm_val_B, comm_prod_L_row_L_col_val_B): (ProductProof<E>, CompressedCommitment<E>, CompressedCommitment<E>, CompressedCommitment<E>) = {
@@ -822,7 +1036,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
           )
         }.unwrap();
 
-        let blind_val_C = <E as Engine>::Scalar::random(&mut OsRng);
+        let blind_val_C = pl_s_comm_i.r_comm_val_C;
 
         let blind_prod_L_row_L_col_val_C = <E as Engine>::Scalar::random(&mut OsRng);
         let (proof_prod_L_row_L_col_val_C, _, comm_val_C, comm_prod_L_row_L_col_val_C): (ProductProof<E>, CompressedCommitment<E>, CompressedCommitment<E>, CompressedCommitment<E>) = {
@@ -833,33 +1047,38 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
             &mut transcript,
             &L_row_L_col,
             &blind_L_row_L_col,
-            val_A,
+            val_C,
             &blind_val_C,
             &prod,
             &blind_prod_L_row_L_col_val_C,
           )
         }.unwrap();
 
-        let blind_row = <E as Engine>::Scalar::random(&mut OsRng);
-        let comm_row = E::CE::zkcommit(ck, &[*row], &blind_row).compress();
+        let blind_row = pl_s_comm_i.r_comm_row;
+        let comm_row = E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*row], &blind_row).compress();
 
-        let blind_col = <E as Engine>::Scalar::random(&mut OsRng);
-        let comm_col = E::CE::zkcommit(ck, &[*col], &blind_col).compress();
+        let blind_col = pl_s_comm_i.r_comm_col;
+        let comm_col = E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*col], &blind_col).compress();
 
+        let blind_ts_row = pl_s_comm_i.r_comm_ts_row;
+        let comm_ts_row = E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*ts_row], &blind_ts_row).compress();
         
-        let blind_ts_row = <E as Engine>::Scalar::random(&mut OsRng);
-        let comm_ts_row = E::CE::zkcommit(ck, &[*ts_row], &blind_ts_row).compress();
-        
-        let blind_ts_col = <E as Engine>::Scalar::random(&mut OsRng);
-        let comm_ts_col = E::CE::zkcommit(ck, &[*ts_col], &blind_ts_col).compress();
+        let blind_ts_col = pl_s_comm_i.r_comm_ts_col;
+        let comm_ts_col = E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*ts_col], &blind_ts_col).compress();
 
-        ([comm_val_A, comm_val_B, comm_val_C, comm_row, comm_col, comm_ts_row, comm_ts_col], [blind_row, blind_col], [(proof_prod_L_row_L_col_val_A, comm_prod_L_row_L_col_val_A), (proof_prod_L_row_L_col_val_B, comm_prod_L_row_L_col_val_B), (proof_prod_L_row_L_col_val_C, comm_prod_L_row_L_col_val_C)])
+        (
+          [comm_val_A, comm_val_B, comm_val_C, comm_row, comm_col, comm_ts_row, comm_ts_col], 
+          [blind_val_A, blind_val_B, blind_val_C, blind_row, blind_col, blind_ts_row, blind_ts_col], 
+          [blind_row, blind_col], 
+          [(proof_prod_L_row_L_col_val_A, comm_prod_L_row_L_col_val_A), (proof_prod_L_row_L_col_val_B, comm_prod_L_row_L_col_val_B), (proof_prod_L_row_L_col_val_C, comm_prod_L_row_L_col_val_C)],
+          [blind_prod_L_row_L_col_val_A, blind_prod_L_row_L_col_val_B, blind_prod_L_row_L_col_val_C]
+        )
       }).collect::<Vec<_>>().into_iter().unzip_n_vec();
 
       let num_vars = S.iter().map(|s| s.num_vars).collect::<Vec<_>>();
   
       // Truncated sumcheck randomness for each instance
-      let rand_sc_i = num_rounds
+      let rand_sc_i = num_rounds.clone()
         .iter()
         .map(|num_rounds| rand_sc[(num_rounds_max - num_rounds)..].to_vec())
         .collect::<Vec<_>>();
@@ -927,26 +1146,45 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
       )
       .collect::<Vec<_>>().into_iter().unzip_n_vec();
 
-      let (prods_comms_w_plus_r_inv_row_blind_row, prods_comms_w_plus_r_inv_row_blind_col, prods_comms_w_plus_r_inv_row_L_row, prods_comms_w_plus_r_inv_row_L_col, prods_comms_t_plus_r_inv_col_Z): (Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>) = zip_with!(
+      let (
+        prods_comms_w_plus_r_inv_row_blind_row, blind_prod_w_plus_r_inv_row_blind_row, 
+        prods_comms_w_plus_r_inv_row_blind_col, blind_w_plus_r_inv_row_blind_col, 
+        prods_comms_w_plus_r_inv_row_L_row, blind_comms_w_plus_r_inv_row_L_row,
+        prods_comms_w_plus_r_inv_row_L_col, blind_comms_w_plus_r_inv_row_L_col,
+        prods_comms_t_plus_r_inv_col_Z , blind_comms_t_plus_r_inv_col_Z,
+        prods_comms_t_plus_r_inv_col_W, blind_comms_t_plus_r_inv_col_W
+      ): (Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>) = zip_with!(
         iter,
         (
+          evals_Az_Bz_Cz_W_E,
+          blind_evals_Az_Bz_Cz_W_E,
           evals_mem_preprocessed,
+          comm_evals_mem_preprocessed,
           blind_row_col,
           evals_mem_oracle,
+          comm_evals_mem_oracle,
           blind_evals_mem_oracle,
           evals_L_row_col,
           blinds_L_row_L_col,
           z_vec,
           blinds_z
         ),
-        |evals_mem_preprocessed, blind_row_col, evals_mem_oracle, blind_evals_mem_oracle, evals_L_row_col, blinds_L_row_L_col, comm_z_vec, blinds_z| {
+        |evals_Az_Bz_Cz_W_E, blind_evals_Az_Bz_Cz_W_E, evals_mem_preprocessed, comm_evals_mem_preprocessed, blind_row_col, evals_mem_oracle, comm_evals_mem_oracle, blind_evals_mem_oracle, evals_L_row_col, blinds_L_row_L_col, z_vec, blinds_z| {
+          let [_, _, _, W, _] = evals_Az_Bz_Cz_W_E;
+          let [_, _, _, blind_W, _] = blind_evals_Az_Bz_Cz_W_E;
+
+
+          let [_, _, _, _comm_row, _, _, _] = comm_evals_mem_preprocessed;
+
           let [_, _, _, row, col, _, _] = evals_mem_preprocessed;
           let [blind_row, blind_col] = blind_row_col;
           let [_, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col] = evals_mem_oracle;
-          let [blind_w_plus_r_inv_row, blind_t_plus_r_inv_col, blind_w_plus_r_inv_col] = blind_evals_mem_oracle;
+          let [_, _comm_w_plus_r_inv_row, _, _] = comm_evals_mem_oracle;
+
+          let [_, blind_w_plus_r_inv_row, blind_t_plus_r_inv_col, blind_w_plus_r_inv_col] = blind_evals_mem_oracle;
           let [L_row, L_col] = evals_L_row_col;
           let [blind_L_row, blind_L_col] = blinds_L_row_L_col;
-          let Z = comm_z_vec;
+          let Z = z_vec;
           let blind_Z = blinds_z;
 
           let blind_prod_w_plus_r_inv_row_blind_row = <E as Engine>::Scalar::random(&mut OsRng);
@@ -965,12 +1203,12 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
               &blind_prod_w_plus_r_inv_row_blind_row,
             )
           }.unwrap();
-          
-          let blind_prod_w_plus_r_inv_row_blind_col = <E as Engine>::Scalar::random(&mut OsRng);
 
-          let (prod_w_plus_r_inv_row_blind_col, _, _, comm_prod_w_plus_r_inv_row_blind_col): (ProductProof<E>, CompressedCommitment<E>, CompressedCommitment<E>, CompressedCommitment<E>) = {
+          let blind_prod_w_plus_r_inv_col_blind_col = <E as Engine>::Scalar::random(&mut OsRng);
 
-            let prod = *w_plus_r_inv_row * *col;
+          let (prod_w_plus_r_inv_col_col, _, _, comm_prod_w_plus_r_inv_col_col): (ProductProof<E>, CompressedCommitment<E>, CompressedCommitment<E>, CompressedCommitment<E>) = {
+
+            let prod = *w_plus_r_inv_col * *col;
             ProductProof::prove(
               &pk.sumcheck_gens.ck_1,
               &mut transcript,
@@ -979,15 +1217,15 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
               col,
               blind_col,
               &prod,
-              &blind_prod_w_plus_r_inv_row_blind_col,
+              &blind_prod_w_plus_r_inv_col_blind_col,
             )
           }.unwrap();
-
+ 
           let blind_prod_w_plus_r_inv_row_L_row = <E as Engine>::Scalar::random(&mut OsRng);
 
           let (prod_w_plus_r_inv_row_L_row, _, _, comm_prod_w_plus_r_inv_row_L_row): (ProductProof<E>, CompressedCommitment<E>, CompressedCommitment<E>, CompressedCommitment<E>) = {
 
-            let prod = *w_plus_r_inv_row * *row;
+            let prod = *w_plus_r_inv_row * *L_row;
             ProductProof::prove(
               &pk.sumcheck_gens.ck_1,
               &mut transcript,
@@ -999,12 +1237,12 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
               &blind_prod_w_plus_r_inv_row_L_row,
             )
           }.unwrap();
-          
-          let blind_prod_w_plus_r_inv_row_L_col = <E as Engine>::Scalar::random(&mut OsRng);
 
-          let (prod_w_plus_r_inv_row_L_col, _, _, comm_prod_w_plus_r_inv_row_L_col): (ProductProof<E>, CompressedCommitment<E>, CompressedCommitment<E>, CompressedCommitment<E>) = {
+          let blind_prod_w_plus_r_inv_col_L_col = <E as Engine>::Scalar::random(&mut OsRng);
 
-            let prod = *w_plus_r_inv_row * *col;
+          let (prod_w_plus_r_inv_col_L_col, _, _, comm_prod_w_plus_r_inv_col_L_col): (ProductProof<E>, CompressedCommitment<E>, CompressedCommitment<E>, CompressedCommitment<E>) = {
+
+            let prod = *w_plus_r_inv_col * *L_col;
             ProductProof::prove(
               &pk.sumcheck_gens.ck_1,
               &mut transcript,
@@ -1013,7 +1251,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
               L_col,
               blind_L_col,
               &prod,
-              &blind_prod_w_plus_r_inv_row_L_col,
+              &blind_prod_w_plus_r_inv_col_L_col,
             )
           }.unwrap();
 
@@ -1025,7 +1263,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
             ProductProof::prove(
               &pk.sumcheck_gens.ck_1,
               &mut transcript,
-              w_plus_r_inv_col,
+              t_plus_r_inv_col,
               blind_t_plus_r_inv_col,
               Z,
               blind_Z,
@@ -1034,11 +1272,39 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
             )
           }.unwrap();
 
-          ((prod_w_plus_r_inv_row_blind_row, comm_prod_w_plus_r_inv_row_blind_row), (prod_w_plus_r_inv_row_blind_col, comm_prod_w_plus_r_inv_row_blind_col), (prod_w_plus_r_inv_row_L_row, comm_prod_w_plus_r_inv_row_L_row), (prod_w_plus_r_inv_row_L_col, comm_prod_w_plus_r_inv_row_L_col), (prod_t_plus_r_inv_col_Z, comm_prod_t_plus_r_inv_col_Z))
+          let blind_prod_t_plus_r_inv_col_W = <E as Engine>::Scalar::random(&mut OsRng);
+
+          let (prod_t_plus_r_inv_col_W, _, _, comm_prod_t_plus_r_inv_col_W): (ProductProof<E>, CompressedCommitment<E>, CompressedCommitment<E>, CompressedCommitment<E>) = {
+
+            let prod = *t_plus_r_inv_col * *W;
+            ProductProof::prove(
+              &pk.sumcheck_gens.ck_1,
+              &mut transcript,
+              t_plus_r_inv_col,
+              blind_t_plus_r_inv_col,
+              W,
+              blind_W,
+              &prod,
+              &blind_prod_t_plus_r_inv_col_W,
+            )
+          }.unwrap();
+
+          (
+            (prod_w_plus_r_inv_row_blind_row, comm_prod_w_plus_r_inv_row_blind_row),
+            blind_prod_w_plus_r_inv_row_blind_row,
+            (prod_w_plus_r_inv_col_col, comm_prod_w_plus_r_inv_col_col),
+            blind_prod_w_plus_r_inv_col_blind_col,
+            (prod_w_plus_r_inv_row_L_row, comm_prod_w_plus_r_inv_row_L_row),
+            blind_prod_w_plus_r_inv_row_L_row,
+            (prod_w_plus_r_inv_col_L_col, comm_prod_w_plus_r_inv_col_L_col),
+            blind_prod_w_plus_r_inv_col_L_col,
+            (prod_t_plus_r_inv_col_Z, comm_prod_t_plus_r_inv_col_Z),
+            blind_prod_t_plus_r_inv_col_Z,
+            (prod_t_plus_r_inv_col_W, comm_prod_t_plus_r_inv_col_W),
+            blind_prod_t_plus_r_inv_col_W
+          )
         }
       ).collect::<Vec<_>>().into_iter().unzip_n_vec();
-
-
 
       (
         evals_Az_Bz_Cz_W_E,
@@ -1046,11 +1312,15 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         evals_mem_oracle,
         evals_mem_preprocessed,
         comm_evals_Az_Bz_Cz_W_E,
+        blind_evals_Az_Bz_Cz_W_E,
         prod_comm_Az_Bz,
         comm_evals_L_row_col,
+        blinds_L_row_L_col,
         prod_comm_L_row_L_col,
         comm_evals_mem_oracle,
+        blind_evals_mem_oracle,
         comm_evals_mem_preprocessed,
+        blind_evals_mem_preprocessed,
         blind_row_col,
         prod_comm_L_row_L_col_val_A_B_C,
         comm_z_vec,
@@ -1058,11 +1328,18 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         prods_comms_w_plus_r_inv_row_blind_col,
         prods_comms_w_plus_r_inv_row_L_row,
         prods_comms_w_plus_r_inv_row_L_col,
-        prods_comms_t_plus_r_inv_col_Z
+        prods_comms_t_plus_r_inv_col_Z,
+        prods_comms_t_plus_r_inv_col_W,
+        blind_prod_w_plus_r_inv_row_blind_row,
+        blind_w_plus_r_inv_row_blind_col,
+        blind_comms_w_plus_r_inv_row_L_row,
+        blind_comms_w_plus_r_inv_row_L_col,
+        blind_comms_t_plus_r_inv_col_Z,
+        blind_comms_t_plus_r_inv_col_W,
+        blind_L_row_L_col_val_A_B_C,
+        blind_Az_Bz,
       )
     };
-
-
 
     let evals_vec = zip_with!(
       iter,
@@ -1073,12 +1350,113 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         evals_mem_preprocessed
       ),
       |Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed| {
+        let [Az, Bz, Cz, W, E] = Az_Bz_Cz_W_E;
+
         chain![Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed]
           .cloned()
           .collect::<Vec<_>>()
       }
     )
     .collect::<Vec<_>>();
+
+    let blind_eval_vec = zip_with!(
+      iter,
+      (
+        blind_evals_Az_Bz_Cz_W_E,
+        blind_evals_L_row_col,
+        blind_evals_mem_oracle,
+        blind_evals_mem_preprocessed
+      ),
+      |Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed| {
+        let [Az, Bz, Cz, W, E] = Az_Bz_Cz_W_E;
+
+        chain![Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed]
+          .cloned()
+          .collect::<Vec<_>>()
+      }
+    )
+    .collect::<Vec<_>>();
+
+    let comm_eval_vec = zip_with!(
+      iter,
+      (
+        comm_evals_Az_Bz_Cz_W_E,
+        comm_evals_L_row_col,
+        comm_evals_mem_oracle,
+        comm_evals_mem_preprocessed
+      ),
+      |Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed| {
+        let [Az, Bz, Cz, W, E] = Az_Bz_Cz_W_E;
+        chain![Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed]
+          .cloned()
+          .collect::<Vec<_>>()
+      }
+    )
+    .collect::<Vec<_>>();
+
+    // let evals_vec = zip_with!(
+    //   iter,
+    //   (
+    //     evals_Az_Bz_Cz_W_E,
+    //     evals_L_row_col,
+    //     evals_mem_oracle,
+    //     evals_mem_preprocessed
+    //   ),
+    //   |Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed| {
+    //     chain![Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed]
+    //       .cloned()
+    //       .collect::<Vec<_>>()
+    //   }
+    // )
+    // .collect::<Vec<_>>();
+
+    // let blind_eval_vec = zip_with!(
+    //   iter,
+    //   (
+    //     blind_evals_Az_Bz_Cz_W_E,
+    //     blind_evals_L_row_col,
+    //     blind_evals_mem_oracle,
+    //     blind_evals_mem_preprocessed
+    //   ),
+    //   |Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed| {
+    //     chain![Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed]
+    //       .cloned()
+    //       .collect::<Vec<_>>()
+    //   }
+    // )
+    // .collect::<Vec<_>>();
+
+    // let comm_eval_vec = zip_with!(
+    //   iter,
+    //   (
+    //     comm_evals_Az_Bz_Cz_W_E,
+    //     comm_evals_L_row_col,
+    //     comm_evals_mem_oracle,
+    //     comm_evals_mem_preprocessed
+    //   ),
+    //   |Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed| {
+    //     chain![Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed]
+    //       .cloned()
+    //       .collect::<Vec<_>>()
+    //   }
+    // )
+    // .collect::<Vec<_>>();
+
+    // let evals_vec = evals_Az_Bz_Cz_W_E.into_iter().map(|[_, _, _, W, E]| {
+    //   vec![E, W]
+    // }).collect::<Vec<_>>();
+
+    // let blind_eval_vec = blind_evals_Az_Bz_Cz_W_E.into_iter().map(|[_, _, _, W, E]| {
+    //   vec![E, W]
+    // }).collect::<Vec<_>>();
+
+    // let comm_eval_vec = comm_evals_Az_Bz_Cz_W_E.clone().into_iter().map(|[_, _, _, W, E]| {
+    //   vec![E, W]
+    // }).collect::<Vec<_>>();
+
+    // let comms_vec = comms_W_E.into_iter().map(|[W, E]| vec![E, W])
+    // .flatten()
+    // .collect::<Vec<_>>();
 
     let comms_vec = zip_with!(
       iter,
@@ -1111,85 +1489,110 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
     .cloned()
     .collect::<Vec<_>>();
 
-    // let w_vec = zip_with!(
-    //   (
-    //     polys_Az_Bz_Cz.into_iter(),
-    //     polys_W.into_iter(),
-    //     polys_E.into_iter(),
-    //     polys_L_row_col.into_iter(),
-    //     polys_mem_oracles.into_iter(),
-    //     pk.S_repr.iter()
-    //   ),
-    //   |Az_Bz_Cz, W, E, L_row_col, mem_oracles, S_repr| {
-    //     chain![
-    //       Az_Bz_Cz,
-    //       [W, E],
-    //       L_row_col,
-    //       mem_oracles,
-    //       [
-    //         S_repr.val_A.clone(),
-    //         S_repr.val_B.clone(),
-    //         S_repr.val_C.clone(),
-    //         S_repr.row.clone(),
-    //         S_repr.col.clone(),
-    //         S_repr.ts_row.clone(),
-    //         S_repr.ts_col.clone(),
-    //       ]
-    //     ]
-    //   }
-    // )
-    // .flatten()
-    // .map(|p| PolyEvalWitness::<E> { p })
-    // .collect::<Vec<_>>();
+    // let blind_poly_vec: Vec<_> = W.clone().iter().map(|W| [W.r_W, W.r_E]).collect();
 
-    for evals in evals_vec.iter() {
-      transcript.absorb(b"e", &evals.as_slice()); // comm_vec is already in the transcript
-    }
-    let evals_vec = evals_vec.into_iter().flatten().collect::<Vec<_>>();
+    // let blind_poly_vec: Vec<_> = blind_poly_vec.into_iter().flatten().collect::<Vec<_>>();
 
-    let c = transcript.squeeze(b"c")?;
-
-
-
-    let tau = transcript.squeeze(b"t")?;
-    let tau_coords = PowPolynomial::new(&tau, num_rounds_max).coordinates();
-
-    // Compute eval_Mz = eval_Az_at_tau + c * eval_Bz_at_tau + c^2 * eval_Cz_at_tau
-    let evals_Mz: Vec<_> = zip_with!(
-      iter,
-      (comms_Az_Bz_Cz, evals_Az_Bz_Cz_at_tau),
-      |comm_Az_Bz_Cz, evals_Az_Bz_Cz_at_tau| {
-        let u = PolyEvalInstance::<E>::batch(
-          comm_Az_Bz_Cz.as_slice(),
-          tau_coords.clone(),
-          evals_Az_Bz_Cz_at_tau.as_slice(),
-          &c,
-        );
-        u.e
+    let w_vec = zip_with!(
+      (
+        polys_Az_Bz_Cz.into_iter(),
+        polys_W.into_iter(),
+        polys_E.into_iter(),
+        polys_L_row_col.into_iter(),
+        polys_mem_oracles.into_iter(),
+        pk.S_repr.iter()
+      ),
+      |Az_Bz_Cz, W, E, L_row_col, mem_oracles, S_repr| {
+        chain![
+          Az_Bz_Cz,
+          [W, E],
+          L_row_col,
+          mem_oracles,
+          [
+            S_repr.val_A.clone(),
+            S_repr.val_B.clone(),
+            S_repr.val_C.clone(),
+            S_repr.row.clone(),
+            S_repr.col.clone(),
+            S_repr.ts_row.clone(),
+            S_repr.ts_col.clone(),
+          ]
+        ]
       }
     )
-    .collect();
-
-  
-
-    let num_claims_per_instance = 10;
-
-    let claims = evals_Mz
-    .iter()
-    .flat_map(|&eval_Mz| {
-      let mut claims = vec![E::Scalar::ZERO; num_claims_per_instance];
-      claims[7] = eval_Mz;
-      claims[8] = eval_Mz;
-      claims.into_iter()
-    })
+    .flatten()
+    // .map(|p| PolyEvalWitness::<E> { p })
     .collect::<Vec<_>>();
 
 
-    let comm_claims =  claims.iter().map(|eval| {
-        let blind_eval = <E as Engine>::Scalar::random(&mut OsRng);
-        E::CE::zkcommit(ck, &[*eval], &blind_eval).compress()
-    }).collect::<Vec<_>>();
 
+    let blind_poly_vec = zip_with!(
+      (
+        blind_polys_Az_Bz_Cz.into_iter(),
+        r_W_E.into_iter(),
+        // blind_polys_W.into_iter(),
+        // blind_polys_E.into_iter(),
+        blind_polys_L_row_col.into_iter(),
+        blind_polys_mem_oracles.into_iter(),
+        pk.S_comm.iter()
+      ),
+      |Az_Bz_Cz, r_W_E, L_row_col, mem_oracles, S_comm| {
+        chain![
+          Az_Bz_Cz,
+          r_W_E,
+          L_row_col,
+          mem_oracles,
+          [
+            S_comm.r_comm_val_A.clone(),
+            S_comm.r_comm_val_B.clone(),
+            S_comm.r_comm_val_C.clone(),
+            S_comm.r_comm_row.clone(),
+            S_comm.r_comm_col.clone(),
+            S_comm.r_comm_ts_row.clone(),
+            S_comm.r_comm_ts_col.clone(),
+          ]
+        ]
+      }
+    )
+    .flatten()
+    // .map(|p| PolyEvalWitness::<E> { p })
+    .collect::<Vec<_>>();
+
+    for evals in evals_vec.iter() {
+      // transcript.absorb(b"e", &evals.as_slice()); // comm_vec is already in the transcript
+    }
+    let evals_vec = evals_vec.into_iter().flatten().collect::<Vec<_>>();
+    let blind_eval_vec = blind_eval_vec.into_iter().flatten().collect::<Vec<_>>();
+    let comm_eval_vec = comm_eval_vec.into_iter().flatten().collect::<Vec<_>>();
+
+    let _c = transcript.squeeze(b"c")?;
+
+
+
+    // let tau = transcript.squeeze(b"t")?;
+    // let tau_coords = PowPolynomial::new(&tau, num_rounds_max).coordinates();
+
+
+
+    // let comm_claims =  claims.iter().map(|eval| {
+    //     let blind_eval = <E as Engine>::Scalar::random(&mut OsRng);
+    //     E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*eval], &blind_eval).compress()
+    // }).collect::<Vec<_>>();
+
+    let comm_evals_Mz =  evals_Mz.iter().map(|eval| {
+      let blind_eval = <E as Engine>::Scalar::random(&mut OsRng);
+      E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*eval], &blind_eval).compress()
+  }).collect::<Vec<_>>();
+
+  
+  let comm_claims = zip_with!(
+    iter,
+    (claims, blind_claims),
+    |claims, blind_claims| {
+      E::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[*claims], &blind_claims).compress()
+    }
+  )
+  .collect();
 
     // // Compute number of variables for each polynomial
     // let num_vars_u = w_vec.iter().map(|w| w.p.len().log_2()).collect::<Vec<_>>();
@@ -1208,23 +1611,294 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
     //   &u_batch.e,
     // )?;
 
+    let points = vec![rand_sc.clone(); comms_vec.len()];
+
+    let num_vars = S.iter().map(|s| s.num_vars).collect::<Vec<_>>();
+
+    let rand_sc_i = num_rounds.clone()
+    .iter()
+    .map(|num_rounds| rand_sc[(num_rounds_max - num_rounds)..].to_vec())
+    .collect::<Vec<_>>();
+
+    let claim_sc_final_expected = zip_with!(
+      (
+        num_vars.iter(),
+        rand_sc_i.iter(),
+        U.iter(),
+        evals_Az_Bz_Cz_W_E.iter().cloned(),
+        evals_L_row_col.iter().cloned(),
+        evals_mem_oracle.iter().cloned(),
+        evals_mem_preprocessed.iter().cloned()
+      ),
+      |num_vars,
+       rand_sc,
+       U,
+       evals_Az_Bz_Cz_W_E,
+       evals_L_row_col,
+       eval_mem_oracle,
+       eval_mem_preprocessed| {
+        let [Az, Bz, Cz, W, E] = evals_Az_Bz_Cz_W_E;
+        let [L_row, L_col] = evals_L_row_col;
+        let [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col] =
+          eval_mem_oracle;
+        let [val_A, val_B, val_C, row, col, ts_row, ts_col] = eval_mem_preprocessed;
+
+        let num_rounds_i = rand_sc.len();
+        let num_vars_log = num_vars.log_2();
+
+        let eq_rho = PowPolynomial::new(&rho, num_rounds_i).evaluate(rand_sc);
+
+        let (eq_tau, eq_masked_tau) = {
+          let eq_tau: EqPolynomial<_> = PowPolynomial::new(&tau, num_rounds_i).into();
+
+          let eq_tau_at_rand = eq_tau.evaluate(rand_sc);
+          let eq_masked_tau = MaskedEqPolynomial::new(&eq_tau, num_vars_log).evaluate(rand_sc);
+
+          (eq_tau_at_rand, eq_masked_tau)
+        };
+
+        // Evaluate identity polynomial
+        let id = IdentityPolynomial::new(num_rounds_i).evaluate(rand_sc);
+
+        let Z = {
+          // rand_sc was padded, so we now remove the padding
+          let (factor, rand_sc_unpad) = {
+            let l = num_rounds_i - (num_vars_log + 1);
+
+            let (rand_sc_lo, rand_sc_hi) = rand_sc.split_at(l);
+
+            let factor = rand_sc_lo
+              .iter()
+              .fold(E::Scalar::ONE, |acc, r_p| acc * (E::Scalar::ONE - r_p));
+
+            (factor, rand_sc_hi)
+          };
+
+          let X = {
+            // constant term
+            let poly_X = std::iter::once(U.u).chain(U.X.iter().cloned()).collect();
+            SparsePolynomial::new(num_vars_log, poly_X).evaluate(&rand_sc_unpad[1..])
+          };
+
+          // W was evaluated as if it was padded to logNi variables,
+          // so we don't multiply it by (1-rand_sc_unpad[0])
+          W + factor * rand_sc_unpad[0] * X
+        };
+
+        let t_plus_r_row = {
+          let addr_row = id;
+          let val_row = eq_tau;
+          let t = addr_row + gamma * val_row;
+          t + r
+        };
+
+        let w_plus_r_row = {
+          let addr_row = row;
+          let val_row = L_row;
+          let w = addr_row + gamma * val_row;
+          w + r
+        };
+
+        let t_plus_r_col = {
+          let addr_col = id;
+          let val_col = Z;
+          let t = addr_col + gamma * val_col;
+          t + r
+        };
+
+        let w_plus_r_col = {
+          let addr_col = col;
+          let val_col = L_col;
+          let w = addr_col + gamma * val_col;
+          w + r
+        };
+
+        let claims_mem = [
+          t_plus_r_inv_row - w_plus_r_inv_row,
+          t_plus_r_inv_col - w_plus_r_inv_col,
+          eq_rho * (t_plus_r_inv_row * t_plus_r_row - ts_row),
+          eq_rho * (w_plus_r_inv_row * w_plus_r_row - E::Scalar::ONE),
+          eq_rho * (t_plus_r_inv_col * t_plus_r_col - ts_col),
+          eq_rho * (w_plus_r_inv_col * w_plus_r_col - E::Scalar::ONE),
+        ];
+
+        let claims_outer = [
+          eq_tau * (Az * Bz - U.u * Cz - E),
+          eq_tau * (Az + c * Bz + c * c * Cz),
+        ];
+        let claims_inner = [L_row * L_col * (val_A + c * val_B + c * c * val_C)];
+
+        let claims_witness = [eq_masked_tau * W];
+
+        chain![claims_mem, claims_outer, claims_inner, claims_witness]
+        // chain![claims_inner]
+
+      }
+    )
+    .flatten()
+    .zip_eq(s_powers.clone())
+    .fold(E::Scalar::ZERO, |acc, (claim, s)| acc + s * claim);
+
+    let blind_claim_sc_final_expected = zip_with!(
+      (
+        num_vars.iter(),
+        rand_sc_i.iter(),
+        U.iter(),
+        blind_evals_Az_Bz_Cz_W_E.iter().cloned(),
+        blind_evals_L_row_col.iter().cloned(),
+        blind_evals_mem_oracle.iter().cloned(),
+        blind_evals_mem_preprocessed.iter().cloned(),
+        blind_w_plus_r_inv_row_row.iter().cloned(),
+        blind_w_plus_r_inv_row_L_row.iter().cloned(),
+        blind_t_plus_r_inv_col_z.iter().cloned(),
+        blind_t_plus_r_inv_col_w.iter().cloned(),
+        blind_w_plus_r_inv_col_col.iter().cloned(),
+        blind_w_plus_r_inv_col_L_col.iter().cloned(),
+        blind_Az_Bz.iter().cloned(),
+        blind_L_row_L_col_val_A_B_C.iter().cloned()
+      ),
+      |num_vars,
+       rand_sc,
+       U,
+       comm_evals_Az_Bz_Cz_W_E,
+       comm_evals_L_row_col,
+       comm_eval_mem_oracle,
+       comm_eval_mem_preprocessed,
+       comm_w_plus_r_inv_row_row,
+       comm_w_plus_r_inv_row_L_row,
+       comm_t_plus_r_inv_col_z,
+       comm_t_plus_r_inv_col_w,
+       comm_w_plus_r_inv_col_col,
+       comm_w_plus_r_inv_col_L_col,
+       comm_Az_Bz,
+       comms_L_row_L_col_val_A_B_C| {
+        let [Az, Bz, Cz, W, E] = comm_evals_Az_Bz_Cz_W_E;
+        let [_, _] = comm_evals_L_row_col;
+        let [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col] =
+          comm_eval_mem_oracle;
+        let [_, _, _, _, _, ts_row, ts_col] = comm_eval_mem_preprocessed.try_into().unwrap();
+        let [comm_L_row_L_col_val_A, comm_L_row_L_col_val_B, comm_L_row_L_col_val_C] = comms_L_row_L_col_val_A_B_C.try_into().unwrap();
 
 
-    // TODO: need to think about it
-    let poly_vec = vec![];
+        let num_rounds_i = rand_sc.len();
+        let num_vars_log = num_vars.log_2();
 
-    let blind_poly_vec = vec![];
-    let points = vec![];
-    let blind_eval_vec = vec![];
-    let comm_eval_vec = vec![];
+        let eq_rho = PowPolynomial::new(&rho, num_rounds_i).evaluate(rand_sc);
+
+        let (eq_tau, eq_masked_tau) = {
+          let eq_tau: EqPolynomial<_> = PowPolynomial::new(&tau, num_rounds_i).into();
+
+          let eq_tau_at_rand = eq_tau.evaluate(rand_sc);
+          let eq_masked_tau = MaskedEqPolynomial::new(&eq_tau, num_vars_log).evaluate(rand_sc);
+
+          (eq_tau_at_rand, eq_masked_tau)
+        };
+
+        // Evaluate identity polynomial
+        let id = IdentityPolynomial::new(num_rounds_i).evaluate(rand_sc);
+
+        // let Z = {
+        //   // rand_sc was padded, so we now remove the padding
+          let (factor, rand_sc_unpad) = {
+            let l = num_rounds_i - (num_vars_log + 1);
+
+            let (rand_sc_lo, rand_sc_hi) = rand_sc.split_at(l);
+
+            let factor = rand_sc_lo
+              .iter()
+              .fold(E::Scalar::ONE, |acc, r_p| acc * (E::Scalar::ONE - r_p));
+
+            (factor, rand_sc_hi)
+          };
+
+          let X = {
+            // constant term
+            let poly_X = std::iter::once(U.u).chain(U.X.iter().cloned()).collect();
+            SparsePolynomial::new(num_vars_log, poly_X).evaluate(&rand_sc_unpad[1..])
+          };
+
+        //   // W was evaluated as if it was padded to logNi variables,
+        //   // so we don't multiply it by (1-rand_sc_unpad[0])
+        //   W + <E as Engine>::CE::zkcommit(
+        //     &EE::get_scalar_gen_vk(vk.vk_ee.clone()),
+        //     &[X],
+        //     &<E as Engine>::Scalar::ZERO,
+        // ) * factor * rand_sc_unpad[0]
+        // };
+
+        let t_plus_row = {
+          let addr_row = id;
+          let val_row = eq_tau;
+          let t = addr_row + gamma * val_row;
+          t
+        };
+
+        // let w_plus_row = {
+        //   let addr_row = row;
+        //   let val_row = L_row;
+        //   let w = addr_row + gamma * val_row;
+        //   w
+        // };
+
+        // let t_plus_col = {
+        //   let addr_col = id;
+        //   let val_col = Z;
+        //   let t = addr_col + gamma * val_col;
+        //   t
+        // };
+
+        // let w_plus_col = {
+        //   let addr_col = col;
+        //   let val_col = L_col;
+        //   let w = addr_col + gamma * val_col;
+        //   w
+        // };
+
+  
+        let claims_mem = [
+          t_plus_r_inv_row - w_plus_r_inv_row,
+          t_plus_r_inv_col - w_plus_r_inv_col,
+          (t_plus_r_inv_row * t_plus_row + t_plus_r_inv_row * r - ts_row) * eq_rho,
+          (comm_w_plus_r_inv_row_row + comm_w_plus_r_inv_row_L_row * gamma + w_plus_r_inv_row * r - E::Scalar::ZERO) * eq_rho, // fixed from one to zero here
+          // (t_plus_r_inv_col * id + comm_t_plus_r_inv_col_z * gamma + t_plus_r_inv_col * r - ts_col) * eq_rho,
+          (t_plus_r_inv_col * id + comm_t_plus_r_inv_col_w * gamma + t_plus_r_inv_col * X * factor * rand_sc_unpad[0] * gamma + t_plus_r_inv_col * r - ts_col) * eq_rho,
+
+          (comm_w_plus_r_inv_col_col + comm_w_plus_r_inv_col_L_col * gamma + w_plus_r_inv_col * r - E::Scalar::ZERO) * eq_rho,// fixed from one to zero here
+        ];
+
+        let claims_outer = [
+          (comm_Az_Bz - Cz * U.u - E) * eq_tau,
+          (Az + Bz * c + Cz * c * c) * eq_tau,
+        ];
+        let claims_inner = [comm_L_row_L_col_val_A + comm_L_row_L_col_val_B * c + comm_L_row_L_col_val_C * c * c];
+
+        let claims_witness = [W * eq_masked_tau];
+
+        chain![claims_mem, claims_outer, claims_inner, claims_witness]
+        // chain![claims_inner]
+
+      }
+    )
+    .flatten()
+    .zip_eq(s_powers)
+    .fold(E::Scalar::ZERO, |acc, (claim, s)| acc + s * claim);
+
+    let (proof_eq_sc_inner, _C1, _C2) = EqualityProof::<E>::prove(
+      &EE::get_scalar_gen_pk(pk.pk_ee.clone()),
+      &mut transcript,
+      &claim_sc_final_expected,
+      &blind_claim_sc_final_expected,
+      &claim_sc_final_expected,
+      &blind_claim_postsc_inner,
+    )?;
 
     let eval_arg = EE::prove_batch(
       ck,
       &pk.pk_ee,
       &mut transcript,
       &comms_vec,
-      // w_vec.as_slice(),
-      &poly_vec,
+      &w_vec,
+      // &poly_vec,
       &blind_poly_vec,
       &points,
       &evals_vec,
@@ -1232,6 +1906,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
       &comm_eval_vec,
     )?;
 
+    
     let comms_Az_Bz_Cz = comms_Az_Bz_Cz
       .into_iter()
       .map(|comms| comms.map(|comm| comm.compress()))
@@ -1244,6 +1919,12 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
       .into_iter()
       .map(|comms| comms.map(|comm| comm.compress()))
       .collect();
+
+    let claim_zero =
+      <E as Engine>::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[<E as Engine>::Scalar::ZERO], &<E as Engine>::Scalar::ZERO).compress();
+
+    let claim_one =
+      <E as Engine>::CE::zkcommit(&pk.sumcheck_gens.ck_1, &[<E as Engine>::Scalar::ONE], &<E as Engine>::Scalar::ZERO).compress();
 
     Ok(Self {
       comms_Az_Bz_Cz,
@@ -1265,13 +1946,26 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
       prods_comms_w_plus_r_inv_row_L_row,
       prods_comms_w_plus_r_inv_row_L_col,
       prods_comms_t_plus_r_inv_col_Z,
+      prods_comms_t_plus_r_inv_col_W,
+
       eval_arg,
+      comm_claim,
+      claim_zero,
+      claim_one,
+      comm_evals_Mz,
+      comm_E_vec,
+      comm_W_vec,
+      proof_eq_sc_inner,
+
+      comm_eval_last,
     })
   }
 
   fn verify(&self, vk: &Self::VerifierKey, U: &[RelaxedR1CSInstance<E>]) -> Result<(), NovaError> {
     let num_instances = U.len();
     let num_claims_per_instance = 10;
+    // let num_claims_per_instance = 1;
+
 
     // number of rounds of sum-check
     let num_rounds = vk.S_comm.iter().map(|s| s.N.log_2()).collect::<Vec<_>>();
@@ -1308,14 +2002,6 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
           .collect::<Result<Vec<_>, _>>()
       })
       .collect::<Result<Vec<_>, _>>()?;
-
-      // let comm_z_vec = self
-      // .comm_z_vec
-      // .iter()
-      // .map(|comm| {
-      //   Commitment::<E>::decompress(comm).unwrap()
-      // })
-      // .collect::<Vec<_>>();
 
     let comms_mem_oracles = self
       .comms_mem_oracles
@@ -1363,6 +2049,13 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
       })
       .collect::<Vec<_>>();
 
+    let comm_E_vec = self
+      .comm_E_vec
+      .iter().map(Commitment::<E>::decompress)
+          .collect::<Result<Vec<_>, _>>()?;
+
+    let comm_W_vec = self.comm_W_vec.iter().map(|e| Commitment::<E>::decompress(e)).collect::<Result<Vec<_>, _>>()?;
+
     let comm_evals_mem_preprocessed = self
       .comm_evals_mem_preprocessed
       .iter()
@@ -1397,113 +2090,65 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         arr
       })
       .collect::<Vec<_>>();
- 
-    // let comms_w_plus_r_inv_row_blind_row = self.prods_comms_w_plus_r_inv_row_blind_row.iter().map(|(prod, comm)| {
-    //   self.prod.verify(
-    //       &vk.sumcheck_gens.ck_1,
-    //       &mut transcript,
-    //       &self.comm_eval_w_plus_r_inv_col,
-    //       &self.comm_eval_col,
-    //       &comm,
-    //   ).unwrap();
-    //   Commitment::<E>::decompress(&comm).unwrap()
-    // });
 
-    let comms_w_plus_r_inv_row_row = zip_with!(iter, (self.prods_comms_w_plus_r_inv_row_blind_row, self.comm_evals_mem_oracle, self.comm_evals_mem_preprocessed), |prod_comm, comm_evals_mem_oracle, comm_evals_mem_preprocessed| {
-      let [_, comm_w_plus_r_inv_row, _, _] = comm_evals_mem_oracle;
-      let [_, _, _, comm_row, _, _, _] = comm_evals_mem_preprocessed;
-      let (prod, comm) = prod_comm;
-      prod.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        &comm_w_plus_r_inv_row,
-        &comm_row,
-        &comm,
-    )?;
-    Ok(Commitment::<E>::decompress(&comm)?)
-    })
-    .collect::<Result<Vec<_>, NovaError>>()?;
+    let tau = transcript.squeeze(b"t")?;
 
-    // [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col]      let [_, _, _, comm_w_plus_r_inv_col] = comm_evals_mem_oracle;
+    // absorb commitments to L_row and L_col in the transcript
+    for comms in comms_L_row_col.iter() {
+      transcript.absorb(b"e", &comms.as_slice());
+    }
+
+    let c = transcript.squeeze(b"c")?;
 
 
-    let comms_w_plus_r_inv_col_col = zip_with!(iter, (self.prods_comms_w_plus_r_inv_row_blind_row, self.comm_evals_mem_oracle, self.comm_evals_mem_preprocessed), |prod_comm, comm_evals_mem_oracle, comm_evals_mem_preprocessed| {
-      let [_, _, _, comm_w_plus_r_inv_col] = comm_evals_mem_oracle;
-      let [_, _, _, _, comm_col, _, _] = comm_evals_mem_preprocessed;
-      let (prod, comm) = prod_comm;
-      prod.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        &comm_w_plus_r_inv_col ,
-        &comm_col,
-        &comm,
-    )?;
-    Ok(Commitment::<E>::decompress(&comm)?)
-    })
-    .collect::<Result<Vec<_>, NovaError>>()?;
+    let gamma = transcript.squeeze(b"g")?;
+    let r = transcript.squeeze(b"r")?;
+
+    let rho: <E as Engine>::Scalar = transcript.squeeze(b"r")?;
+
+    for comms in comms_mem_oracles.iter() {
+      transcript.absorb(b"l", &comms.as_slice());
+    }
+
+    
 
 
-    let comms_w_plus_r_inv_row_L_row = zip_with!(iter, (self.prods_comms_w_plus_r_inv_row_blind_row, self.comm_evals_mem_oracle, self.comm_evals_L_row_col), |prod_comm, comm_evals_mem_oracle, comm_evals_L_row_col| {
-      let [_, comm_w_plus_r_inv_row, _, _] = comm_evals_mem_oracle;
-      let [comm_L_row, _] = comm_evals_L_row_col;
-      let (prod, comm) = prod_comm;
-      prod.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        &comm_w_plus_r_inv_row,
-        &comm_L_row,
-        &comm,
-    )?;
-    Ok(Commitment::<E>::decompress(&comm)?)
-    })
-    .collect::<Result<Vec<_>, NovaError>>()?;
+
+    let s: <E as Engine>::Scalar = transcript.squeeze(b"r")?;
+    let s_powers = powers(&s, num_instances * num_claims_per_instance);
+
+    let (claim_sc_final, rand_sc) = {
+      // Gather all claims into a single vector
+      // let claims = self.comm_evals_Mz
+      //   .iter()
+      //   .flat_map(|eval_Mz| {
+      //     let mut claims = vec![self.claim_zero.clone(); num_claims_per_instance];
+      //     claims[7] = eval_Mz.clone();
+      //     claims[8] = eval_Mz.clone();
+      //     claims.into_iter()
+      //   })
+      //   .collect::<Vec<_>>();
+
+      // Number of rounds for each claim
+      let num_rounds_by_claim = num_rounds
+        .iter()
+        .flat_map(|num_rounds_i| vec![*num_rounds_i; num_claims_per_instance].into_iter())
+        .collect::<Vec<_>>();
+
+      // self
+      //   .sc
+      //   .verify_batch(&claims, &num_rounds_by_claim, &s_powers, 3, &vk.sumcheck_gens.ck_1, &vk.sumcheck_gens.ck_4, &mut transcript)?
 
 
-    let comms_w_plus_r_inv_col_L_col = zip_with!(iter, (self.prods_comms_w_plus_r_inv_row_blind_row, self.comm_evals_mem_oracle, self.comm_evals_L_row_col), |prod_comm, comm_evals_mem_oracle, comm_evals_L_row_col| {
-      let [_, _, _, comm_w_plus_r_inv_col] = comm_evals_mem_oracle;
-      let [_, comm_L_col] = comm_evals_L_row_col;
-      let (prod, comm) = prod_comm;
-      prod.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        &comm_w_plus_r_inv_col ,
-        &comm_L_col,
-        &comm,
-    )?;
-    Ok(Commitment::<E>::decompress(&comm)?)
-    })
-    .collect::<Result<Vec<_>, NovaError>>()?;
+      self
+        .sc
+        .verify_batch(&self.comm_claims, &num_rounds_by_claim, &s_powers, 3, &vk.sumcheck_gens.ck_1, &vk.sumcheck_gens.ck_4, &mut transcript)?
 
-    let comms_t_plus_r_inv_col_z = zip_with!(iter, (self.prods_comms_w_plus_r_inv_row_blind_row, self.comm_evals_mem_oracle, self.comm_z_vec), |prod_comm, comm_evals_mem_oracle, comm_z_vec| {
-      let [_, _, comm_t_plus_r_inv_col, _] = comm_evals_mem_oracle;
-      let comm_z = comm_z_vec;
-      let (prod, comm) = prod_comm;
-      prod.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        comm_t_plus_r_inv_col,
-        comm_z,
-        comm,
-    )?;
-    Ok(Commitment::<E>::decompress(&comm)?)
-    })
-    .collect::<Result<Vec<_>, NovaError>>()?;
+      // self
+      //   .sc
+      //   .verify(&self.comm_claim, num_rounds_max, 3, &vk.sumcheck_gens.ck_1, &vk.sumcheck_gens.ck_4, &mut transcript)?
+    };
 
-    let comms_Az_Bz = zip_with!(iter, (self.prod_comm_Az_Bz, self.comm_evals_Az_Bz_Cz_W_E), |prod_comm, comm_evals_Az_Bz_Cz_W_E| {
-      let [comm_Az, comm_Bz, _, _, _] = comm_evals_Az_Bz_Cz_W_E;
-      let (prod, comm) = prod_comm;
-      prod.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        comm_Az,
-        comm_Bz,
-        comm,
-    )?;
-    Ok(Commitment::<E>::decompress(&comm)?)
-    })
-    .collect::<Result<Vec<_>, NovaError>>()?;
-
-  
     let comms_L_row_L_col = zip_with!((self.prod_comm_L_row_L_col.iter().cloned(), self.comm_evals_L_row_col.iter().cloned()), |prod_comm, comm_evals_L_row_col| {
       let [comm_L_row, comm_L_col] = comm_evals_L_row_col;
       let (prod, comm) = prod_comm;
@@ -1517,28 +2162,30 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
     Ok(comm)
     })
     .collect::<Result<Vec<_>, NovaError>>()?;
+  
+    let comms_Az_Bz = zip_with!((self.prod_comm_Az_Bz.iter().cloned(), self.comm_evals_Az_Bz_Cz_W_E.iter().cloned()), |prod_comm, comm_evals_Az_Bz_Cz_W_E| {
+      let [comm_Az, comm_Bz, _, _, _] = comm_evals_Az_Bz_Cz_W_E;
+      let (prod, comm) = prod_comm;
+      prod.verify(
+        &vk.sumcheck_gens.ck_1,
+        &mut transcript,
+        &comm_Az,
+        &comm_Bz,
+        &comm,
+    )?;
+    Ok(Commitment::<E>::decompress(&comm)?)
+    })
+    .collect::<Result<Vec<_>, NovaError>>()?;
 
-
-    // let comms_t_plus_r_inv_col_Z = zip_with!(iter, (self.prods_comms_t_plus_r_inv_col_Z, self.comm_evals_mem_oracle, self.comm_z_vec), |prod_comm, comm_evals_mem_oracle, comm_z_vec| {
-    //   let [_, _, comm_t_plus_r_inv_col, _] = comm_evals_mem_oracle;
-    //   let comm_z = comm_z_vec;
-    //   let (prod, comm) = prod_comm;
-    //   prod.verify(
-    //     &vk.sumcheck_gens.ck_1,
-    //     &mut transcript,
-    //     comm_t_plus_r_inv_col,
-    //     comm_z,
-    //     comm,
-    // )?;
-    // Ok(Commitment::<E>::decompress(&comm)?)
-    // })
-    // .collect::<Result<Vec<_>, NovaError>>()?;
-
+    println!("post comms_Az_Bz ");
 
     let comms_L_row_L_col_val_A_B_C = zip_with!(iter, (self.prod_comm_L_row_L_col_val_A_B_C, comms_L_row_L_col, self.comm_evals_mem_preprocessed), |prod_comm, comms_L_row_L_col, comm_evals_mem_preprocessed| {
       let comm_L_row_L_col = comms_L_row_L_col;
       let [comm_val_A, comm_val_B, comm_val_C, _, _, _, _] = comm_evals_mem_preprocessed;
       let [(prod_A, comm_A), (prod_B, comm_B), (prod_C, comm_C)] = prod_comm;
+
+      println!("pre prod_A ");
+
       prod_A.verify(
         &vk.sumcheck_gens.ck_1,
         &mut transcript,
@@ -1546,6 +2193,9 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         comm_val_A,
         comm_A,
     )?;
+
+    println!("post prod_A ");
+
       prod_B.verify(
         &vk.sumcheck_gens.ck_1,
         &mut transcript,
@@ -1553,6 +2203,9 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         comm_val_B,
         comm_B,
     )?;
+
+    println!("post prod_B ");
+
       prod_C.verify(
         &vk.sumcheck_gens.ck_1,
         &mut transcript,
@@ -1560,17 +2213,99 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         comm_val_C,
         comm_C,
     )?;
+
+    println!("post prod_C ");
+
     Ok([Commitment::<E>::decompress(&comm_A)?, Commitment::<E>::decompress(&comm_B)?, Commitment::<E>::decompress(&comm_C)?])
     })
     .collect::<Result<Vec<_>, NovaError>>()?;
 
-    // absorb commitments to L_row and L_col in the transcript
-    for comms in comms_L_row_col.iter() {
-      transcript.absorb(b"e", &comms.as_slice());
-    }
+    println!("post prod_comm_L_row_L_col_val_A_B_C ");
+
+
+    let (comms_w_plus_r_inv_row_row, comms_w_plus_r_inv_col_col, comms_w_plus_r_inv_row_L_row, comms_w_plus_r_inv_col_L_col, comms_t_plus_r_inv_col_z, comms_t_plus_r_inv_col_w): (Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>) = zip_with!(iter, (
+      self.prods_comms_w_plus_r_inv_row_blind_row, self.prods_comms_w_plus_r_inv_row_blind_col, self.prods_comms_w_plus_r_inv_row_L_row, self.prods_comms_w_plus_r_inv_row_L_col, self.prods_comms_t_plus_r_inv_col_Z, self.prods_comms_t_plus_r_inv_col_W, self.comm_evals_mem_oracle, self.comm_evals_mem_preprocessed, self.comm_evals_L_row_col, self.comm_z_vec, self.comm_evals_Az_Bz_Cz_W_E
+    ), |prods_comms_w_plus_r_inv_row_blind_row, prods_comms_w_plus_r_inv_row_blind_col, prods_comms_w_plus_r_inv_row_L_row, prods_comms_w_plus_r_inv_row_L_col, prods_comms_t_plus_r_inv_col_Z, prods_comms_t_plus_r_inv_col_W, comm_evals_mem_oracle, comm_evals_mem_preprocessed, comm_evals_L_row_col, comm_z_vec, comm_evals_Az_Bz_Cz_W_E| {
+
+      // [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col]            
+      let [_, comm_w_plus_r_inv_row, comm_t_plus_r_inv_col, comm_w_plus_r_inv_col] = comm_evals_mem_oracle;
+
+      let [comm_L_row, comm_L_col] = comm_evals_L_row_col;
+
+      // [val_A, val_B, val_C, row, col, ts_row, ts_col]
+      let [_, _, _, comm_row, comm_col, _, _] = comm_evals_mem_preprocessed;
+      let (prod_w_plus_r_inv_row_blind_row, comm_w_plus_r_inv_row_row) = prods_comms_w_plus_r_inv_row_blind_row;
+      prod_w_plus_r_inv_row_blind_row.verify(
+        &vk.sumcheck_gens.ck_1,
+        &mut transcript,
+        &comm_w_plus_r_inv_row,
+        &comm_row,
+        &comm_w_plus_r_inv_row_row,
+    )?;
+
+    let (prod_w_plus_r_inv_col_col, comm_w_plus_r_inv_col_col) = prods_comms_w_plus_r_inv_row_blind_col;
+    prod_w_plus_r_inv_col_col.verify(
+        &vk.sumcheck_gens.ck_1,
+        &mut transcript,
+        &comm_w_plus_r_inv_col,
+        &comm_col,
+        &comm_w_plus_r_inv_col_col,
+    )?;
+
+    let (prod_w_plus_r_inv_row_L_row, comm_w_plus_r_inv_row_L_row) = prods_comms_w_plus_r_inv_row_L_row;
+    prod_w_plus_r_inv_row_L_row.verify(
+        &vk.sumcheck_gens.ck_1,
+        &mut transcript,
+        &comm_w_plus_r_inv_row,
+        &comm_L_row,
+        &comm_w_plus_r_inv_row_L_row,
+    )?;
+
+    let (prod_w_plus_r_inv_col_L_col, comm_w_plus_r_inv_col_L_col) = prods_comms_w_plus_r_inv_row_L_col;
+    prod_w_plus_r_inv_col_L_col.verify(
+      &vk.sumcheck_gens.ck_1,
+      &mut transcript,
+      &comm_w_plus_r_inv_col ,
+      &comm_L_col,
+      &comm_w_plus_r_inv_col_L_col,
+    )?;
+
+    let comm_z = comm_z_vec;
+    let (prod_t_plus_r_inv_col_z, comm_t_plus_r_inv_col_z) = prods_comms_t_plus_r_inv_col_Z;
+    prod_t_plus_r_inv_col_z.verify(
+      &vk.sumcheck_gens.ck_1,
+      &mut transcript,
+      &comm_t_plus_r_inv_col,
+      &comm_z,
+      &comm_t_plus_r_inv_col_z,
+    )?;
+
+    let [_, _, _, comm_w, _] = comm_evals_Az_Bz_Cz_W_E;
+    let (prod_t_plus_r_inv_col_w, comm_t_plus_r_inv_col_w) = prods_comms_t_plus_r_inv_col_W;
+    prod_t_plus_r_inv_col_w.verify(
+      &vk.sumcheck_gens.ck_1,
+      &mut transcript,
+      &comm_t_plus_r_inv_col,
+      &comm_w,
+      &comm_t_plus_r_inv_col_w,
+    )?;
+
+    Ok((
+      Commitment::<E>::decompress(&comm_w_plus_r_inv_row_row)?,
+      Commitment::<E>::decompress(&comm_w_plus_r_inv_col_col)?,
+      Commitment::<E>::decompress(&comm_w_plus_r_inv_row_L_row)?,
+      Commitment::<E>::decompress(&comm_w_plus_r_inv_col_L_col)?,
+      Commitment::<E>::decompress(&comm_t_plus_r_inv_col_z)?,
+      Commitment::<E>::decompress(&comm_t_plus_r_inv_col_w)?,
+    )
+    )
+    })
+    .collect::<Result<Vec<_>, NovaError>>()?.into_iter().unzip_n_vec();
+
+    println!("post prods_comms_w_plus_r_inv_row_blind_row ");
 
     // Batch at tau for each instance
-    let c = transcript.squeeze(b"c")?;
+    let _c = transcript.squeeze(b"c")?;
 
     // // Compute eval_Mz = eval_Az_at_tau + c * eval_Bz_at_tau + c^2 * eval_Cz_at_tau
     // let evals_Mz: Vec<_> = zip_with!(
@@ -1595,43 +2330,9 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
     //   })
     //   .collect::<Result<Vec<_>, _>>()?;
 
-    let gamma = transcript.squeeze(b"g")?;
-    let r = transcript.squeeze(b"r")?;
-
-    for comms in comms_mem_oracles.iter() {
-      transcript.absorb(b"l", &comms.as_slice());
-    }
-
-    let rho = transcript.squeeze(b"r")?;
-
-    let s = transcript.squeeze(b"r")?;
-    let s_powers = powers(&s, num_instances * num_claims_per_instance);
-
-    let (claim_sc_final, rand_sc) = {
-      // // Gather all claims into a single vector
-      // let claims = comm_evals_Mz
-      //   .iter()
-      //   .flat_map(|&eval_Mz| {
-      //     let mut claims = vec![E::Scalar::ZERO; num_claims_per_instance];
-      //     claims[7] = eval_Mz;
-      //     claims[8] = eval_Mz;
-      //     claims.into_iter()
-      //   })
-      //   .collect::<Vec<_>>();
-
-      // Number of rounds for each claim
-      let num_rounds_by_claim = num_rounds
-        .iter()
-        .flat_map(|num_rounds_i| vec![*num_rounds_i; num_claims_per_instance].into_iter())
-        .collect::<Vec<_>>();
-
-      self
-        .sc
-        .verify_batch(&self.comm_claims, &num_rounds_by_claim, &s_powers, 3, &vk.sumcheck_gens.ck_1, &vk.sumcheck_gens.ck_4, &mut transcript)?
-    };
-
-    let tau = transcript.squeeze(b"t")?;
+    // let tau = transcript.squeeze(b"t")?;
     // let tau_coords = PowPolynomial::new(&tau, num_rounds_max).coordinates();
+
 
     // Truncated sumcheck randomness for each instance
     let rand_sc_i = num_rounds
@@ -1639,10 +2340,10 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
       .map(|num_rounds| rand_sc[(num_rounds_max - num_rounds)..].to_vec())
       .collect::<Vec<_>>();
 
-    let claim_zero =
-    <E as Engine>::CE::zkcommit(&vk.sumcheck_gens.ck_1, &[<E as Engine>::Scalar::ZERO], &<E as Engine>::Scalar::ZERO);
+    // let claim_zero = <E as Engine>::CE::zkcommit(&vk.sumcheck_gens.ck_1, &[<E as Engine>::Scalar::ZERO], &<E as Engine>::Scalar::ZERO);
+    let claim_zero = Commitment::<E>::decompress(&self.claim_zero)?;
 
-    let claim_sc_final_expected = zip_with!(
+    let claim_sc_final_expected_vec: Vec<_> = zip_with!(
       (
         vk.num_vars.iter(),
         rand_sc_i.iter(),
@@ -1654,6 +2355,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         comms_w_plus_r_inv_row_row.iter().cloned(),
         comms_w_plus_r_inv_row_L_row.iter().cloned(),
         comms_t_plus_r_inv_col_z.iter().cloned(),
+        comms_t_plus_r_inv_col_w.iter().cloned(),
         comms_w_plus_r_inv_col_col.iter().cloned(),
         comms_w_plus_r_inv_col_L_col.iter().cloned(),
         comms_Az_Bz.iter().cloned(),
@@ -1669,6 +2371,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
        comm_w_plus_r_inv_row_row,
        comm_w_plus_r_inv_row_L_row,
        comm_t_plus_r_inv_col_z,
+       comm_t_plus_r_inv_col_w,
        comm_w_plus_r_inv_col_col,
        comm_w_plus_r_inv_col_L_col,
        comm_Az_Bz,
@@ -1700,23 +2403,23 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
 
         // let Z = {
         //   // rand_sc was padded, so we now remove the padding
-        //   let (factor, rand_sc_unpad) = {
-        //     let l = num_rounds_i - (num_vars_log + 1);
+          let (factor, rand_sc_unpad) = {
+            let l = num_rounds_i - (num_vars_log + 1);
 
-        //     let (rand_sc_lo, rand_sc_hi) = rand_sc.split_at(l);
+            let (rand_sc_lo, rand_sc_hi) = rand_sc.split_at(l);
 
-        //     let factor = rand_sc_lo
-        //       .iter()
-        //       .fold(E::Scalar::ONE, |acc, r_p| acc * (E::Scalar::ONE - r_p));
+            let factor = rand_sc_lo
+              .iter()
+              .fold(E::Scalar::ONE, |acc, r_p| acc * (E::Scalar::ONE - r_p));
 
-        //     (factor, rand_sc_hi)
-        //   };
+            (factor, rand_sc_hi)
+          };
 
-        //   let X = {
-        //     // constant term
-        //     let poly_X = std::iter::once(U.u).chain(U.X.iter().cloned()).collect();
-        //     SparsePolynomial::new(num_vars_log, poly_X).evaluate(&rand_sc_unpad[1..])
-        //   };
+          let X = {
+            // constant term
+            let poly_X = std::iter::once(U.u).chain(U.X.iter().cloned()).collect();
+            SparsePolynomial::new(num_vars_log, poly_X).evaluate(&rand_sc_unpad[1..])
+          };
 
         //   // W was evaluated as if it was padded to logNi variables,
         //   // so we don't multiply it by (1-rand_sc_unpad[0])
@@ -1755,16 +2458,18 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         //   w
         // };
 
-        let claim_one =
-        <E as Engine>::CE::zkcommit(&vk.sumcheck_gens.ck_1, &[<E as Engine>::Scalar::ONE], &<E as Engine>::Scalar::ZERO);
-  
+        let claim_one = <E as Engine>::CE::zkcommit(&vk.sumcheck_gens.ck_1, &[<E as Engine>::Scalar::ONE], &<E as Engine>::Scalar::ZERO);
+        // let claim_one = Commitment::<E>::decompress(&self.claim_one).unwrap();
+
   
         let claims_mem = [
           t_plus_r_inv_row - w_plus_r_inv_row,
           t_plus_r_inv_col - w_plus_r_inv_col,
           (t_plus_r_inv_row * t_plus_row + t_plus_r_inv_row * r - ts_row) * eq_rho,
           (comm_w_plus_r_inv_row_row + comm_w_plus_r_inv_row_L_row * gamma + w_plus_r_inv_row * r - claim_one) * eq_rho,
-          (t_plus_r_inv_col * id + comm_t_plus_r_inv_col_z * gamma + t_plus_r_inv_col * r - ts_col) * eq_rho,
+          // (t_plus_r_inv_col * id + comm_t_plus_r_inv_col_z * gamma + t_plus_r_inv_col * r - ts_col) * eq_rho,
+          (t_plus_r_inv_col * id + comm_t_plus_r_inv_col_w * gamma + t_plus_r_inv_col * X * factor * rand_sc_unpad[0] * gamma + t_plus_r_inv_col * r - ts_col) * eq_rho,
+
           (comm_w_plus_r_inv_col_col + comm_w_plus_r_inv_col_L_col * gamma + w_plus_r_inv_col * r - claim_one) * eq_rho,
         ];
 
@@ -1777,15 +2482,63 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
         let claims_witness = [W * eq_masked_tau];
 
         chain![claims_mem, claims_outer, claims_inner, claims_witness]
+        // chain![claims_inner]
+
       }
     )
-    .flatten()
-    .zip_eq(s_powers)
-    .fold(claim_zero, |acc, (claim, s)| acc + claim * s);
+    .flatten().collect();
+    // .zip_eq(s_powers)
+    // .fold(claim_zero, |acc, (claim, s)| acc + claim * s);
 
-    if claim_sc_final_expected != Commitment::<E>::decompress(&claim_sc_final)? {
-      return Err(NovaError::InvalidSumcheckProof);
+    let mut claim_sc_final_expected = claim_sc_final_expected_vec[0] * s_powers[0];
+
+    for i in 1..s_powers.len() {
+      claim_sc_final_expected = claim_sc_final_expected + claim_sc_final_expected_vec[i] * s_powers[i];
     }
+
+    
+    // let claim_sc_final_expected_vec_2: Vec<_> = (0..claim_sc_final_expected_vec.len()).map(|i| claim_sc_final_expected_vec[i] * s_powers[i]).collect();
+
+    // let claim_sc_final_dec  = Commitment::<E>::decompress(&claim_sc_final)?;
+
+    let claim_inner_final_expected_comp = claim_sc_final_expected.compress();
+
+    let claim_inner_final_expected_zero_comp = (claim_sc_final_expected + claim_zero).compress();
+
+    let claim_zero_2 = <E as Engine>::CE::zkcommit(&vk.sumcheck_gens.ck_1, &[<E as Engine>::Scalar::ZERO], &<E as Engine>::Scalar::ZERO);
+
+
+    let claim_inner_final_expected_zero_comp_2 = (claim_sc_final_expected + claim_zero_2).compress();
+
+
+        // verify proof that claim_inner_final_expected == claim_post_inner
+        self.proof_eq_sc_inner.verify(
+          &vk.sumcheck_gens.ck_1,
+          &mut transcript,
+          &claim_inner_final_expected_comp,
+          // &self.comm_eval_last,
+          &claim_sc_final,
+      )?;
+
+    // if self.comm_eval_last != claim_sc_final {
+    //   return Err(NovaError::InvalidSumcheckProof);
+    // }
+
+
+    // if claim_sc_final_expected != claim_sc_final_dec {
+    //   return Err(NovaError::InvalidSumcheckProof);
+    // }
+
+    // if claim_sc_final_expected.compress() != claim_sc_final {
+    //   return Err(NovaError::InvalidSumcheckProof);
+    // }
+
+    // if claim_sc_final_expected != Commitment::<E>::decompress(&claim_sc_final)? {
+    //   return Err(NovaError::InvalidSumcheckProof);
+    // }
+
+    println!("post claim_sc_final_expected != Com");
+
 
     // let evals_vec = zip_with!(
     //   iter,
@@ -1811,7 +2564,10 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
 
 
 
-    let _c = transcript.squeeze(b"c")?;
+    // let _c = transcript.squeeze(b"c")?;
+
+
+    // let _tau = transcript.squeeze(b"t")?;
 
     // // Compute batched polynomial evaluation instance at rand_sc
     // let u = {
@@ -1824,34 +2580,60 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
     //     .flat_map(|num_rounds| vec![*num_rounds; num_evals].into_iter())
     //     .collect::<Vec<_>>();
 
-    //   let comms_vec = zip_with!(
-    //     (
-    //       comms_Az_Bz_Cz.into_iter(),
-    //       U.iter(),
-    //       comms_L_row_col.into_iter(),
-    //       comms_mem_oracles.into_iter(),
-    //       vk.S_comm.iter()
-    //     ),
-    //     |Az_Bz_Cz, U, L_row_col, mem_oracles, S_comm| {
-    //       chain![
-    //         Az_Bz_Cz,
-    //         [U.comm_W, U.comm_E],
-    //         L_row_col,
-    //         mem_oracles,
-    //         [
-    //           S_comm.comm_val_A,
-    //           S_comm.comm_val_B,
-    //           S_comm.comm_val_C,
-    //           S_comm.comm_row,
-    //           S_comm.comm_col,
-    //           S_comm.comm_ts_row,
-    //           S_comm.comm_ts_col,
-    //         ]
-    //       ]
-    //     }
-    //   )
-    //   .flatten()
-    //   .collect::<Vec<_>>();
+      // let comms_vec = zip_with!(
+      //   (
+      //     // comms_Az_Bz_Cz.into_iter(),
+      //     // comm_W_vec.into_iter(),
+      //     // comm_E_vec.into_iter()
+      //     comms_L_row_col.into_iter(),
+      //     comms_mem_oracles.into_iter(),
+      //     comm_evals_mem_preprocessed.into_iter()
+      //   ),
+      //   |L_row_col, mem_oracles, comm_evals_mem_preprocessed| {
+      //     chain![
+      //       // Az_Bz_Cz,
+      //       // [comm_E, comm_W],
+      //       L_row_col,
+      //       mem_oracles,
+      //       comm_evals_mem_preprocessed,
+      //     ]
+      //   }
+      // )
+      // .flatten()
+      // .collect::<Vec<_>>();
+
+      let comms_vec = zip_with!(
+        (
+          comms_Az_Bz_Cz.into_iter(),
+          U.iter(),
+          comms_L_row_col.into_iter(),
+          comms_mem_oracles.into_iter(),
+          vk.S_comm.iter()
+        ),
+        |Az_Bz_Cz, U, L_row_col, mem_oracles, S_comm| {
+          chain![
+            Az_Bz_Cz,
+            [U.comm_W, U.comm_E],
+            L_row_col,
+            mem_oracles,
+            [
+              S_comm.comm_val_A.clone(),
+              S_comm.comm_val_B.clone(),
+              S_comm.comm_val_C.clone(),
+              S_comm.comm_row.clone(),
+              S_comm.comm_col.clone(),
+              S_comm.comm_ts_row.clone(),
+              S_comm.comm_ts_col.clone(),
+            ]
+          ]
+        }
+      )
+      .flatten()
+      .collect::<Vec<_>>();
+
+
+      // let comms_vec = U.iter().map(|U| [U.comm_W, U.comm_E]).flatten().collect::<Vec<_>>();
+
 
     //   PolyEvalInstance::<E>::batch_diff_size(&comms_vec, &evals_vec, &num_vars, rand_sc, c)
     // };
@@ -1859,13 +2641,12 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
     // verify
     // EE::verify_batch(&vk.vk_ee, &mut transcript, &u.c, &u.x, &u.e, &self.eval_arg)?;
 
-    let comm_vec = vec![];
-    let points = vec![];
+    let points = vec![rand_sc; comms_vec.len()];
 
     EE::verify_batch(
       &vk.vk_ee,
       &mut transcript,
-      &comm_vec,
+      &comms_vec,
       &points,
       &self.eval_arg,
     )?;
@@ -1920,12 +2701,14 @@ where
   ///   u'' = L_0(r_{0},...,r_{n-m-1}) * u'
   /// in order batch all evaluations with a single PCS call.
   fn prove_helper<T1, T2, T3, T4>(
-    ck: &CommitmentKey<E>,
+    _ck: &CommitmentKey<E>,
     num_rounds: usize,
     mut mem: Vec<T1>,
     mut outer: Vec<T2>,
     mut inner: Vec<T3>,
     mut witness: Vec<T4>,
+    ck_1: &CommitmentKey<E>, // generator of size 1
+    ck_n: &CommitmentKey<E>, // generators of size n
     transcript: &mut E::TE,
   ) -> Result<
     (
@@ -1935,6 +2718,12 @@ where
       Vec<Vec<Vec<E::Scalar>>>,
       Vec<Vec<Vec<E::Scalar>>>,
       Vec<Vec<Vec<E::Scalar>>>,
+      CompressedCommitment<E>,
+      E::Scalar,
+      CompressedCommitment<E>,
+      E::Scalar,
+      Vec<E::Scalar>,
+      E::Scalar,
     ),
     NovaError,
   >
@@ -1986,6 +2775,32 @@ where
     .flatten()
     .collect::<Vec<E::Scalar>>();
 
+
+    // let claims = zip_with!(
+    //   iter,
+    //   (mem, outer, inner, witness),
+    //   |mem, outer, inner, witness| {
+    //     Self::scaled_claims(inner, num_rounds)
+    //       .into_iter()
+    //   }
+    // )
+    // .flatten()
+    // .collect::<Vec<E::Scalar>>();
+
+    let blind_claims = zip_with!(
+      iter,
+      (mem, outer, inner, witness),
+      |mem, outer, inner, witness| {
+        Self::scaled_blind_claims(mem, num_rounds)
+        .into_iter()
+        .chain(Self::scaled_blind_claims(outer, num_rounds))
+        .chain(Self::scaled_blind_claims(inner, num_rounds))
+        .chain(Self::scaled_blind_claims(witness, num_rounds))
+      }
+    )
+    .flatten()
+    .collect::<Vec<E::Scalar>>();
+
     // Sample a challenge for the random linear combination of all scaled claims
     let s = transcript.squeeze(b"r")?;
     let coeffs = powers(&s, claims.len());
@@ -1993,16 +2808,26 @@ where
     // At the start of each round, the running claim is equal to the random linear combination
     // of the Sumcheck claims, evaluated over the bound polynomials.
     // Initially, it is equal to the random linear combination of the scaled input claims.
-    let mut running_claim = zip_with!(iter, (claims, coeffs), |c_1, c_2| *c_1 * c_2).sum();
+    let mut claim_per_round = zip_with!(iter, (claims, coeffs), |c_1, c_2| *c_1 * c_2).sum();
+    // let mut claim_per_round = <E as Engine>::Scalar::ZERO;
+
+
+    // let blind_claim = <E as Engine>::Scalar::random(&mut OsRng);
+    // let blind_claim = <E as Engine>::Scalar::ZERO;
+    let blind_claim = zip_with!(iter, (blind_claims, coeffs), |c_1, c_2| *c_1 * c_2).sum();;
+
+    let mut comm_claim_per_round =
+    <E as Engine>::CE::zkcommit(ck_1, &[claim_per_round], &blind_claim).compress();
+
+    let comm_claim = comm_claim_per_round.clone();
 
     // Keep track of the verifier challenges r, and the univariate polynomials sent by the prover
     // in each round
     let mut r: Vec<E::Scalar> = Vec::new();
-    let mut cubic_polys: Vec<CompressedUniPoly<E::Scalar>> = Vec::new();
 
     let mut comm_polys = Vec::new();
     let mut comm_evals = Vec::new();
-    let proofs = Vec::new();
+    let mut proofs = Vec::new();
 
     let (blinds_poly, blinds_evals) = {
       (
@@ -2051,6 +2876,33 @@ where
       .flatten()
       .collect::<Vec<_>>();
 
+
+      // let evals = zip_with!(
+      //   par_iter,
+      //   (mem, outer, inner, witness),
+      //   |mem, outer, inner, witness| {
+      //     let ((evals_mem, evals_outer), (evals_inner, evals_witness)) = rayon::join(
+      //       || {
+      //         rayon::join(
+      //           || Self::get_evals(mem, remaining_variables),
+      //           || Self::get_evals(outer, remaining_variables),
+      //         )
+      //       },
+      //       || {
+      //         rayon::join(
+      //           || Self::get_evals(inner, remaining_variables),
+      //           || Self::get_evals(witness, remaining_variables),
+      //         )
+      //       },
+      //     );
+      //     evals_inner
+      //       .into_par_iter()
+      //   }
+      // )
+      // .flatten()
+      // .collect::<Vec<_>>();
+
+
       assert_eq!(evals.len(), claims.len());
 
       // Random linear combination of the univariate evaluations at X_i = 0, 2, 3
@@ -2060,19 +2912,22 @@ where
 
       let evals = vec![
         evals_combined_0,
-        running_claim - evals_combined_0,
+        claim_per_round - evals_combined_0,
         evals_combined_2,
         evals_combined_3,
       ];
       // Coefficient representation of S(X_i)
       let poly = UniPoly::from_evals(&evals);
+      let comm_poly: zk_pedersen::CompressedCommitment<E> = <E as Engine>::CE::zkcommit(ck_n, &poly.coeffs, &blinds_poly[i]).compress();
+      transcript.absorb(b"comm_poly", &comm_poly);
+      comm_polys.push(comm_poly);
 
       // append the prover's message to the transcript
-      transcript.absorb(b"p", &poly);
+      // transcript.absorb(b"p", &poly);
 
       // derive the verifier's challenge for the next round
-      let r_i = transcript.squeeze(b"c")?;
-      r.push(r_i);
+      let r_i = transcript.squeeze(b"challenge_nextround")?;
+      // r.push(r_i);
 
       // Bind the variable X_i of polynomials across all claims to r_i.
       // If the claim is defined over m variables and m < n-i, then
@@ -2098,13 +2953,100 @@ where
         }
       );
 
-      running_claim = poly.evaluate(&r_i);
-      let comm_e: crate::provider::zk_pedersen::CompressedCommitment<E> = <E as Engine>::CE::zkcommit(ck, &[running_claim], &blinds_evals[i]).compress();
-      cubic_polys.push(poly.compress());
+      // produce a proof of sum-check an of evaluation
+      let (proof, claim_next_round, comm_claim_next_round) = {
+          let eval = poly.evaluate(&r_i);
+          let comm_eval = <E as Engine>::CE::zkcommit(ck_1, &[eval], &blinds_evals[i]).compress();
 
-      let comm_poly: crate::provider::zk_pedersen::CompressedCommitment<E> = <E as Engine>::CE::zkcommit(ck, &poly.coeffs, &blinds_poly[i]).compress();
-      comm_polys.push(comm_poly);
-      comm_evals.push(comm_e);
+          // we need to prove the following under homomorphic commitments:
+          // (1) poly(0) + poly(1) = claim_per_round
+          // (2) poly(r_j) = eval
+
+          // Our technique is to leverage dot product proofs:
+          // (1) we can prove: <poly_in_coeffs_form, (2, 1, 1, 1)> = claim_per_round
+          // (2) we can prove: <poly_in_coeffs_form, (1, r_j, r^2_j, ..) = eval
+          // for efficiency we batch them using random weights
+
+          // add two claims to transcript
+          transcript.absorb(b"comm_claim_per_round", &comm_claim_per_round);
+          transcript.absorb(b"comm_eval", &comm_eval);
+
+          // produce two weights
+          let w0 = transcript.squeeze(b"combine_two_claims_to_one_0")?;
+          let w1 = transcript.squeeze(b"combine_two_claims_to_one_1")?;
+
+          let decompressed_comm_claim_per_round = Commitment::<E>::decompress(&comm_claim_per_round)?;
+          let decompressed_comm_eval = Commitment::<E>::decompress(&comm_eval)?;
+
+          // compute a weighted sum of the RHS
+          let target = claim_per_round * w0 + eval * w1;
+
+          let comm_target =
+              (decompressed_comm_claim_per_round * w0 + decompressed_comm_eval * w1).compress();
+
+          let blind = {
+              let blind_sc = if i == 0 {
+                  &blind_claim
+              } else {
+                  &blinds_evals[i - 1]
+              };
+
+              let blind_eval = &blinds_evals[i];
+
+              w0 * blind_sc + w1 * blind_eval
+          };
+
+
+          assert_eq!(
+              <E as Engine>::CE::zkcommit(ck_1, &[target], &blind).compress(),
+              comm_target
+          );
+
+          let a = {
+              // the vector to use to decommit for sum-check test
+              let a_sc = {
+                  let mut a = vec![<E as Engine>::Scalar::ONE; poly.degree() + 1];
+                  a[0] += <E as Engine>::Scalar::ONE;
+                  a
+              };
+
+              // the vector to use to decommit for evaluation
+              let a_eval = {
+                  let mut a = vec![<E as Engine>::Scalar::ONE; poly.degree() + 1];
+                  for i in 1..a.len() {
+                      a[i] = a[i - 1] * r_i;
+                  }
+                  a
+              };
+
+              // take a weighted sum of the two vectors using w
+              assert_eq!(a_sc.len(), a_eval.len());
+              
+              (0..a_sc.len())
+                  .map(|j| w0 * a_sc[j] + w1 * a_eval[j])
+                  .collect::<Vec<<E as Engine>::Scalar>>()
+          };
+
+          let (proof, _comm_poly, _comm_sc_eval) = DotProductProof::prove(
+              ck_1,
+              ck_n,
+              transcript,
+              &poly.coeffs,
+              &blinds_poly[i],
+              &a,
+              &target,
+              &blind,
+          )?;
+
+          (proof, eval, comm_eval)
+      };
+
+      claim_per_round = claim_next_round;
+      comm_claim_per_round = comm_claim_next_round.clone();
+
+      proofs.push(proof);
+      r.push(r_i);
+      comm_evals.push(comm_claim_per_round.clone());
     }
 
     // Collect evaluations at (r_{n-m}, ..., r_{n-1}) of polynomials over all claims,
@@ -2117,6 +3059,9 @@ where
       .map(|inst| inst.final_claims())
       .collect();
 
+    let comm_eval_last = comm_evals[comm_evals.len() - 1].clone();
+    let blind_eval_last = blinds_evals[comm_evals.len() - 1];
+
     Ok((
       ZKSumcheckProof::new(comm_polys, comm_evals, proofs),
       r,
@@ -2124,6 +3069,12 @@ where
       claims_inner,
       claims_mem,
       claims_witness,
+      comm_claim,
+      claim_per_round,
+      comm_eval_last,
+      blind_eval_last,
+      coeffs,
+      blinds_evals[num_rounds - 1],
     ))
   }
 
@@ -2170,6 +3121,17 @@ where
       .map(|claim| scaling * claim)
       .collect()
   }
+
+  fn scaled_blind_claims<T: ZKSumcheckEngine<E>>(inst: &T, remaining_variables: usize) -> Vec<E::Scalar> {
+    let num_instance_variables = inst.size().log_2(); // m
+    let num_repetitions = 1 << (remaining_variables - num_instance_variables);
+    let scaling = E::Scalar::from(num_repetitions as u64);
+    inst
+      .initial_blinds()
+      .iter()
+      .map(|claim| scaling * claim)
+      .collect()
+  }
 }
 
 impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E>
@@ -2200,7 +3162,9 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>, EE: EvaluationEngineTrai
     pk: &Self::ProverKey,
     S: &R1CSShape<E>,
     U: &RelaxedR1CSInstance<E>,
-    W: &RelaxedR1CSWitness<E>,
+    W: &ZKRelaxedR1CSWitness<E>,
+    // W: &RelaxedR1CSWitness<E>,
+
   ) -> Result<Self, NovaError> {
     let slice_U = slice::from_ref(U);
     let slice_W = slice::from_ref(W);
