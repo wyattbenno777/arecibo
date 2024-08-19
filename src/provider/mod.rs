@@ -93,7 +93,7 @@ impl Engine for ZKGrumpkinEngine {
   type RO = PoseidonRO<Self::Base, Self::Scalar>;
   type ROCircuit = PoseidonROCircuit<Self::Base>;
   type TE = Keccak256Transcript<Self>;
-  type CE = PedersenCommitmentEngine<Self>;
+  type CE = ZKPedersenCommitmentEngine<Self>;
 }
 
 /// An implementation of the Nova `Engine` trait with BN254 curve and Zeromorph commitment scheme
