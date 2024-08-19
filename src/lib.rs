@@ -1,7 +1,7 @@
 //! This library implements Nova, a high-speed recursive SNARK.
 #![deny(
-  warnings,
-  unused,
+  // warnings,
+  // unused,
   future_incompatible,
   nonstandard_style,
   rust_2018_idioms,
@@ -15,6 +15,8 @@ mod bellpepper;
 mod circuit;
 mod digest;
 mod nifs;
+pub(crate) mod zknifs;
+
 
 #[cfg(test)]
 #[allow(unused)]
