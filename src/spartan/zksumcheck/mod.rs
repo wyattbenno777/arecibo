@@ -1,5 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
+#![allow(dead_code)]
+
 use super::nizk::DotProductProof;
 use crate::errors::NovaError;
 use crate::provider::zk_pedersen;
@@ -233,7 +235,7 @@ where
 
           let evals = vec![eval_point_0, claim_per_round - eval_point_0, eval_point_2];
           let poly = UniPoly::from_evals(&evals);
-          let comm_poly = <E as Engine>::CE::zkcommit(ck_n, &poly.coeffs, &blinds_poly[j]).compress();
+          let comm_poly: zk_pedersen::CompressedCommitment<E> = <E as Engine>::CE::zkcommit(ck_n, &poly.coeffs, &blinds_poly[j]).compress();
           (poly, comm_poly)
       };
 
@@ -270,10 +272,11 @@ where
           let w0 = transcript.squeeze(b"combine_two_claims_to_one_0")?;
           let w1 = transcript.squeeze(b"combine_two_claims_to_one_1")?;
 
-          // compute a weighted sum of the RHS
-          let target = w0 * claim_per_round + w1 * eval;
           let decompressed_comm_claim_per_round = Commitment::<E>::decompress(&comm_claim_per_round)?;
           let decompressed_comm_eval = Commitment::<E>::decompress(&comm_eval)?;
+
+          // compute a weighted sum of the RHS
+          let target = claim_per_round * w0 + eval * w1;
 
           let comm_target =
               (decompressed_comm_claim_per_round * w0 + decompressed_comm_eval * w1).compress();

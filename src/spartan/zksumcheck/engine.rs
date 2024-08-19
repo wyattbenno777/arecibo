@@ -1,4 +1,5 @@
 use ff::Field;
+use rand_core::OsRng;
 use rayon::prelude::*;
 
 use crate::provider::util::field::batch_invert;
@@ -63,6 +64,9 @@ pub trait ZKSumcheckEngine<E: Engine>: Send + Sync {
   /// returns the initial claims
   fn initial_claims(&self) -> Vec<<E as Engine>::Scalar>;
 
+  /// returns the initial blinds
+  fn initial_blinds(&self) -> Vec<<E as Engine>::Scalar>;
+
   /// degree of the sum-check polynomial
   fn degree(&self) -> usize;
 
@@ -118,6 +122,10 @@ impl<E: Engine> WitnessBoundSumcheck<E> {
 }
 impl<E:Engine> ZKSumcheckEngine<E> for WitnessBoundSumcheck<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E>, E::GE: DlogGroup<ScalarExt = E::Scalar>,   E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>> {
   fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
+    vec![<E as Engine>::Scalar::ZERO]
+  }
+
+  fn initial_blinds(&self) -> Vec<<E as Engine>::Scalar> {
     vec![<E as Engine>::Scalar::ZERO]
   }
 
@@ -179,7 +187,10 @@ pub(in crate::spartan) struct MemorySumcheckInstance<E: Engine> {
   poly_zero: MultilinearPolynomial<E::Scalar>,
 }
 
-impl<E: Engine> MemorySumcheckInstance<E> {
+impl<E: Engine> MemorySumcheckInstance<E>
+where 
+    <E as Engine>::CE: ZKCommitmentEngineTrait<E>,
+{
   /// Computes witnesses for `MemoryInstanceSumcheck`
   ///
   /// # Description
@@ -212,7 +223,7 @@ impl<E: Engine> MemorySumcheckInstance<E> {
     addr_col: &[E::Scalar],
     L_col: &[E::Scalar],
     ts_col: &[E::Scalar],
-  ) -> Result<([Commitment<E>; 4], [Vec<E::Scalar>; 4], [Vec<E::Scalar>; 4]), NovaError> {
+  ) -> Result<([Commitment<E>; 4], [Vec<E::Scalar>; 4], [Vec<E::Scalar>; 4], [E::Scalar; 4]), NovaError> {
     // hash the tuples of (addr,val) memory contents and read responses into a single field element using `hash_func`
     let hash_func_vec = |mem: &[E::Scalar],
                          addr: &[E::Scalar],
@@ -288,20 +299,25 @@ impl<E: Engine> MemorySumcheckInstance<E> {
     let t_plus_r_inv_col = t_plus_r_inv_col?;
     let w_plus_r_inv_col = w_plus_r_inv_col?;
 
+    let blind_t_plus_r_inv_row = <E as Engine>::Scalar::random(&mut OsRng);
+    let blind_w_plus_r_inv_row = <E as Engine>::Scalar::random(&mut OsRng);
+    let blind_t_plus_r_inv_col = <E as Engine>::Scalar::random(&mut OsRng);
+    let blind_w_plus_r_inv_col = <E as Engine>::Scalar::random(&mut OsRng);
+
     let (
       (comm_t_plus_r_inv_row, comm_w_plus_r_inv_row),
       (comm_t_plus_r_inv_col, comm_w_plus_r_inv_col),
     ) = rayon::join(
       || {
         rayon::join(
-          || E::CE::commit(ck, &t_plus_r_inv_row),
-          || E::CE::commit(ck, &w_plus_r_inv_row),
+          || E::CE::zkcommit(ck, &t_plus_r_inv_row, &blind_t_plus_r_inv_row),
+          || E::CE::zkcommit(ck, &w_plus_r_inv_row, &blind_w_plus_r_inv_row),
         )
       },
       || {
         rayon::join(
-          || E::CE::commit(ck, &t_plus_r_inv_col),
-          || E::CE::commit(ck, &w_plus_r_inv_col),
+          || E::CE::zkcommit(ck, &t_plus_r_inv_col, &blind_t_plus_r_inv_col),
+          || E::CE::zkcommit(ck, &w_plus_r_inv_col, &blind_w_plus_r_inv_col),
         )
       },
     );
@@ -313,6 +329,13 @@ impl<E: Engine> MemorySumcheckInstance<E> {
       comm_w_plus_r_inv_col,
     ];
 
+    let blind_vec = [
+      blind_t_plus_r_inv_row,
+      blind_w_plus_r_inv_row,
+      blind_t_plus_r_inv_col,
+      blind_w_plus_r_inv_col,
+    ];
+
     let poly_vec = [
       t_plus_r_inv_row,
       w_plus_r_inv_row,
@@ -322,7 +345,7 @@ impl<E: Engine> MemorySumcheckInstance<E> {
 
     let aux_poly_vec = [t_plus_r_row, w_plus_r_row, t_plus_r_col, w_plus_r_col];
 
-    Ok((comm_vec, poly_vec, aux_poly_vec))
+    Ok((comm_vec, poly_vec, aux_poly_vec, blind_vec))
   }
 
   pub fn new(
@@ -356,6 +379,10 @@ impl<E: Engine> MemorySumcheckInstance<E> {
 
 impl<E: Engine> ZKSumcheckEngine<E> for MemorySumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E>, E::GE: DlogGroup<ScalarExt = E::Scalar>,   E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>{
   fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
+    vec![<E as Engine>::Scalar::ZERO; 6]
+  }
+
+  fn initial_blinds(&self) -> Vec<<E as Engine>::Scalar> {
     vec![<E as Engine>::Scalar::ZERO; 6]
   }
 
@@ -503,6 +530,7 @@ pub(in crate::spartan) struct OuterSumcheckInstance<E: Engine> {
 
   poly_Mz: MultilinearPolynomial<E::Scalar>,
   eval_Mz_at_tau: E::Scalar,
+  blind_eval_Mz_at_tau: E::Scalar,
 
   poly_zero: MultilinearPolynomial<E::Scalar>,
 }
@@ -515,6 +543,7 @@ impl<E: Engine> OuterSumcheckInstance<E> {
     uCz_E: Vec<E::Scalar>,
     Mz: Vec<E::Scalar>,
     eval_Mz_at_tau: &E::Scalar,
+    blind_eval_Mz_at_tau: &E::Scalar,
   ) -> Self {
     let zero = vec![E::Scalar::ZERO; tau.len()];
     Self {
@@ -524,6 +553,7 @@ impl<E: Engine> OuterSumcheckInstance<E> {
       poly_uCz_E: MultilinearPolynomial::new(uCz_E),
       poly_Mz: MultilinearPolynomial::new(Mz),
       eval_Mz_at_tau: *eval_Mz_at_tau,
+      blind_eval_Mz_at_tau: *blind_eval_Mz_at_tau,
       poly_zero: MultilinearPolynomial::new(zero),
     }
   }
@@ -532,6 +562,10 @@ impl<E: Engine> OuterSumcheckInstance<E> {
 impl<E: Engine> ZKSumcheckEngine<E> for OuterSumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E>, E::GE: DlogGroup<ScalarExt = E::Scalar>,   E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>{
   fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
     vec![<E as Engine>::Scalar::ZERO, self.eval_Mz_at_tau]
+  }
+
+  fn initial_blinds(&self) -> Vec<<E as Engine>::Scalar> {
+    vec![<E as Engine>::Scalar::ZERO, self.blind_eval_Mz_at_tau]
   }
 
   fn degree(&self) -> usize {
@@ -601,6 +635,7 @@ impl<E: Engine> ZKSumcheckEngine<E> for OuterSumcheckInstance<E> where <E as Eng
 
 pub(in crate::spartan) struct InnerSumcheckInstance<E: Engine> {
   pub(in crate::spartan) claim: E::Scalar,
+  pub(in crate::spartan) blind_claim: E::Scalar,
   pub(in crate::spartan) poly_L_row: MultilinearPolynomial<E::Scalar>,
   pub(in crate::spartan) poly_L_col: MultilinearPolynomial<E::Scalar>,
   pub(in crate::spartan) poly_val: MultilinearPolynomial<E::Scalar>,
@@ -609,12 +644,14 @@ impl<E: Engine> InnerSumcheckInstance<E> {
   #[allow(unused)]
   pub fn new(
     claim: E::Scalar,
+    blind_claim: E::Scalar,
     poly_L_row: MultilinearPolynomial<E::Scalar>,
     poly_L_col: MultilinearPolynomial<E::Scalar>,
     poly_val: MultilinearPolynomial<E::Scalar>,
   ) -> Self {
     Self {
       claim,
+      blind_claim,
       poly_L_row,
       poly_L_col,
       poly_val,
@@ -624,6 +661,10 @@ impl<E: Engine> InnerSumcheckInstance<E> {
 impl<E: Engine> ZKSumcheckEngine<E> for InnerSumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E>, E::GE: DlogGroup<ScalarExt = E::Scalar>,   E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>> {
   fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
     vec![self.claim]
+  }
+
+  fn initial_blinds(&self) -> Vec<<E as Engine>::Scalar> {
+    vec![self.blind_claim]
   }
 
   fn degree(&self) -> usize {
@@ -682,7 +723,10 @@ pub(in crate::spartan) struct LookupSumcheckInstance<E: Engine> {
   initial_claim: Option<E::Scalar>,
 }
 
-impl<E: Engine> LookupSumcheckInstance<E> {
+impl<E: Engine> LookupSumcheckInstance<E>
+where 
+    <E as Engine>::CE: ZKCommitmentEngineTrait<E>,
+{
   /// Computes witnesses for MemoryInstanceSumcheck
   ///
   /// # Description
@@ -809,14 +853,16 @@ impl<E: Engine> LookupSumcheckInstance<E> {
       )
     };
 
-    let ((t_inv, w_inv), (t, w)) = {
+    let ((t_inv, w_inv), (t, w), (blind_t_inv, blind_w_inv)) = {
       let ((t_inv, w_inv), (t, w)) = helper(&T, &W, ts, r);
-      ((t_inv?, w_inv?), (t?, w?))
+      let blind_t_inv = <E as Engine>::Scalar::random(&mut OsRng);
+      let blind_w_inv = <E as Engine>::Scalar::random(&mut OsRng);
+      ((t_inv?, w_inv?), (t?, w?), (blind_t_inv, blind_w_inv))
     };
 
     let comm_vec = {
       let (t_inv_comm, w_inv_comm) =
-        rayon::join(|| E::CE::commit(ck, &t_inv), || E::CE::commit(ck, &w_inv));
+        rayon::join(|| E::CE::zkcommit(ck, &t_inv, &blind_t_inv), || E::CE::zkcommit(ck, &w_inv, &blind_w_inv));
       [t_inv_comm, w_inv_comm]
     };
     let poly_vec = [t_inv, w_inv];
@@ -853,6 +899,15 @@ impl<E: Engine> LookupSumcheckInstance<E> {
 
 impl<E: Engine> ZKSumcheckEngine<E> for LookupSumcheckInstance<E> where <E as Engine>::CE: ZKCommitmentEngineTrait<E>, E::GE: DlogGroup<ScalarExt = E::Scalar>,   E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>> {
   fn initial_claims(&self) -> Vec<<E as Engine>::Scalar> {
+    vec![
+      self.initial_claim.unwrap_or_default(),
+      <E as Engine>::Scalar::ZERO,
+      <E as Engine>::Scalar::ZERO,
+    ]
+  }
+
+  fn initial_blinds(&self) -> Vec<<E as Engine>::Scalar> {
+    // TODO: fix initial_claim
     vec![
       self.initial_claim.unwrap_or_default(),
       <E as Engine>::Scalar::ZERO,
