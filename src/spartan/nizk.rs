@@ -204,13 +204,13 @@ impl<E: Engine> ProductProof<E> where E::CE: ZKCommitmentEngineTrait<E> {
   /// prove
   pub fn prove(
     ck_n: &CommitmentKey<E>,
-    transcript: &mut <E as Engine>::TE,
-    x: &<E as Engine>::Scalar,
-    rX: &<E as Engine>::Scalar,
-    y: &<E as Engine>::Scalar,
-    rY: &<E as Engine>::Scalar,
-    z: &<E as Engine>::Scalar,
-    rZ: &<E as Engine>::Scalar,
+    transcript: &mut E::TE,
+    x: &E::Scalar,
+    rX: &E::Scalar,
+    y: &E::Scalar,
+    rY: &E::Scalar,
+    z: &E::Scalar,
+    rZ: &E::Scalar,
   ) -> Result<
     (
       ProductProof<E>,
@@ -223,29 +223,29 @@ impl<E: Engine> ProductProof<E> where E::CE: ZKCommitmentEngineTrait<E> {
     transcript.dom_sep(Self::protocol_name());
 
     // produce 5 random scalars
-    let b1 = <E as Engine>::Scalar::random(&mut OsRng);
-    let b2 = <E as Engine>::Scalar::random(&mut OsRng);
-    let b3 = <E as Engine>::Scalar::random(&mut OsRng);
-    let b4 = <E as Engine>::Scalar::random(&mut OsRng);
-    let b5 = <E as Engine>::Scalar::random(&mut OsRng);
+    let b1 = E::Scalar::random(&mut OsRng);
+    let b2 = E::Scalar::random(&mut OsRng);
+    let b3 = E::Scalar::random(&mut OsRng);
+    let b4 = E::Scalar::random(&mut OsRng);
+    let b5 = E::Scalar::random(&mut OsRng);
 
-    let X = <E as Engine>::CE::zkcommit(ck_n, &[*x], rX).compress();
+    let X = E::CE::zkcommit(ck_n, &[*x], rX).compress();
     transcript.absorb(b"X", &X);
 
-    let Y = <E as Engine>::CE::zkcommit(ck_n, &[*y], rY).compress();
+    let Y = E::CE::zkcommit(ck_n, &[*y], rY).compress();
     transcript.absorb(b"Y", &Y);
 
-    let Z = <E as Engine>::CE::zkcommit(ck_n, &[*z], rZ).compress();
+    let Z = E::CE::zkcommit(ck_n, &[*z], rZ).compress();
     transcript.absorb(b"Z", &Z);
 
-    let alpha = <E as Engine>::CE::zkcommit(ck_n, &[b1], &b2).compress();
+    let alpha = E::CE::zkcommit(ck_n, &[b1], &b2).compress();
     transcript.absorb(b"alpha", &alpha);
 
-    let beta = <E as Engine>::CE::zkcommit(ck_n, &[b3], &b4).compress();
+    let beta = E::CE::zkcommit(ck_n, &[b3], &b4).compress();
     transcript.absorb(b"beta", &beta);
 
     let delta = {
-      let h_to_b5 = <E as Engine>::CE::zkcommit(ck_n, &[<E as Engine>::Scalar::ZERO], &b5); // h^b5
+      let h_to_b5 = E::CE::zkcommit(ck_n, &[E::Scalar::ZERO], &b5); // h^b5
       (Commitment::<E>::decompress(&X)? * b3 + h_to_b5).compress() // X^b3*h^b5
     };
 
@@ -277,13 +277,13 @@ impl<E: Engine> ProductProof<E> where E::CE: ZKCommitmentEngineTrait<E> {
   fn check_equality(
     P: &CompressedCommitment<E>,
     X: &CompressedCommitment<E>,
-    c: &<E as Engine>::Scalar,
+    c: &E::Scalar,
     ck_n: &CommitmentKey<E>,
-    z1: &<E as Engine>::Scalar,
-    z2: &<E as Engine>::Scalar,
+    z1: &E::Scalar,
+    z2: &E::Scalar,
   ) -> Result<bool, NovaError> {
     let lhs = (Commitment::<E>::decompress(P)? + Commitment::<E>::decompress(X)? * *c).compress();
-    let rhs = <E as Engine>::CE::zkcommit(ck_n, &[*z1], z2).compress();
+    let rhs = E::CE::zkcommit(ck_n, &[*z1], z2).compress();
 
     Ok(lhs == rhs)
   }
@@ -292,7 +292,7 @@ impl<E: Engine> ProductProof<E> where E::CE: ZKCommitmentEngineTrait<E> {
   pub fn verify(
     &self,
     ck_n: &CommitmentKey<E>,
-    transcript: &mut <E as Engine>::TE,
+    transcript: &mut E::TE,
     X: &CompressedCommitment<E>,
     Y: &CompressedCommitment<E>,
     Z: &CompressedCommitment<E>,
@@ -321,7 +321,7 @@ impl<E: Engine> ProductProof<E> where E::CE: ZKCommitmentEngineTrait<E> {
       let lhs = (Commitment::<E>::decompress(&self.delta)? + Commitment::<E>::decompress(Z)? * c)
         .compress();
 
-      let h_to_z5 = <E as Engine>::CE::zkcommit(ck_n, &[<E as Engine>::Scalar::ZERO], &z5); // h^z5
+      let h_to_z5 = E::CE::zkcommit(ck_n, &[E::Scalar::ZERO], &z5); // h^z5
       let rhs = (Commitment::<E>::decompress(X)? * z3 + h_to_z5).compress(); // X^z3*h^z5
       lhs == rhs
     };
