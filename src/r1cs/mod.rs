@@ -994,8 +994,9 @@ impl<E: Engine> ZKRelaxedR1CSWitness<E> {
   /// Mutably folds an incoming `R1CSWitness` into the current one
   pub fn fold_mut(
     &mut self,
-    W2: &R1CSWitness<E>,
+    W2: &ZKR1CSWitness<E>,
     T: &[E::Scalar],
+    r_T: &<E as Engine>::Scalar,
     r: &E::Scalar,
   ) -> Result<(), NovaError> {
     if self.W.len() != W2.W.len() {
@@ -1012,6 +1013,12 @@ impl<E: Engine> ZKRelaxedR1CSWitness<E> {
       .par_iter_mut()
       .zip_eq(T)
       .for_each(|(a, b)| *a += *r * *b);
+
+    let (W1, r_W1, E1, r_E1) = (&self.W, &self.r_W, &self.E, &self.r_E);
+    let (W2, r_W2) = (&W2.W, &W2.r_W);
+
+    self.r_W = *r_W1 + *r * *r_W2;
+    self.r_E = *r_E1 + *r * *r_T;
 
     Ok(())
   }
