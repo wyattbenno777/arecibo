@@ -1,6 +1,10 @@
 //! This module defines a final compressing SNARK for supernova proofs
 
 use super::{error::SuperNovaError, PublicParams, ZKRecursiveSNARK};
+use crate::r1cs::ZKRelaxedR1CSWitness;
+use crate::traits;
+use crate::traits::commitment;
+use crate::traits::commitment::ZKCommitmentEngineTrait;
 use crate::{
   constants::NUM_HASH_BITS,
   r1cs::{R1CSInstance, RelaxedR1CSWitness},
@@ -9,13 +13,9 @@ use crate::{
     AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROTrait,
   },
 };
-use crate::r1cs::ZKRelaxedR1CSWitness;
-use crate::{errors::NovaError, scalar_as_base, RelaxedR1CSInstance, zknifs::NIFS};
-use crate::traits;
-use crate::traits::commitment::ZKCommitmentEngineTrait;
+use crate::{errors::NovaError, scalar_as_base, zknifs::NIFS, RelaxedR1CSInstance};
 use ff::PrimeField;
 use serde::{Deserialize, Serialize};
-use crate::traits::commitment;
 
 /// A type that holds the prover key for `CompressedSNARK`
 #[derive(Debug)]
@@ -71,7 +71,8 @@ where
   S1: BatchedRelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
   <E1 as traits::Engine>::CE: commitment::ZKCommitmentEngineTrait<E1>,
-  <<E1 as CurveCycleEquipped>::Secondary as traits::Engine>::CE: ZKCommitmentEngineTrait<<E1 as CurveCycleEquipped>::Secondary>,
+  <<E1 as CurveCycleEquipped>::Secondary as traits::Engine>::CE:
+    ZKCommitmentEngineTrait<<E1 as CurveCycleEquipped>::Secondary>,
 {
   /// Creates prover and verifier keys for `CompressedSNARK`
   pub fn setup(
@@ -286,6 +287,7 @@ fn field_as_usize<F: PrimeField>(x: F) -> usize {
 #[cfg(test)]
 mod test {
   use super::*;
+  use crate::traits::commitment;
   use crate::{
     provider::{
       ipa_pc, zk_ipa_pc, Bn256EngineIPA, Bn256EngineZKPedersen, PallasEngine, Secp256k1Engine,
@@ -293,7 +295,6 @@ mod test {
     spartan::{self, batched, batched_ppsnark, snark::RelaxedR1CSSNARK},
     supernova::{circuit::TrivialSecondaryCircuit, NonUniformCircuit, StepCircuit},
   };
-  use crate::traits::commitment;
 
   use abomonation::Abomonation;
   use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
@@ -592,7 +593,8 @@ mod test {
     S1: BatchedRelaxedR1CSSNARKTrait<E1>,
     S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
     <E1 as traits::Engine>::CE: commitment::ZKCommitmentEngineTrait<E1>,
-    <<E1 as traits::CurveCycleEquipped>::Secondary as traits::Engine>::CE: ZKCommitmentEngineTrait<<E1 as traits::CurveCycleEquipped>::Secondary>,
+    <<E1 as traits::CurveCycleEquipped>::Secondary as traits::Engine>::CE:
+      ZKCommitmentEngineTrait<<E1 as traits::CurveCycleEquipped>::Secondary>,
     <E1::Scalar as PrimeField>::Repr: Abomonation,
     <<Dual<E1> as Engine>::Scalar as PrimeField>::Repr: Abomonation,
     C: NonUniformCircuit<E1, C1 = C, C2 = TrivialSecondaryCircuit<<Dual<E1> as Engine>::Scalar>>
@@ -673,6 +675,26 @@ mod test {
 
     // ppSNARK
     test_compression_with::<E1, S1, S2, _, _>(NUM_STEPS, TestCircuit::new);
+  }
+
+  #[test]
+  fn test_zk_nivc_trivial_with_compression_big() {
+    const NUM_STEPS: usize = 6;
+    // Curve cycle to prove on
+    type E1 = Bn256EngineZKPedersen;
+
+    // PCS to use
+    type EE1 = zk_ipa_pc::EvaluationEngine<E1>;
+    // PCS for secondary curve
+    type EE2 = zk_ipa_pc::EvaluationEngine<Dual<E1>>;
+
+    // SNARK for primary NIVC
+    type S1 = spartan::batched_zkppsnark::BatchedRelaxedR1CSSNARK<E1, EE1>;
+    // SNARK for secondary NIVC
+    type S2 = spartan::zksnark::RelaxedR1CSSNARK<Dual<E1>, EE2>;
+
+    // ppSNARK
+    test_compression_with::<E1, S1, S2, _, _>(NUM_STEPS, BigTestCircuit::new);
   }
 
   // #[test]
