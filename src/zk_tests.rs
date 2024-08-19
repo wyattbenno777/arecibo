@@ -23,7 +23,7 @@
 
 // type EE<E> = provider::zk_ipa_pc::EvaluationEngine<E>;
 // type S<E, EE> = spartan::zksnark::RelaxedR1CSSNARK<E, EE>;
-// type SPrime<E, EE> = spartan::zkppsnark::RelaxedR1CSSNARK<E, EE>;
+// type SPrime<E, EE> = spartan::batched_zkppsnark::RelaxedR1CSSNARK<E, EE>;
 
 // #[derive(Clone, Debug)]
 // struct CubicCircuit<F: PrimeField> {
@@ -264,6 +264,23 @@
 //     zn_secondary,
 //     vec![<Dual<E1> as Engine>::Scalar::from(2460515u64)]
 //   );
+
+//     // // run the compressed snark
+//     // // produce the prover and verifier keys for compressed snark
+//     // let (pk, vk) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
+
+//     // // produce a compressed SNARK
+//     // let compressed_snark = CompressedSNARK::<_, S1, S2>::prove(&pp, &pk, &recursive_snark).unwrap();
+
+//     // // verify the compressed SNARK
+//     // compressed_snark
+//     //   .verify(
+//     //     &vk,
+//     //     num_steps,
+//     //     &[<E1 as Engine>::Scalar::ONE],
+//     //     &[<Dual<E1> as Engine>::Scalar::ZERO],
+//     //   )
+//     //   .unwrap();
 // }
 
 // #[test]
