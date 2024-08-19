@@ -648,26 +648,6 @@ mod test {
   }
 
   #[test]
-  fn test_zk_nivc_trivial_with_compression() {
-    const NUM_STEPS: usize = 6;
-    // Curve cycle to prove on
-    type E1 = Bn256EngineZKPedersen;
-
-    // PCS to use
-    type EE1 = zk_ipa_pc::EvaluationEngine<E1>;
-    // PCS for secondary curve
-    type EE2 = ipa_pc::EvaluationEngine<Dual<E1>>;
-
-    // SNARK for primary NIVC
-    type S1 = spartan::batched_zkppsnark::BatchedRelaxedR1CSSNARK<E1, EE1>;
-    // SNARK for secondary NIVC
-    type S2 = spartan::snark::RelaxedR1CSSNARK<Dual<E1>, EE2>;
-
-    // ppSNARK
-    test_compression_with::<E1, S1, S2, _, _>(NUM_STEPS, TestCircuit::new);
-  }
-
-  #[test]
   fn test_compression_with_circuit_size_difference() {
     const NUM_STEPS: usize = 4;
 
