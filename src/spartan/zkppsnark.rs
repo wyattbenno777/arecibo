@@ -743,6 +743,8 @@ where
             .map(|i| U.u * Cz[i] + E[i])
             .collect::<Vec<<E as Engine>::Scalar>>(),
           w.p.clone(), // Mz = Az + r * Bz + r^2 * Cz
+          // TODO: fix later
+          &E::Scalar::ZERO,
           &u.e,        // eval_Az_at_tau + r * eval_Az_at_tau + r^2 * eval_Cz_at_tau
         );
 
@@ -755,6 +757,8 @@ where
         .collect::<Vec<<E as Engine>::Scalar>>();
         let inner_sc_inst = InnerSumcheckInstance {
           claim: eval_Az_at_tau + c * eval_Bz_at_tau + c * c * eval_Cz_at_tau,
+          // TODO: fix later
+          blind_claim: E::Scalar::ZERO,
           poly_L_row: MultilinearPolynomial::new(L_row.clone()),
           poly_L_col: MultilinearPolynomial::new(L_col.clone()),
           poly_val: MultilinearPolynomial::new(val),
@@ -768,7 +772,7 @@ where
 
         // hash the tuples of (addr,val) memory contents and read responses into a single field element using `hash_func`
 
-        let (comm_mem_oracles, mem_oracles, mem_aux) =
+        let (comm_mem_oracles, mem_oracles, mem_aux, _) =
           MemorySumcheckInstance::<E>::compute_oracles(
             ck,
             &r,
