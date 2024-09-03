@@ -11,7 +11,6 @@
 // #![forbid(unsafe_code)] // Commented for development with `Abomonation`
 
 // private modules
-mod bellpepper;
 mod circuit;
 mod digest;
 mod nifs;
@@ -21,6 +20,7 @@ mod nifs;
 mod zk_tests;
 
 // public modules
+pub mod bellpepper;
 pub mod constants;
 pub mod errors;
 pub mod gadgets;
