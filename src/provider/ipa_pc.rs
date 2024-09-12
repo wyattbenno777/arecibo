@@ -25,7 +25,7 @@ pub struct ProverKey<E: Engine> {
 }
 
 /// Provides an implementation of the verifier key
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct VerifierKey<E: Engine> {
   pub(in crate::provider) ck_v: Arc<CommitmentKey<E>>,
