@@ -15,6 +15,7 @@ pub struct Bit<Scalar: PrimeField> {
   /// The linear combination which constrain the value of the bit
   pub bit: LinearCombination<Scalar>,
   /// The value of the bit (filled at witness-time)
+  #[allow(unused)]
   pub value: Option<bool>,
 }
 
