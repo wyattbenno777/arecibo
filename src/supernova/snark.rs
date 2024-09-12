@@ -283,7 +283,7 @@ mod test {
   use super::*;
   use crate::{
     provider::{ipa_pc, Bn256EngineIPA, PallasEngine, Secp256k1Engine},
-    spartan::{batched, batched_ppsnark, snark::RelaxedR1CSSNARK},
+    spartan::{batched, batched_ppsnark, ipa_batched_ppsnark, snark::RelaxedR1CSSNARK},
     supernova::{circuit::TrivialSecondaryCircuit, NonUniformCircuit, StepCircuit},
   };
 
@@ -296,6 +296,9 @@ mod test {
   type S1<E> = batched::BatchedRelaxedR1CSSNARK<E, EE<E>>;
   type S1PP<E> = batched_ppsnark::BatchedRelaxedR1CSSNARK<E, EE<E>>;
   type S2<E> = RelaxedR1CSSNARK<E, EE<E>>;
+
+  type E = PallasEngine;
+  type TINY = ipa_batched_ppsnark::BatchedRelaxedR1CSSNARK<E>;
 
   #[derive(Clone)]
   struct SquareCircuit<E> {
@@ -655,5 +658,59 @@ mod test {
     test_compression_with::<PallasEngine, S1<_>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
     test_compression_with::<Bn256EngineIPA, S1<_>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
     test_compression_with::<Secp256k1Engine, S1<_>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
+  }
+
+  fn test_tinysnark_with<E1, S1, S2, F, C>(num_steps: usize, circuits_factory: F)
+  where
+    E1: CurveCycleEquipped,
+    S1: BatchedRelaxedR1CSSNARKTrait<E1>,
+    S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+    <E1::Scalar as PrimeField>::Repr: Abomonation,
+    <<Dual<E1> as Engine>::Scalar as PrimeField>::Repr: Abomonation,
+    C: NonUniformCircuit<E1, C1 = C, C2 = TrivialSecondaryCircuit<<Dual<E1> as Engine>::Scalar>>
+      + StepCircuit<E1::Scalar>,
+    F: Fn(usize) -> Vec<C>,
+  {
+    let secondary_circuit = TrivialSecondaryCircuit::default();
+    let test_circuits = circuits_factory(num_steps);
+
+    let pp = PublicParams::setup(&test_circuits[0], &*S1::ck_floor(), &*S2::ck_floor());
+
+    let z0_primary = vec![E1::Scalar::from(17u64)];
+    let z0_secondary = vec![<Dual<E1> as Engine>::Scalar::ZERO];
+
+    let mut recursive_snark = RecursiveSNARK::new(
+      &pp,
+      &test_circuits[0],
+      &test_circuits[0],
+      &secondary_circuit,
+      &z0_primary,
+      &z0_secondary,
+    )
+    .unwrap();
+
+    for circuit in test_circuits.iter().take(num_steps) {
+      recursive_snark
+        .prove_step(&pp, circuit, &secondary_circuit)
+        .unwrap();
+
+      recursive_snark
+        .verify(&pp, &z0_primary, &z0_secondary)
+        .unwrap();
+    }
+
+    let (_prover_key, _verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
+
+    /*let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
+
+    compressed_snark
+      .verify(&pp, &verifier_key, &z0_primary, &z0_secondary)
+      .unwrap();*/
+  }
+
+  #[test]
+  fn test_tiny_snark() {
+    const NUM_STEPS: usize = 4;
+    test_tinysnark_with::<PallasEngine, TINY<>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
   }
 }
