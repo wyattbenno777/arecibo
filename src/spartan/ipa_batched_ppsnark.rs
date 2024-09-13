@@ -26,10 +26,10 @@ use crate::{
       },
       SumcheckProof,
     },
-    PolyEvalInstance, PolyEvalWitness,
+    PolyEvalInstance, PolyEvalWitness
   },
   traits::{
-    commitment::{CommitmentTrait, Len},
+    commitment::{CommitmentEngineTrait, CommitmentTrait, Len},
     evaluation::EvaluationEngineTrait,
     snark::{BatchedRelaxedR1CSSNARKTrait, DigestHelperTrait, RelaxedR1CSSNARKTrait},
     Engine, TranscriptEngineTrait,
@@ -155,7 +155,7 @@ pub struct BatchedRelaxedR1CSSNARK<E: Engine> {
   evals_mem_preprocessed: Vec<[E::Scalar; 7]>,
 
   // a PCS evaluation argument
-  //eval_arg: ipa_pc::InnerProductArgument<E>,
+  eval_arg: ipa_pc::InnerProductArgument<E>,
 }
 
 impl<E: Engine> BatchedRelaxedR1CSSNARKTrait<E> for BatchedRelaxedR1CSSNARK<E>
@@ -361,6 +361,74 @@ where
       &mut transcript,
     )?;
 
+    //need to start ipa proof here for witness.
+    let evals_W = claims_witness
+    .into_iter()
+    .map(|claims| claims[0][0])
+    .collect::<Vec<_>>();
+
+    let evals_E = zip_with!(
+      iter,
+      (polys_E, pk.S_repr),
+      |poly_E, s_repr| {
+          let log_Ni = s_repr.N.log_2();
+          let (_, rand_sc_i) = rand_sc.split_at(num_rounds_sc - log_Ni);
+          let rand_sc_evals = EqPolynomial::evals_from_points(rand_sc_i);
+          zip_with!(par_iter, (poly_E, rand_sc_evals), |p, eq| *p * eq).sum()
+      }
+    )
+    .collect::<Vec<E::Scalar>>();
+
+    let evals_W_E = zip_with!(
+      (evals_W.into_iter(), evals_E.into_iter()),
+      |W, E| [W, E]
+    )
+    .collect::<Vec<_>>();
+
+    // Prepare witness polynomials for IPA
+    let witness_polys: Vec<PolyEvalWitness<E>> = zip_with!(
+      (polys_W.into_iter(), polys_E.clone().into_iter()),
+      |W, E| vec![PolyEvalWitness { p: W }, PolyEvalWitness { p: E }]
+    )
+    .flatten()
+    .collect();
+    
+
+    let witness_comms = witness_polys
+      .iter()
+      .map(|poly| E::CE::commit(ck, &poly.p))
+      .collect::<Vec<_>>();
+
+    // Prepare u_batch for witness polynomials
+    let c_witness = transcript.squeeze(b"c_witness")?;
+    let num_vars_witness = witness_polys.iter().map(|p| p.p.len().log_2()).collect::<Vec<_>>();
+    let u_batch_witness = PolyEvalInstance::<E>::batch_diff_size(
+        &witness_comms,
+        &evals_W_E.iter().flatten().cloned().collect::<Vec<_>>(),
+        &num_vars_witness,
+        rand_sc,
+        c_witness
+    );
+
+    // Create a vector of references to PolyEvalWitness
+    let witness_poly_refs: Vec<&PolyEvalWitness<E>> = witness_polys.iter().collect();
+
+    // Create w_batch for witness polynomials
+    let w_batch_witness = PolyEvalWitness::<E>::batch_diff_size(&witness_poly_refs, c_witness);
+
+    println!("Start IPA");
+    // Perform IPA for witness polynomials
+    let eval_arg_witness = ipa_pc::EvaluationEngine::prove(
+        ck,
+        &pk.pk_ee,
+        &mut transcript,
+        &u_batch_witness.c,
+        &w_batch_witness.p,
+        &u_batch_witness.x,
+        &u_batch_witness.e,
+    )?;
+    println!("End IPA");
+
     let _data_for_remote: DataForUntrustedRemote<E> = DataForUntrustedRemote {
       polys_Az_Bz_Cz: polys_Az_Bz_Cz.clone(), // Clone the polynomials
       ck: ck.clone(),
@@ -377,46 +445,6 @@ where
     };
 
     
-    let _witness_w_vec: Vec<PolyEvalWitness<E>> = zip_with!(
-      (polys_W.into_iter(), polys_E.into_iter()),
-      |W, E| {
-        vec![
-          PolyEvalWitness::<E> { p: W },
-          PolyEvalWitness::<E> { p: E }
-        ]
-      }
-    )
-    .flatten()
-    .collect();
-
-    /*
-    // Create a vector of references to PolyEvalWitness<E>
-    let witness_w_vec_refs: Vec<&PolyEvalWitness<E>> = witness_w_vec.iter().collect();
-      // Yes needs mods.
-    for evals in evals_vec.iter() {
-      transcript.absorb(b"e", &evals.as_slice()); // comm_vec is already in the transcript
-    }
-    let evals_vec = evals_vec.into_iter().flatten().collect::<Vec<_>>();
-
-    let c = transcript.squeeze(b"c")?;
-
-    let num_vars_u = w_vec.iter().map(|w| w.p.len().log_2()).collect::<Vec<_>>();
-    let u_batch =
-      PolyEvalInstance::<E>::batch_diff_size(&comms_vec, &evals_vec, &num_vars_u, rand_sc, c);
-    // Create witness-only w_batch
-    let witness_w_batch = 
-      PolyEvalWitness::<E>::batch_diff_size(&witness_w_vec_refs, c);
-
-    let eval_arg = ipa_pc::EvaluationEngine::prove(
-      ck,
-      &pk.pk_ee,
-      &mut transcript,
-      &u_batch.c,
-      &witness_w_batch.p,
-      &u_batch.x,
-      &u_batch.e,
-    )?;*/
-    
     let comms_Az_Bz_Cz: Vec<[CompressedCommitment<E>; 3]> = Vec::new();
     let comms_L_row_col: Vec<[CompressedCommitment<E>; 2]> = Vec::new();
     let comms_mem_oracles: Vec<[CompressedCommitment<E>; 4]> = Vec::new();
@@ -425,7 +453,6 @@ where
     let evals_L_row_col: Vec<[E::Scalar; 2]> = Vec::new();
     let evals_mem_oracle: Vec<[E::Scalar; 4]> = Vec::new();
     let evals_mem_preprocessed: Vec<[E::Scalar; 7]> = Vec::new();
-    //let eval_arg: ipa_pc::InnerProductArgument<E> = ipa_pc::InnerProductArgument::default();
 
     println!("done tiny prover");
 
@@ -439,7 +466,7 @@ where
       evals_L_row_col,
       evals_mem_oracle,
       evals_mem_preprocessed,
-      //eval_arg,
+      eval_arg: eval_arg_witness,
     })
   }
 
