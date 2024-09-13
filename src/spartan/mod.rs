@@ -24,6 +24,7 @@ pub mod nizk;
 pub mod zksnark;
 mod zksumcheck;
 
+use serde::{Deserialize, Serialize};
 use crate::{
   r1cs::{R1CSShape, SparseMatrix},
   traits::Engine,
@@ -47,6 +48,7 @@ pub fn powers<F: Field>(s: &F, n: usize) -> Vec<F> {
 /// A type that holds a witness to a polynomial evaluation instance
 #[repr(transparent)]
 #[derive(Debug, RefCast)]
+#[derive(Serialize, Deserialize)]
 struct PolyEvalWitness<E: Engine> {
   p: Vec<E::Scalar>, // polynomial
 }
@@ -117,6 +119,7 @@ impl<E: Engine> PolyEvalWitness<E> {
 
 /// A type that holds a polynomial evaluation instance
 #[derive(Debug)]
+#[derive(Serialize, Deserialize)]
 struct PolyEvalInstance<E: Engine> {
   c: Commitment<E>,  // commitment to the polynomial
   x: Vec<E::Scalar>, // evaluation point

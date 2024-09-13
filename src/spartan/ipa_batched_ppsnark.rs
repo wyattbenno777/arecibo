@@ -43,6 +43,7 @@ use once_cell::sync::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+//use std::fs;
 
 /// A type that represents the prover's key
 #[derive(Debug)]
@@ -80,7 +81,7 @@ impl<E: Engine> VerifierKey<E> {
   }
 }
 
-#[allow(unused)]
+#[derive(Serialize, Deserialize)]
 pub struct DataForUntrustedRemote<E: Engine> {
   polys_Az_Bz_Cz: Vec<[Vec<E::Scalar>; 3]>,
   ck: CommitmentKey<E>,
@@ -94,19 +95,10 @@ pub struct DataForUntrustedRemote<E: Engine> {
   N_max: usize,
   Nis: Vec<usize>,
   num_rounds_sc: usize,
-  //comms_W_E: Vec<[Commitment<E>; 2]>,
-  /*
-
-  evals_Az_Bz_Cz_W_E: Vec<[E::Scalar; 5]>,
-  evals_L_row_col: Vec<[E::Scalar; 2]>,
-  evals_mem_oracle: Vec<[E::Scalar; 4]>,
-  evals_mem_preprocessed: Vec<[E::Scalar; 7]>,
-  evals_vec: Vec<Vec<E::Scalar>>,
-  comms_vec: Vec<Commitment<E>>,
-  ,
-  pk_S_comm: R1CSShapeSparkCommitment<E>,
-  polys_mem_oracles: Vec<[Vec<E::Scalar>; 4]>,
-  remote_w_vec: Vec<PolyEvalWitness<E>>,*/
+  rand_sc: Vec<E::Scalar>,
+  blinded_witness_comms: Vec<Commitment<E>>,
+  u_batch_witness: PolyEvalInstance<E>,
+  w_batch_witness: PolyEvalWitness<E>,
 }
 
 
@@ -155,7 +147,7 @@ pub struct BatchedRelaxedR1CSSNARK<E: Engine> {
   evals_mem_preprocessed: Vec<[E::Scalar; 7]>,
 
   // a PCS evaluation argument
-  eval_arg: ipa_pc::InnerProductArgument<E>,
+  //eval_arg: ipa_pc::InnerProductArgument<E>,
 }
 
 impl<E: Engine> BatchedRelaxedR1CSSNARKTrait<E> for BatchedRelaxedR1CSSNARK<E>
@@ -392,31 +384,48 @@ where
     )
     .flatten()
     .collect();
-    
 
-    let witness_comms = witness_polys
+    let mut rng = rand::thread_rng();
+    let blinding_factors: Vec<E::Scalar> = (0..witness_polys.len())
+        .map(|_| E::Scalar::random(&mut rng))
+        .collect();
+    
+    // Blind the witness polynomials
+    let blinded_witness_polys: Vec<PolyEvalWitness<E>> = witness_polys
+    .into_iter()
+    .zip(blinding_factors.iter())
+    .map(|(mut poly, &blind)| {
+        for coeff in poly.p.iter_mut() {
+            *coeff += blind;
+        }
+        poly
+    })
+    .collect();
+
+    // Commit to the blinded witness polynomials
+    let blinded_witness_comms = blinded_witness_polys
       .iter()
       .map(|poly| E::CE::commit(ck, &poly.p))
       .collect::<Vec<_>>();
 
-    // Prepare u_batch for witness polynomials
+    // Prepare u_batch for blinded witness polynomials
     let c_witness = transcript.squeeze(b"c_witness")?;
-    let num_vars_witness = witness_polys.iter().map(|p| p.p.len().log_2()).collect::<Vec<_>>();
+    let num_vars_witness = blinded_witness_polys.iter().map(|p| p.p.len().log_2()).collect::<Vec<_>>();
     let u_batch_witness = PolyEvalInstance::<E>::batch_diff_size(
-        &witness_comms,
-        &evals_W_E.iter().flatten().cloned().collect::<Vec<_>>(),
-        &num_vars_witness,
-        rand_sc,
-        c_witness
+      &blinded_witness_comms,
+      &evals_W_E.iter().flatten().cloned().collect::<Vec<_>>(),
+      &num_vars_witness,
+      rand_sc.clone(),
+      c_witness
     );
 
-    // Create a vector of references to PolyEvalWitness
-    let witness_poly_refs: Vec<&PolyEvalWitness<E>> = witness_polys.iter().collect();
+    // Create a vector of references to blinded PolyEvalWitness
+    let blinded_witness_poly_refs: Vec<&PolyEvalWitness<E>> = blinded_witness_polys.iter().collect();
 
-    // Create w_batch for witness polynomials
-    let w_batch_witness = PolyEvalWitness::<E>::batch_diff_size(&witness_poly_refs, c_witness);
+    // Create w_batch for blinded witness polynomials
+    let w_batch_witness = PolyEvalWitness::<E>::batch_diff_size(&blinded_witness_poly_refs, c_witness);
 
-    println!("Start IPA");
+    /*
     // Perform IPA for witness polynomials
     let eval_arg_witness = ipa_pc::EvaluationEngine::prove(
         ck,
@@ -427,7 +436,7 @@ where
         &u_batch_witness.x,
         &u_batch_witness.e,
     )?;
-    println!("End IPA");
+    */
 
     let _data_for_remote: DataForUntrustedRemote<E> = DataForUntrustedRemote {
       polys_Az_Bz_Cz: polys_Az_Bz_Cz.clone(), // Clone the polynomials
@@ -442,7 +451,14 @@ where
       N_max: N_max,
       Nis: Nis.clone(),
       num_rounds_sc: num_rounds_sc.clone(),
+      rand_sc: rand_sc.clone(),
+      blinded_witness_comms,
+      u_batch_witness,
+      w_batch_witness,
     };
+
+    //let data_str = serde_json::to_string(&data_for_remote)?;
+    //fs::write("cat.json", &data_str)?;
 
     
     let comms_Az_Bz_Cz: Vec<[CompressedCommitment<E>; 3]> = Vec::new();
@@ -466,7 +482,7 @@ where
       evals_L_row_col,
       evals_mem_oracle,
       evals_mem_preprocessed,
-      eval_arg: eval_arg_witness,
+      //eval_arg: eval_arg_witness,
     })
   }
 
