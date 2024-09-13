@@ -120,6 +120,8 @@ impl<E: Engine> PolyEvalWitness<E> {
 /// A type that holds a polynomial evaluation instance
 #[derive(Debug)]
 #[derive(Serialize, Deserialize)]
+#[serde(bound(serialize = "E::Scalar: Serialize, Commitment<E>: Serialize"))]
+#[serde(bound(deserialize = "E::Scalar: Deserialize<'de>, Commitment<E>: Deserialize<'de>"))]
 struct PolyEvalInstance<E: Engine> {
   c: Commitment<E>,  // commitment to the polynomial
   x: Vec<E::Scalar>, // evaluation point

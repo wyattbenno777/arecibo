@@ -43,7 +43,8 @@ use once_cell::sync::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-//use std::fs;
+use std::fs;
+use tracing::error;
 
 /// A type that represents the prover's key
 #[derive(Debug)]
@@ -85,7 +86,7 @@ impl<E: Engine> VerifierKey<E> {
 pub struct DataForUntrustedRemote<E: Engine> {
   polys_Az_Bz_Cz: Vec<[Vec<E::Scalar>; 3]>,
   ck: CommitmentKey<E>,
-  transcript_state: E::TE,
+  //transcript_state: E::TE,
   polys_tau: Vec<Vec<E::Scalar>>, 
   coords_tau: Vec<Vec<E::Scalar>>,
   polys_L_row_col: Vec<[Vec<E::Scalar>; 2]>,
@@ -148,6 +149,48 @@ pub struct BatchedRelaxedR1CSSNARK<E: Engine> {
 
   // a PCS evaluation argument
   //eval_arg: ipa_pc::InnerProductArgument<E>,
+}
+
+fn serialize_field<T: serde::Serialize>(field_name: &str, field_value: &T) {
+  match serde_json::to_string(field_value) {
+      Ok(json_string) => {
+          let file_name = format!("{}.json", field_name);
+          if let Err(e) = fs::write(&file_name, json_string) {
+              error!("Failed to write file {}: {}", file_name, e);
+          } else {
+              println!("Successfully wrote {}", file_name);
+          }
+      },
+      Err(e) => {
+          error!("Failed to serialize {}: {}", field_name, e);
+      }
+  }
+}
+
+fn serialize_data_for_remote<E: Engine>(data: &DataForUntrustedRemote<E>) 
+where 
+    E::Scalar: Serialize,
+    Commitment<E>: Serialize,
+    PolyEvalInstance<E>: Serialize,
+    PolyEvalWitness<E>: Serialize,
+{
+    serialize_field("polys_Az_Bz_Cz", &data.polys_Az_Bz_Cz);
+    serialize_field("ck", &data.ck);
+    serialize_field("polys_tau", &data.polys_tau);
+    serialize_field("coords_tau", &data.coords_tau);
+    serialize_field("polys_L_row_col", &data.polys_L_row_col);
+    serialize_field("polys_E", &data.polys_E);
+    serialize_field("us", &data.us);
+    serialize_field("polys_Z", &data.polys_Z);
+    serialize_field("N_max", &data.N_max);
+    serialize_field("Nis", &data.Nis);
+    serialize_field("num_rounds_sc", &data.num_rounds_sc);
+    serialize_field("rand_sc", &data.rand_sc);
+    serialize_field("blinded_witness_comms", &data.blinded_witness_comms);
+    serialize_field("u_batch_witness", &data.u_batch_witness);
+    serialize_field("w_batch_witness", &data.w_batch_witness);
+
+    println!("Serialization of DataForUntrustedRemote complete.");
 }
 
 impl<E: Engine> BatchedRelaxedR1CSSNARKTrait<E> for BatchedRelaxedR1CSSNARK<E>
@@ -438,10 +481,10 @@ where
     )?;
     */
 
-    let _data_for_remote: DataForUntrustedRemote<E> = DataForUntrustedRemote {
+    let data_for_remote: DataForUntrustedRemote<E> = DataForUntrustedRemote {
       polys_Az_Bz_Cz: polys_Az_Bz_Cz.clone(), // Clone the polynomials
       ck: ck.clone(),
-      transcript_state: transcript, // Clone the current state of the transcript
+      //transcript_state: transcript, // Clone the current state of the transcript
       polys_tau: polys_tau.clone(),
       coords_tau: coords_tau.clone(),
       polys_L_row_col: polys_L_row_col.clone(),
@@ -457,9 +500,7 @@ where
       w_batch_witness,
     };
 
-    //let data_str = serde_json::to_string(&data_for_remote)?;
-    //fs::write("cat.json", &data_str)?;
-
+    serialize_data_for_remote(&data_for_remote);
     
     let comms_Az_Bz_Cz: Vec<[CompressedCommitment<E>; 3]> = Vec::new();
     let comms_L_row_col: Vec<[CompressedCommitment<E>; 2]> = Vec::new();
