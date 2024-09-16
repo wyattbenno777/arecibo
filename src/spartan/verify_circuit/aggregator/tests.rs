@@ -21,6 +21,7 @@ use bellpepper_core::num::AllocatedNum;
 use bellpepper_core::{ConstraintSystem, SynthesisError};
 use core::marker::PhantomData;
 use error::SuperNovaError;
+use std::time::Instant;
 
 use ff::Field;
 use ff::PrimeField;
@@ -45,16 +46,21 @@ fn test_aggregator() -> anyhow::Result<()> {
   let snarks_data = sim_network(num_snarks);
 
   println!("Producing PP for Aggregated SNARK...");
+  let time = Instant::now();
+
   let pp = AggPublicParams::setup(
     &snarks_data,
     &crate::traits::snark::default_ck_hint(),
     &crate::traits::snark::default_ck_hint(),
   )?;
+  println!("PP took: {:?}", time.elapsed());
 
   let (pk, vk) = AggregatedSNARK::<E1, AS1, AS2>::setup(&pp)?;
 
   println!("Proving Aggregated SNARK...");
+  let time = Instant::now();
   let snark = AggregatedSNARK::<E1, AS1, AS2>::prove(&pp, &pk, &snarks_data)?;
+  println!("Aggregation took: {:?}", time.elapsed());
 
   println!("Verifying Aggregated SNARK...");
   snark.verify(&vk)?;
@@ -67,16 +73,20 @@ fn test_aggregator_single() -> anyhow::Result<()> {
   let snarks_data = sim_network(num_snarks);
 
   println!("Producing PP for Aggregated SNARK...");
+  let time = Instant::now();
   let pp = AggPublicParams::setup(
     &snarks_data,
     &crate::traits::snark::default_ck_hint(),
     &crate::traits::snark::default_ck_hint(),
   )?;
+  println!("PP took: {:?}", time.elapsed());
 
   let (pk, vk) = AggregatedSNARK::<E1, AS1, AS2>::setup(&pp)?;
 
   println!("Proving Aggregated SNARK...");
+  let time = Instant::now();
   let snark = AggregatedSNARK::<E1, AS1, AS2>::prove(&pp, &pk, &snarks_data)?;
+  println!("Aggregation took: {:?}", time.elapsed());
 
   println!("Verifying Aggregated SNARK...");
   let _ = snark.verify(&vk);
@@ -88,7 +98,7 @@ fn sim_network(num_snarks: usize) -> Vec<AggregatorSNARKData<E1>> {
   let mut snarks_data_for_agg = vec![];
 
   for i in 0..num_snarks {
-    println!("node {i}: Producing proof to be aggregated");
+    println!("node {i}: Producing SNARK to be aggregated");
     let (snark, vk) = test_nivc_with::<E1, S1>();
 
     let TestSNARK { snark, instance: U } = snark;
