@@ -1238,7 +1238,7 @@ where
       blinds_polys_mem_oracles[3].clone(),
       pk.S_comm.r_comm_ts_col.clone(),
     ];
-    let points = vec![];
+    let points = vec![rand_sc; comm_vec.len()];
     let blind_eval_vec = vec![];
     let comm_eval_vec = vec![];
 
