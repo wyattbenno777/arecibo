@@ -1239,7 +1239,26 @@ where
       pk.S_comm.r_comm_ts_col.clone(),
     ];
     let points = vec![rand_sc; comm_vec.len()];
-    let blind_eval_vec = vec![];
+    let blind_eval_vec = vec![
+      blind_eval_W,
+      blind_eval_Az,
+      blind_eval_Bz,
+      blind_eval_Cz,
+      blind_eval_E,
+      blind_eval_L_row,
+      blind_eval_L_col,
+      blind_eval_val_A,
+      blind_eval_val_B,
+      blind_eval_val_C,
+      blind_eval_t_plus_r_inv_row,
+      blind_eval_row,
+      blind_eval_w_plus_r_inv_row,
+      blind_eval_ts_row,
+      blind_eval_t_plus_r_inv_col,
+      blind_eval_col,
+      blind_eval_w_plus_r_inv_col,
+      blind_eval_ts_col,
+    ];
     let comm_eval_vec = vec![];
 
     transcript.absorb(b"e", &eval_vec.as_slice()); // comm_vec is already in the transcript
