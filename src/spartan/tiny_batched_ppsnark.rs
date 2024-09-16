@@ -79,6 +79,8 @@ impl<E: Engine> VerifierKey<E> {
   }
 }
 
+/// The remove untrusted prover will be given all of the data that it
+/// needs to verify the batched proofs from the smaller trusted prover.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "E: Engine")]
 pub struct DataForUntrustedRemote<E: Engine> {
