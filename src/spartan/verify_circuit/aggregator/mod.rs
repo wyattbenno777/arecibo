@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use bellpepper_core::{num::AllocatedNum, SynthesisError};
+use serde::{Deserialize, Serialize};
 
 use super::{gadgets::nonnative::ipa::EvaluationEngineGadget, ipa_prover_poseidon::batched};
 use crate::bellpepper::r1cs::{NovaShape, NovaWitness};
@@ -22,6 +23,8 @@ use bellpepper_core::ConstraintSystem;
 mod tests;
 
 /// Necessary public values needed for both proving and verifying
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct PublicParams<E1>
 where
   E1: CurveCycleEquipped,
@@ -77,6 +80,8 @@ where
 }
 
 /// Resulting SNARK after aggregating child SNARKS
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct AggregatedSNARK<E1, S1, S2>
 where
   E1: CurveCycleEquipped,
@@ -199,7 +204,8 @@ where
   pk_secondary: S2::ProverKey,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(bound = "")]
 
 /// Verifier Key for Aggregation proving system
 pub struct VerifierKey<E1, S1, S2>
