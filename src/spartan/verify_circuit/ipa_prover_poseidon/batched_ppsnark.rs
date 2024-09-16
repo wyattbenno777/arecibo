@@ -1,6 +1,14 @@
 //! batched pp snark
 //!
 //!
+use super::ipa_pc;
+
+use crate::provider::pedersen::CommitmentKeyExtTrait;
+use crate::provider::traits::DlogGroup;
+
+use crate::spartan::verify_circuit::gadgets::poseidon_transcript::PoseidonTranscript;
+#[cfg(test)]
+use bellpepper_core::ConstraintSystem;
 
 use crate::{
   digest::{DigestComputer, SimpleDigestible},
@@ -28,24 +36,28 @@ use crate::{
   },
   traits::{
     commitment::{CommitmentEngineTrait, CommitmentTrait, Len},
-    evaluation::EvaluationEngineTrait,
     snark::{BatchedRelaxedR1CSSNARKTrait, DigestHelperTrait, RelaxedR1CSSNARKTrait},
-    Engine, TranscriptEngineTrait,
+    Engine,
   },
   zip_with, zip_with_for_each, Commitment, CommitmentKey, CompressedCommitment,
 };
+
 use core::slice;
 use ff::Field;
+use generic_array::typenum::U24;
 use itertools::{chain, Itertools as _};
 use once_cell::sync::*;
+
+use poseidon_sponge::sponge::vanilla::Sponge;
+use poseidon_sponge::sponge::vanilla::SpongeTrait;
+use poseidon_sponge::Strength;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-
 /// A type that represents the prover's key
 #[derive(Debug)]
-pub struct ProverKey<E: Engine, EE: EvaluationEngineTrait<E>> {
-  pk_ee: EE::ProverKey,
+pub struct ProverKey<E: Engine> {
+  pk_ee: ipa_pc::ProverKey<E>,
   S_repr: Vec<R1CSShapeSparkRepr<E>>,
   S_comm: Vec<R1CSShapeSparkCommitment<E>>,
   vk_digest: E::Scalar, // digest of verifier's key
@@ -54,18 +66,18 @@ pub struct ProverKey<E: Engine, EE: EvaluationEngineTrait<E>> {
 /// A type that represents the verifier's key
 #[derive(Debug, Serialize)]
 #[serde(bound = "")]
-pub struct VerifierKey<E: Engine, EE: EvaluationEngineTrait<E>> {
-  pub(in crate::spartan) vk_ee: EE::VerifierKey,
+pub struct VerifierKey<E: Engine> {
+  pub(in crate::spartan) vk_ee: ipa_pc::VerifierKey<E>,
   pub(crate) S_comm: Vec<R1CSShapeSparkCommitment<E>>,
   pub(crate) num_vars: Vec<usize>,
   #[serde(skip, default = "OnceCell::new")]
   digest: OnceCell<E::Scalar>,
 }
-impl<E: Engine, EE: EvaluationEngineTrait<E>> VerifierKey<E, EE> {
+impl<E: Engine> VerifierKey<E> {
   fn new(
     num_vars: Vec<usize>,
     S_comm: Vec<R1CSShapeSparkCommitment<E>>,
-    vk_ee: EE::VerifierKey,
+    vk_ee: ipa_pc::VerifierKey<E>,
   ) -> Self {
     Self {
       num_vars,
@@ -76,9 +88,9 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> VerifierKey<E, EE> {
   }
 }
 
-impl<E: Engine, EE: EvaluationEngineTrait<E>> SimpleDigestible for VerifierKey<E, EE> {}
+impl<E: Engine> SimpleDigestible for VerifierKey<E> {}
 
-impl<E: Engine, EE: EvaluationEngineTrait<E>> DigestHelperTrait<E> for VerifierKey<E, EE> {
+impl<E: Engine> DigestHelperTrait<E> for VerifierKey<E> {
   /// Returns the digest of the verifier's key
   fn digest(&self) -> E::Scalar {
     self
@@ -97,7 +109,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> DigestHelperTrait<E> for VerifierK
 /// the commitment to a vector viewed as a polynomial commitment
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct BatchedRelaxedR1CSSNARK<E: Engine, EE: EvaluationEngineTrait<E>> {
+pub struct BatchedRelaxedR1CSSNARK<E: Engine> {
   // commitment to oracles: the first three are for Az, Bz, Cz,
   // and the last two are for memory reads
   pub(crate) comms_Az_Bz_Cz: Vec<[CompressedCommitment<E>; 3]>,
@@ -119,16 +131,17 @@ pub struct BatchedRelaxedR1CSSNARK<E: Engine, EE: EvaluationEngineTrait<E>> {
   pub(crate) evals_mem_oracle: Vec<[E::Scalar; 4]>,
   // [val_A, val_B, val_C, row, col, ts_row, ts_col]
   pub(crate) evals_mem_preprocessed: Vec<[E::Scalar; 7]>,
-
   // a PCS evaluation argument
-  pub(crate) eval_arg: EE::EvaluationArgument,
+  pub(crate) eval_arg: ipa_pc::InnerProductArgument<E>,
 }
 
-impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
-  for BatchedRelaxedR1CSSNARK<E, EE>
+impl<E: Engine> BatchedRelaxedR1CSSNARKTrait<E> for BatchedRelaxedR1CSSNARK<E>
+where
+  E::GE: DlogGroup,
+  CommitmentKey<E>: CommitmentKeyExtTrait<E>,
 {
-  type ProverKey = ProverKey<E, EE>;
-  type VerifierKey = VerifierKey<E, EE>;
+  type ProverKey = ProverKey<E>;
+  type VerifierKey = VerifierKey<E>;
 
   fn ck_floor() -> Box<dyn for<'a> Fn(&'a R1CSShape<E>) -> usize> {
     Box::new(|shape: &R1CSShape<E>| -> usize {
@@ -151,7 +164,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
         return Err(NovaError::InternalError);
       }
     }
-    let (pk_ee, vk_ee) = EE::setup(ck.clone());
+    let (pk_ee, vk_ee) = ipa_pc::EvaluationEngine::setup(ck.clone());
 
     let S = S.iter().map(|s| s.pad()).collect::<Vec<_>>();
     let S_repr = S.iter().map(R1CSShapeSparkRepr::new).collect::<Vec<_>>();
@@ -185,7 +198,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     assert!(Nis.iter().all(|&Ni| Ni.is_power_of_two()));
     let N_max = *Nis.iter().max().unwrap();
 
-    let num_instances = U.len();
+    let _num_instances = U.len();
 
     // Pad [(Wᵢ,Eᵢ)] to the next power of 2 (not to Ni)
     let W = zip_with!(par_iter, (W, S), |w, s| w.pad(s)).collect::<Vec<RelaxedR1CSWitness<E>>>();
@@ -194,13 +207,17 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     let num_rounds_sc = N_max.log_2();
 
     // Initialize transcript with vk || [Uᵢ]
-    let mut transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
-    transcript.absorb(b"vk", &pk.vk_digest);
-    if num_instances > 1 {
-      let num_instances_field = E::Scalar::from(num_instances as u64);
-      transcript.absorb(b"n", &num_instances_field);
-    }
-    transcript.absorb(b"U", &U);
+
+    let constants = Sponge::<E::Scalar, U24>::api_constants(Strength::Standard);
+    let mut transcript = PoseidonTranscript::<E>::new(&constants);
+
+    transcript.absorb(pk.vk_digest);
+
+    // if num_instances > 1 {
+    //   let num_instances_field = E::Scalar::from(num_instances as u64);
+    //   transcript.absorb(num_instances_field);
+    // }
+    // transcript.absorb(b"U", &U);
 
     // Append public inputs to Wᵢ: Zᵢ = [Wᵢ, uᵢ, Xᵢ]
     let polys_Z = zip_with!(par_iter, (W, U, Nis), |W, U, Ni| {
@@ -233,12 +250,12 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
         [comm_Az, comm_Bz, comm_Cz]
       })
       .collect::<Vec<_>>();
-    comms_Az_Bz_Cz
-      .iter()
-      .for_each(|comms| transcript.absorb(b"c", &comms.as_slice()));
+    // comms_Az_Bz_Cz
+    //   .iter()
+    //   .for_each(|comms| transcript.absorb(b"c", &comms.as_slice()));
 
     // Compute eq(tau) for each instance in log2(Ni) variables
-    let tau = transcript.squeeze(b"t")?;
+    let tau = transcript.squeeze(String::from("tau"))?;
     let all_taus = PowPolynomial::squares(&tau, N_max.log_2());
 
     let (polys_tau, coords_tau): (Vec<_>, Vec<_>) = Nis
@@ -283,9 +300,9 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     .collect::<Vec<_>>();
 
     // absorb the claimed evaluations into the transcript
-    for evals in evals_Az_Bz_Cz_at_tau.iter() {
-      transcript.absorb(b"e", &evals.as_slice());
-    }
+    // for evals in evals_Az_Bz_Cz_at_tau.iter() {
+    //   transcript.absorb(b"e", &evals.as_slice());
+    // }
 
     // Pad Zᵢ, E to Nᵢ
     let polys_Z = polys_Z
@@ -354,12 +371,12 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
       .collect::<Vec<_>>();
 
     // absorb commitments to L_row and L_col in the transcript
-    for comms in comms_L_row_col.iter() {
-      transcript.absorb(b"e", &comms.as_slice());
-    }
+    // for comms in comms_L_row_col.iter() {
+    //   transcript.absorb(b"e", &comms.as_slice());
+    // }
 
     // For each instance, batch Mz = Az + c*Bz + c^2*Cz
-    let c = transcript.squeeze(b"c")?;
+    let c = transcript.squeeze(String::from("c"))?;
 
     let polys_Mz: Vec<_> = polys_Az_Bz_Cz
       .par_iter()
@@ -444,8 +461,8 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     // a third sum-check instance to prove the read-only memory claim
     // we now need to prove that L_row and L_col are well-formed
     let (mem_sc_inst, comms_mem_oracles, polys_mem_oracles) = {
-      let gamma = transcript.squeeze(b"g")?;
-      let r = transcript.squeeze(b"r")?;
+      let gamma = transcript.squeeze(String::from("gamma"))?;
+      let r = transcript.squeeze(String::from("r"))?;
 
       // We start by computing oracles and auxiliary polynomials to help prove the claim
       // oracles correspond to [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col]
@@ -481,12 +498,12 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
         )?;
 
       // Commit to oracles
-      for comms in comms_mem_oracles.iter() {
-        transcript.absorb(b"l", &comms.as_slice());
-      }
+      // for comms in comms_mem_oracles.iter() {
+      //   transcript.absorb(b"l", &comms.as_slice());
+      // }
 
       // Sample new random variable for eq polynomial
-      let rho = transcript.squeeze(b"r")?;
+      let rho = transcript.squeeze(String::from("rho"))?;
       let all_rhos = PowPolynomial::squares(&rho, N_max.log_2());
 
       let instances = zip_with!(
@@ -691,12 +708,12 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     .map(|p| PolyEvalWitness::<E> { p })
     .collect::<Vec<_>>();
 
-    for evals in evals_vec.iter() {
-      transcript.absorb(b"e", &evals.as_slice()); // comm_vec is already in the transcript
-    }
+    // for evals in evals_vec.iter() {
+    //   transcript.absorb(b"e", &evals.as_slice()); // comm_vec is already in the transcript
+    // }
     let evals_vec = evals_vec.into_iter().flatten().collect::<Vec<_>>();
 
-    let c = transcript.squeeze(b"c")?;
+    let c = transcript.squeeze(String::from("c_1"))?;
 
     // Compute number of variables for each polynomial
     let num_vars_u = w_vec.iter().map(|w| w.p.len().log_2()).collect::<Vec<_>>();
@@ -705,14 +722,8 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     let w_batch =
       PolyEvalWitness::<E>::batch_diff_size(&w_vec.iter().by_ref().collect::<Vec<_>>(), c);
 
-    let eval_arg = EE::prove(
-      ck,
-      &pk.pk_ee,
-      &mut transcript,
-      &u_batch.c,
-      &w_batch.p,
-      &u_batch.x,
-      &u_batch.e,
+    let eval_arg = ipa_pc::EvaluationEngine::prove(
+      ck, &pk.pk_ee, &u_batch.c, &w_batch.p, &u_batch.x, &u_batch.e,
     )?;
 
     let comms_Az_Bz_Cz = comms_Az_Bz_Cz
@@ -750,14 +761,15 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     let num_rounds = vk.S_comm.iter().map(|s| s.N.log_2()).collect::<Vec<_>>();
     let num_rounds_max = *num_rounds.iter().max().unwrap();
 
-    let mut transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
+    let constants = Sponge::<E::Scalar, U24>::api_constants(Strength::Standard);
+    let mut transcript = PoseidonTranscript::<E>::new(&constants);
 
-    transcript.absorb(b"vk", &vk.digest());
-    if num_instances > 1 {
-      let num_instances_field = E::Scalar::from(num_instances as u64);
-      transcript.absorb(b"n", &num_instances_field);
-    }
-    transcript.absorb(b"U", &U);
+    transcript.absorb(vk.digest());
+    // if num_instances > 1 {
+    //   let num_instances_field = E::Scalar::from(num_instances as u64);
+    //   transcript.absorb(num_instances_field);
+    // }
+    // transcript.absorb(b"U", &U);
 
     // Decompress commitments
     let comms_Az_Bz_Cz = self
@@ -794,25 +806,25 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
       .collect::<Result<Vec<_>, _>>()?;
 
     // Add commitments [Az, Bz, Cz] to the transcript
-    comms_Az_Bz_Cz
-      .iter()
-      .for_each(|comms| transcript.absorb(b"c", &comms.as_slice()));
+    // comms_Az_Bz_Cz
+    //   .iter()
+    //   .for_each(|comms| transcript.absorb(b"c", &comms.as_slice()));
 
-    let tau = transcript.squeeze(b"t")?;
+    let tau = transcript.squeeze(String::from("tau"))?;
     let tau_coords = PowPolynomial::new(&tau, num_rounds_max).coordinates();
 
     // absorb the claimed evaluations into the transcript
-    self.evals_Az_Bz_Cz_at_tau.iter().for_each(|evals| {
-      transcript.absorb(b"e", &evals.as_slice());
-    });
+    // self.evals_Az_Bz_Cz_at_tau.iter().for_each(|evals| {
+    //   transcript.absorb(b"e", &evals.as_slice());
+    // });
 
     // absorb commitments to L_row and L_col in the transcript
-    for comms in comms_L_row_col.iter() {
-      transcript.absorb(b"e", &comms.as_slice());
-    }
+    // for comms in comms_L_row_col.iter() {
+    //   transcript.absorb(b"e", &comms.as_slice());
+    // }
 
     // Batch at tau for each instance
-    let c = transcript.squeeze(b"c")?;
+    let c = transcript.squeeze(String::from("c"))?;
 
     // Compute eval_Mz = eval_Az_at_tau + c * eval_Bz_at_tau + c^2 * eval_Cz_at_tau
     let evals_Mz: Vec<_> = zip_with!(
@@ -830,16 +842,16 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     )
     .collect();
 
-    let gamma = transcript.squeeze(b"g")?;
-    let r = transcript.squeeze(b"r")?;
+    let gamma = transcript.squeeze(String::from("gamma"))?;
+    let r = transcript.squeeze(String::from("r"))?;
 
-    for comms in comms_mem_oracles.iter() {
-      transcript.absorb(b"l", &comms.as_slice());
-    }
+    // for comms in comms_mem_oracles.iter() {
+    //   transcript.absorb(b"l", &comms.as_slice());
+    // }
 
-    let rho = transcript.squeeze(b"r")?;
+    let rho = transcript.squeeze(String::from("rho"))?;
 
-    let s = transcript.squeeze(b"r")?;
+    let s = transcript.squeeze(String::from("s"))?;
     let s_powers = powers(&s, num_instances * num_claims_per_instance);
 
     let (claim_sc_final, rand_sc) = {
@@ -862,7 +874,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
 
       self
         .sc
-        .verify_batch(&claims, &num_rounds_by_claim, &s_powers, 3, &mut transcript)?
+        .verify_batch_poseidon(&claims, &num_rounds_by_claim, &s_powers, 3, &mut transcript)?
     };
 
     // Truncated sumcheck randomness for each instance
@@ -1008,12 +1020,12 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     )
     .collect::<Vec<_>>();
 
-    // Add all Sumcheck evaluations to the transcript
-    for evals in evals_vec.iter() {
-      transcript.absorb(b"e", &evals.as_slice()); // comm_vec is already in the transcript
-    }
+    // // Add all Sumcheck evaluations to the transcript
+    // for evals in evals_vec.iter() {
+    //   transcript.absorb(b"e", &evals.as_slice()); // comm_vec is already in the transcript
+    // }
 
-    let c = transcript.squeeze(b"c")?;
+    let c = transcript.squeeze(String::from("c_1"))?;
 
     // Compute batched polynomial evaluation instance at rand_sc
     let u = {
@@ -1059,13 +1071,1078 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     };
 
     // verify
-    EE::verify(&vk.vk_ee, &mut transcript, &u.c, &u.x, &u.e, &self.eval_arg)?;
+    ipa_pc::EvaluationEngine::verify(&vk.vk_ee, &u.c, &u.x, &u.e, &self.eval_arg)?;
 
     Ok(())
   }
 }
 
-impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARK<E, EE> {
+impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
+  #[cfg(test)]
+  pub fn verify_cs<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+    vk: &VerifierKey<E>,
+    U: &[RelaxedR1CSInstance<E>],
+  ) -> Result<(), NovaError> {
+    use crate::gadgets::alloc_negate;
+    use crate::gadgets::{alloc_one, alloc_zero};
+    use crate::spartan::verify_circuit::gadgets::poly::alloc_powers;
+    use crate::spartan::verify_circuit::gadgets::poly::AllocatedEqPolynomial;
+    use crate::spartan::verify_circuit::gadgets::poly::AllocatedIdentityPolynomial;
+    use crate::spartan::verify_circuit::gadgets::poly::AllocatedMaskedEqPolynomial;
+    use crate::spartan::verify_circuit::gadgets::poly::AllocatedPowPolynomial;
+    use crate::spartan::verify_circuit::gadgets::poly::AllocatedSparsePolynomial;
+    use crate::spartan::verify_circuit::gadgets::poseidon_transcript::PoseidonTranscriptCircuit;
+    use crate::spartan::verify_circuit::gadgets::sumcheck::SCVerifyBatchedGadget;
+    use bellpepper_core::num::AllocatedNum;
+    use poseidon_sponge::sponge::circuit::SpongeCircuit;
+    use poseidon_sponge::sponge::vanilla::Mode::Simplex;
+
+    let alloc_one = alloc_one(cs.namespace(|| "one"));
+    let alloc_zero = alloc_zero(cs.namespace(|| "zero"));
+
+    let num_instances = U.len();
+    let num_claims_per_instance = 10;
+
+    // number of rounds of sum-check
+    let num_rounds = vk.S_comm.iter().map(|s| s.N.log_2()).collect::<Vec<_>>();
+    let num_rounds_max = *num_rounds.iter().max().unwrap();
+
+    let constants = Sponge::<E::Scalar, U24>::api_constants(Strength::Standard);
+    let mut transcript = PoseidonTranscript::<E>::new(&constants);
+
+    let mut sponge = SpongeCircuit::<E::Scalar, U24, _>::new_with_constants(&constants, Simplex);
+
+    let mut cs = cs.namespace(|| "ns");
+    let mut transcript_circuit = PoseidonTranscriptCircuit::<E>::new(&mut sponge, &mut cs);
+
+    transcript.absorb(vk.digest());
+
+    let vk_digest = AllocatedNum::alloc(cs.namespace(|| "vk_digest"), || Ok(vk.digest()))?;
+    transcript_circuit.absorb(vk_digest, &mut sponge, &mut cs);
+    // if num_instances > 1 {
+    //   let num_instances_field = E::Scalar::from(num_instances as u64);
+    //   transcript.absorb(num_instances_field);
+    // }
+    // transcript.absorb(b"U", &U);
+
+    // Decompress commitments
+    let comms_Az_Bz_Cz = self
+      .comms_Az_Bz_Cz
+      .iter()
+      .map(|comms| {
+        comms
+          .iter()
+          .map(Commitment::<E>::decompress)
+          .collect::<Result<Vec<_>, _>>()
+      })
+      .collect::<Result<Vec<_>, _>>()?;
+
+    let comms_L_row_col = self
+      .comms_L_row_col
+      .iter()
+      .map(|comms| {
+        comms
+          .iter()
+          .map(Commitment::<E>::decompress)
+          .collect::<Result<Vec<_>, _>>()
+      })
+      .collect::<Result<Vec<_>, _>>()?;
+
+    let comms_mem_oracles = self
+      .comms_mem_oracles
+      .iter()
+      .map(|comms| {
+        comms
+          .iter()
+          .map(Commitment::<E>::decompress)
+          .collect::<Result<Vec<_>, _>>()
+      })
+      .collect::<Result<Vec<_>, _>>()?;
+
+    // Add commitments [Az, Bz, Cz] to the transcript
+    // comms_Az_Bz_Cz
+    //   .iter()
+    //   .for_each(|comms| transcript.absorb(b"c", &comms.as_slice()));
+
+    let tau = transcript.squeeze(String::from("tau"))?;
+    let tau_coords = PowPolynomial::new(&tau, num_rounds_max).coordinates();
+
+    let alloc_tau = transcript_circuit.squeeze(String::from("tau"), &mut sponge, &mut cs)?;
+    let alloc_tau_coords = AllocatedPowPolynomial::new(
+      cs.namespace(|| "Pow polynomials"),
+      &alloc_tau,
+      num_rounds_max,
+    )?
+    .coordinates();
+
+    assert_eq!(alloc_tau.get_value().unwrap(), tau);
+    for (alloc_tau_coord, tau_coord) in alloc_tau_coords.iter().zip(tau_coords.iter()) {
+      assert_eq!(alloc_tau_coord.get_value().unwrap(), *tau_coord);
+    }
+
+    // absorb the claimed evaluations into the transcript
+    // self.evals_Az_Bz_Cz_at_tau.iter().for_each(|evals| {
+    //   transcript.absorb(b"e", &evals.as_slice());
+    // });
+
+    // absorb commitments to L_row and L_col in the transcript
+    // for comms in comms_L_row_col.iter() {
+    //   transcript.absorb(b"e", &comms.as_slice());
+    // }
+
+    // Batch at tau for each instance
+    let c = transcript.squeeze(String::from("c"))?;
+    let alloc_c = transcript_circuit.squeeze(String::from("c"), &mut sponge, &mut cs)?;
+
+    assert_eq!(alloc_c.get_value().unwrap(), c);
+
+    // Compute eval_Mz = eval_Az_at_tau + c * eval_Bz_at_tau + c^2 * eval_Cz_at_tau
+    let evals_Mz: Vec<_> = zip_with!(
+      iter,
+      (comms_Az_Bz_Cz, self.evals_Az_Bz_Cz_at_tau),
+      |comm_Az_Bz_Cz, evals_Az_Bz_Cz_at_tau| {
+        let u = PolyEvalInstance::<E>::batch(
+          comm_Az_Bz_Cz.as_slice(),
+          tau_coords.clone(),
+          evals_Az_Bz_Cz_at_tau.as_slice(),
+          &c,
+        );
+        u.e
+      }
+    )
+    .collect();
+
+    let alloc_evals_Mz = evals_Mz
+      .iter()
+      .enumerate()
+      .map(|(i, eval)| AllocatedNum::alloc(cs.namespace(|| format!("eval_Mz_{i}")), || Ok(*eval)))
+      .collect::<Result<Vec<_>, _>>()?;
+
+    let gamma = transcript.squeeze(String::from("gamma"))?;
+    let alloc_gamma = transcript_circuit.squeeze(String::from("gamma"), &mut sponge, &mut cs)?;
+    assert_eq!(alloc_gamma.get_value().unwrap(), gamma);
+
+    let r = transcript.squeeze(String::from("r"))?;
+    let alloc_r = transcript_circuit.squeeze(String::from("r"), &mut sponge, &mut cs)?;
+    assert_eq!(alloc_r.get_value().unwrap(), r);
+
+    // for comms in comms_mem_oracles.iter() {
+    //   transcript.absorb(b"l", &comms.as_slice());
+    // }
+
+    let rho = transcript.squeeze(String::from("rho"))?;
+    let alloc_rho = transcript_circuit.squeeze(String::from("rho"), &mut sponge, &mut cs)?;
+    assert_eq!(alloc_rho.get_value().unwrap(), rho);
+
+    let s = transcript.squeeze(String::from("s"))?;
+    let alloc_s = transcript_circuit.squeeze(String::from("s"), &mut sponge, &mut cs)?;
+    assert_eq!(alloc_s.get_value().unwrap(), s);
+
+    let s_powers = powers(&s, num_instances * num_claims_per_instance);
+
+    let alloc_s_powers = alloc_powers(
+      cs.namespace(|| "s powers"),
+      &alloc_s,
+      num_instances * num_claims_per_instance,
+    )?;
+
+    for (alloc_s_power, s_power) in alloc_s_powers.iter().zip_eq(s_powers.iter()) {
+      assert_eq!(alloc_s_power.get_value().unwrap(), *s_power);
+    }
+
+    let (claim_sc_final, rand_sc) = {
+      // Gather all claims into a single vector
+      let claims = evals_Mz
+        .iter()
+        .flat_map(|&eval_Mz| {
+          let mut claims = vec![E::Scalar::ZERO; num_claims_per_instance];
+          claims[7] = eval_Mz;
+          claims[8] = eval_Mz;
+          claims.into_iter()
+        })
+        .collect::<Vec<_>>();
+
+      // Number of rounds for each claim
+      let num_rounds_by_claim = num_rounds
+        .iter()
+        .flat_map(|num_rounds_i| vec![*num_rounds_i; num_claims_per_instance].into_iter())
+        .collect::<Vec<_>>();
+
+      // self.sc.verify_batch_poseidon_cs(
+      //   &mut cs,
+      //   &claims,
+      //   &num_rounds_by_claim,
+      //   &s_powers,
+      //   3,
+      //   &mut transcript,
+      //   &mut transcript_circuit,
+      //   &mut sponge,
+      // )?;
+      self
+        .sc
+        .verify_batch_poseidon(&claims, &num_rounds_by_claim, &s_powers, 3, &mut transcript)?
+    };
+
+    let (alloc_claim_sc_final, alloc_rand_sc) = {
+      // Gather all claims into a single vector
+      let claims = alloc_evals_Mz
+        .iter()
+        .flat_map(|eval_Mz| {
+          let mut claims = (0..num_claims_per_instance)
+            .map(|_| alloc_zero.clone())
+            .collect::<Vec<_>>();
+
+          claims[7] = eval_Mz.clone();
+          claims[8] = eval_Mz.clone();
+          claims.into_iter()
+        })
+        .collect::<Vec<_>>();
+
+      // Number of rounds for each claim
+      let num_rounds_by_claim = num_rounds
+        .iter()
+        .flat_map(|num_rounds_i| vec![*num_rounds_i; num_claims_per_instance].into_iter())
+        .collect::<Vec<_>>();
+
+      let sc = SCVerifyBatchedGadget::new(self.sc.clone());
+      let degree_bound = AllocatedNum::alloc(cs.namespace(|| "degree_bound"), || {
+        Ok(E::Scalar::from(3_u64))
+      })?;
+
+      sc.verify_batched(
+        &mut cs,
+        &claims,
+        &num_rounds_by_claim,
+        &alloc_s_powers,
+        &degree_bound,
+        &mut transcript_circuit,
+        &mut sponge,
+        "sc verify",
+      )?
+    };
+
+    assert_eq!(alloc_claim_sc_final.get_value().unwrap(), claim_sc_final);
+
+    for (alloc_rand_sc_i, rand_sc_i) in alloc_rand_sc.iter().zip_eq(rand_sc.iter()) {
+      assert_eq!(alloc_rand_sc_i.get_value().unwrap(), *rand_sc_i);
+    }
+
+    // Truncated sumcheck randomness for each instance
+    let rand_sc_i = num_rounds
+      .iter()
+      .map(|num_rounds| rand_sc[(num_rounds_max - num_rounds)..].to_vec())
+      .collect::<Vec<_>>();
+
+    let alloc_rand_sc_i = num_rounds
+      .iter()
+      .map(|num_rounds| alloc_rand_sc[(num_rounds_max - num_rounds)..].to_vec())
+      .collect::<Vec<_>>();
+
+    for (alloc_rand_sc_i, rand_sc_i) in alloc_rand_sc_i.iter().zip_eq(rand_sc_i.iter()) {
+      for (alloc_rand_sc_i, rand_sc_i) in alloc_rand_sc_i.iter().zip_eq(rand_sc_i.iter()) {
+        assert_eq!(alloc_rand_sc_i.get_value().unwrap(), *rand_sc_i);
+      }
+    }
+
+    let alloc_evals_Az_Bz_Cz_W_E = self
+      .evals_Az_Bz_Cz_W_E
+      .iter()
+      .enumerate()
+      .map(|(i, evals)| {
+        evals
+          .iter()
+          .enumerate()
+          .map(|(j, eval)| {
+            AllocatedNum::alloc(
+              cs.namespace(|| format!("evals_Az_Bz_Cz_W_E {i}, {j}")),
+              || Ok(*eval),
+            )
+          })
+          .collect::<Result<Vec<_>, _>>()
+      })
+      .collect::<Result<Vec<_>, _>>()?;
+
+    // Allocate evals_L_row_col
+    let alloc_evals_L_row_col = self
+      .evals_L_row_col
+      .iter()
+      .enumerate()
+      .map(|(i, evals)| {
+        evals
+          .iter()
+          .enumerate()
+          .map(|(j, eval)| {
+            AllocatedNum::alloc(cs.namespace(|| format!("evals_L_row_col {i}, {j}")), || {
+              Ok(*eval)
+            })
+          })
+          .collect::<Result<Vec<_>, _>>()
+      })
+      .collect::<Result<Vec<_>, _>>()?;
+
+    // Allocate evals_mem_oracles
+    let alloc_evals_mem_oracle = self
+      .evals_mem_oracle
+      .iter()
+      .enumerate()
+      .map(|(i, evals)| {
+        evals
+          .iter()
+          .enumerate()
+          .map(|(j, eval)| {
+            AllocatedNum::alloc(
+              cs.namespace(|| format!("evals_mem_oracles {i}, {j}")),
+              || Ok(*eval),
+            )
+          })
+          .collect::<Result<Vec<_>, _>>()
+      })
+      .collect::<Result<Vec<_>, _>>()?;
+
+    // Allocate evals_mem_preprocessed
+    let alloc_evals_mem_preprocessed = self
+      .evals_mem_preprocessed
+      .iter()
+      .enumerate()
+      .map(|(i, evals)| {
+        evals
+          .iter()
+          .enumerate()
+          .map(|(j, eval)| {
+            AllocatedNum::alloc(
+              cs.namespace(|| format!("evals_mem_preprocessed {i}, {j}")),
+              || Ok(*eval),
+            )
+          })
+          .collect::<Result<Vec<_>, _>>()
+      })
+      .collect::<Result<Vec<_>, _>>()?;
+
+    let mut chained_claims = vec![];
+    let mut alloc_chained_claims = vec![];
+    for (
+      i,
+      (
+        (((((num_vars, rand_sc), U), evals_Az_Bz_Cz_W_E), evals_L_row_col), eval_mem_oracle),
+        eval_mem_preprocessed,
+      ),
+    ) in vk
+      .num_vars
+      .iter()
+      .zip_eq(rand_sc_i.iter())
+      .zip_eq(U.iter())
+      .zip_eq(self.evals_Az_Bz_Cz_W_E.iter().cloned())
+      .zip_eq(self.evals_L_row_col.iter().cloned())
+      .zip_eq(self.evals_mem_oracle.iter().cloned())
+      .zip_eq(self.evals_mem_preprocessed.iter().cloned())
+      .enumerate()
+    {
+      let alloc_rand_sc = &alloc_rand_sc_i[i];
+      for (alloc_rand_sc, rand_sc) in alloc_rand_sc.iter().zip_eq(rand_sc.iter()) {
+        assert_eq!(alloc_rand_sc.get_value().unwrap(), *rand_sc);
+      }
+
+      let [Az, Bz, Cz, W, E] = evals_Az_Bz_Cz_W_E;
+
+      // Allocate evals_Az_Bz_Cz_W_E
+      let alloc_eval_Az_Bz_Cz_W_E = &alloc_evals_Az_Bz_Cz_W_E[i];
+      let alloc_Az = &alloc_eval_Az_Bz_Cz_W_E[0];
+      let alloc_Bz = &alloc_eval_Az_Bz_Cz_W_E[1];
+      let alloc_Cz = &alloc_eval_Az_Bz_Cz_W_E[2];
+      let alloc_W = &alloc_eval_Az_Bz_Cz_W_E[3];
+      let alloc_E = &alloc_eval_Az_Bz_Cz_W_E[4];
+
+      assert_eq!(alloc_Az.get_value().unwrap(), Az);
+      assert_eq!(alloc_Bz.get_value().unwrap(), Bz);
+      assert_eq!(alloc_Cz.get_value().unwrap(), Cz);
+      assert_eq!(alloc_W.get_value().unwrap(), W);
+      assert_eq!(alloc_E.get_value().unwrap(), E);
+
+      let [L_row, L_col] = evals_L_row_col;
+
+      // Allocate evals_L_row_col
+      let alloc_eval_L_row_col = &alloc_evals_L_row_col[i];
+      let alloc_L_row = &alloc_eval_L_row_col[0];
+      let alloc_L_col = &alloc_eval_L_row_col[1];
+
+      assert_eq!(alloc_L_row.get_value().unwrap(), L_row);
+      assert_eq!(alloc_L_col.get_value().unwrap(), L_col);
+
+      let [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col] =
+        eval_mem_oracle;
+      // Allocate evals_mem_preprocessed
+      let alloc_eval_mem_oracle = &alloc_evals_mem_oracle[i];
+      let alloc_t_plus_r_inv_row = &alloc_eval_mem_oracle[0];
+      let alloc_w_plus_r_inv_row = &alloc_eval_mem_oracle[1];
+      let alloc_t_plus_r_inv_col = &alloc_eval_mem_oracle[2];
+      let alloc_w_plus_r_inv_col = &alloc_eval_mem_oracle[3];
+
+      assert_eq!(
+        alloc_t_plus_r_inv_row.get_value().unwrap(),
+        t_plus_r_inv_row
+      );
+      assert_eq!(
+        alloc_w_plus_r_inv_row.get_value().unwrap(),
+        w_plus_r_inv_row
+      );
+      assert_eq!(
+        alloc_t_plus_r_inv_col.get_value().unwrap(),
+        t_plus_r_inv_col
+      );
+      assert_eq!(
+        alloc_w_plus_r_inv_col.get_value().unwrap(),
+        w_plus_r_inv_col
+      );
+
+      let [val_A, val_B, val_C, row, col, ts_row, ts_col] = eval_mem_preprocessed;
+
+      // Allocate evals_mem_preprocessed
+      let alloc_eval_mem_preprocessed = &alloc_evals_mem_preprocessed[i];
+      let alloc_val_A = &alloc_eval_mem_preprocessed[0];
+      let alloc_val_B = &alloc_eval_mem_preprocessed[1];
+      let alloc_val_C = &alloc_eval_mem_preprocessed[2];
+      let alloc_row = &alloc_eval_mem_preprocessed[3];
+      let alloc_col = &alloc_eval_mem_preprocessed[4];
+      let alloc_ts_row = &alloc_eval_mem_preprocessed[5];
+      let alloc_ts_col = &alloc_eval_mem_preprocessed[6];
+
+      let num_rounds_i = rand_sc.len();
+      let num_vars_log = num_vars.log_2();
+
+      let eq_rho = PowPolynomial::new(&rho, num_rounds_i).evaluate(rand_sc);
+
+      let alloc_eq_rho = AllocatedPowPolynomial::new(
+        cs.namespace(|| format!("eq_rho_poly_{i}")),
+        &alloc_rho,
+        num_rounds_i,
+      )?
+      .evaluate(
+        cs.namespace(|| format!("eq_rho_poly_eval_{i}")),
+        &alloc_rand_sc,
+      )?;
+
+      assert_eq!(alloc_eq_rho.get_value().unwrap(), eq_rho);
+
+      let (eq_tau, eq_masked_tau) = {
+        let eq_tau: EqPolynomial<_> = PowPolynomial::new(&tau, num_rounds_i).into();
+
+        let eq_tau_at_rand = eq_tau.evaluate(rand_sc);
+        let eq_masked_tau = MaskedEqPolynomial::new(&eq_tau, num_vars_log).evaluate(rand_sc);
+
+        (eq_tau_at_rand, eq_masked_tau)
+      };
+
+      let (alloc_eq_tau, alloc_eq_masked_tau) = {
+        let alloc_eq_tau: AllocatedEqPolynomial<_> = AllocatedPowPolynomial::new(
+          cs.namespace(|| format!("eq_tau_pow_poly_{i}")),
+          &alloc_tau,
+          num_rounds_i,
+        )?
+        .into();
+
+        let alloc_eq_tau_at_rand = alloc_eq_tau.evaluate(
+          cs.namespace(|| format!("eq_tau_eval()_{i}")),
+          &alloc_rand_sc,
+        )?;
+
+        let alloc_eq_masked_tau = AllocatedMaskedEqPolynomial::new(&alloc_eq_tau, num_vars_log)
+          .evaluate(
+            cs.namespace(|| format!("eq_masked_tau_eval()_{i}")),
+            &alloc_rand_sc,
+          )?;
+
+        (alloc_eq_tau_at_rand, alloc_eq_masked_tau)
+      };
+
+      assert_eq!(alloc_eq_tau.get_value().unwrap(), eq_tau);
+      assert_eq!(alloc_eq_masked_tau.get_value().unwrap(), eq_masked_tau);
+
+      // Evaluate identity polynomial
+      let id = IdentityPolynomial::new(num_rounds_i).evaluate(rand_sc);
+
+      let alloc_id = AllocatedIdentityPolynomial::new(num_rounds_i).evaluate(
+        cs.namespace(|| format!("id_poly_{i}.eval()")),
+        &alloc_rand_sc,
+      )?;
+
+      assert_eq!(alloc_id.get_value().unwrap(), id);
+
+      let Z = {
+        // rand_sc was padded, so we now remove the padding
+        let (factor, rand_sc_unpad) = {
+          let l = num_rounds_i - (num_vars_log + 1);
+
+          let (rand_sc_lo, rand_sc_hi) = rand_sc.split_at(l);
+
+          let factor = rand_sc_lo
+            .iter()
+            .fold(E::Scalar::ONE, |acc, r_p| acc * (E::Scalar::ONE - r_p));
+
+          (factor, rand_sc_hi)
+        };
+
+        let X = {
+          // constant term
+          let poly_X = std::iter::once(U.u).chain(U.X.iter().cloned()).collect();
+          SparsePolynomial::new(num_vars_log, poly_X).evaluate(&rand_sc_unpad[1..])
+        };
+
+        // W was evaluated as if it was padded to logNi variables,
+        // so we don't multiply it by (1-rand_sc_unpad[0])
+        W + factor * rand_sc_unpad[0] * X
+      };
+
+      let alloc_Z = {
+        // rand_sc was padded, so we now remove the padding
+        let (alloc_factor, alloc_rand_sc_unpad) = {
+          let l = num_rounds_i - (num_vars_log + 1);
+
+          let (alloc_rand_sc_lo, alloc_rand_sc_hi) = alloc_rand_sc.split_at(l);
+          let mut alloc_factor = alloc_one.clone();
+          // let factor = rand_sc_lo
+          //   .iter()
+          //   .fold(E::Scalar::ONE, |acc, r_p| acc * (E::Scalar::ONE - r_p));
+          for alloc_r_p in alloc_rand_sc_lo.iter() {
+            let alloc_neg_r_p = alloc_negate(cs.namespace(|| format!("r_p_{i}")), alloc_r_p)?;
+            let alloc_one_minus_r_p = alloc_one.add(
+              cs.namespace(|| format!("one_minus_r_p_{i}")),
+              &alloc_neg_r_p,
+            )?;
+            alloc_factor =
+              alloc_factor.mul(cs.namespace(|| format!("factor_{i}")), &alloc_one_minus_r_p)?;
+          }
+          (alloc_factor, alloc_rand_sc_hi)
+        };
+
+        let alloc_X = {
+          // constant term
+          let poly_X: Vec<E::Scalar> = std::iter::once(U.u).chain(U.X.iter().cloned()).collect();
+          let alloc_poly_X = poly_X
+            .iter()
+            .map(|x| AllocatedNum::alloc(cs.namespace(|| format!("poly_X_{i}")), || Ok(*x)))
+            .collect::<Result<Vec<_>, _>>()?;
+
+          AllocatedSparsePolynomial::new(num_vars_log, alloc_poly_X).evaluate(
+            cs.namespace(|| format!("evaluate sparse_ml poly_{i}")),
+            &alloc_rand_sc_unpad[1..],
+          )?
+        };
+
+        // W was evaluated as if it was padded to logNi variables,
+        // so we don't multiply it by (1-rand_sc_unpad[0])
+        // W + factor * rand_sc_unpad[0] * X
+        let alloc_rand_sc_unpad_times_X = alloc_rand_sc_unpad[0].mul(
+          cs.namespace(|| format!("rand_sc_unpad_times_X_{i}")),
+          &alloc_X,
+        )?;
+        let factor_times_rand_sc_unpad_times_X = alloc_factor.mul(
+          cs.namespace(|| format!("factor_times_rand_sc_unpad_times_X_{i}")),
+          &alloc_rand_sc_unpad_times_X,
+        )?;
+
+        alloc_W.add(
+          cs.namespace(|| format!("W_plus_factor_times_rand_sc_unpad_times_X_{i}")),
+          &factor_times_rand_sc_unpad_times_X,
+        )?
+      };
+
+      assert_eq!(alloc_Z.get_value().unwrap(), Z);
+
+      let t_plus_r_row = {
+        let addr_row = id;
+        let val_row = eq_tau;
+        let t = addr_row + gamma * val_row;
+        t + r
+      };
+
+      let alloc_t_plus_r_row = {
+        let alloc_addr_row = alloc_id.clone();
+        let alloc_val_row = alloc_eq_tau.clone();
+
+        // let t = addr_row + gamma * val_row;
+        let alloc_gamma_times_val_row = alloc_gamma.mul(
+          cs.namespace(|| format!("t_plus_r_row: gamma * val_row {i}")),
+          &alloc_val_row,
+        )?;
+        let alloc_t = alloc_addr_row.add(
+          cs.namespace(|| format!("t_plus_r_row: addr_row + gamma * val_row {i}")),
+          &alloc_gamma_times_val_row,
+        )?;
+
+        // t + r
+        alloc_t.add(
+          cs.namespace(|| format!("t_plus_r_row: t + r {i}")),
+          &alloc_r,
+        )?
+      };
+
+      assert_eq!(alloc_t_plus_r_row.get_value().unwrap(), t_plus_r_row);
+
+      let w_plus_r_row = {
+        let addr_row = row;
+        let val_row = L_row;
+        let w = addr_row + gamma * val_row;
+        w + r
+      };
+
+      let alloc_w_plus_r_row = {
+        let alloc_addr_row = alloc_row;
+        let alloc_val_row = alloc_L_row.clone();
+
+        // let w = addr_row + gamma * val_row;
+        let alloc_gamma_times_val_row = alloc_gamma.mul(
+          cs.namespace(|| format!("w_plus_r_row: gamma * val_row {i}")),
+          &alloc_val_row,
+        )?;
+        let alloc_w = alloc_addr_row.add(
+          cs.namespace(|| format!("w_plus_r_row: addr_row + gamma * val_row {i}")),
+          &alloc_gamma_times_val_row,
+        )?;
+        // w + r
+        alloc_w.add(
+          cs.namespace(|| format!("w_plus_r_row: w + r {i}")),
+          &alloc_r,
+        )?
+      };
+
+      assert_eq!(alloc_w_plus_r_row.get_value().unwrap(), w_plus_r_row);
+
+      let t_plus_r_col = {
+        let addr_col = id;
+        let val_col = Z;
+        let t = addr_col + gamma * val_col;
+        t + r
+      };
+
+      let alloc_t_plus_r_col = {
+        let alloc_addr_col = alloc_id;
+        let alloc_val_col = alloc_Z;
+
+        // let t = addr_col + gamma * val_col;
+        let alloc_gamma_times_val_col = alloc_gamma.mul(
+          cs.namespace(|| format!("t_plus_r_col: gamma * val_col {i}")),
+          &alloc_val_col,
+        )?;
+        let alloc_t = alloc_addr_col.add(
+          cs.namespace(|| format!("t_plus_r_col: addr_col + gamma * val_col {i}")),
+          &alloc_gamma_times_val_col,
+        )?;
+
+        // t + r
+        alloc_t.add(
+          cs.namespace(|| format!("t_plus_r_col: t + r {i}")),
+          &alloc_r,
+        )?
+      };
+
+      let w_plus_r_col = {
+        let addr_col = col;
+        let val_col = L_col;
+        let w = addr_col + gamma * val_col;
+        w + r
+      };
+
+      let alloc_w_plus_r_col = {
+        let alloc_addr_col = alloc_col;
+        let alloc_val_col = alloc_L_col.clone();
+
+        // let w = addr_col + gamma * val_col;
+        let alloc_gamma_times_val_col = alloc_gamma.mul(
+          cs.namespace(|| format!("w_plus_r_col: gamma * val_col {i}")),
+          &alloc_val_col,
+        )?;
+        let alloc_w = alloc_addr_col.add(
+          cs.namespace(|| format!("w_plus_r_col: addr_col + gamma * val_col {i}")),
+          &alloc_gamma_times_val_col,
+        )?;
+
+        // w + r
+        alloc_w.add(
+          cs.namespace(|| format!("w_plus_r_col: w + r {i}")),
+          &alloc_r,
+        )?
+      };
+
+      let claims_mem = [
+        t_plus_r_inv_row - w_plus_r_inv_row,
+        t_plus_r_inv_col - w_plus_r_inv_col,
+        eq_rho * (t_plus_r_inv_row * t_plus_r_row - ts_row),
+        eq_rho * (w_plus_r_inv_row * w_plus_r_row - E::Scalar::ONE),
+        eq_rho * (t_plus_r_inv_col * t_plus_r_col - ts_col),
+        eq_rho * (w_plus_r_inv_col * w_plus_r_col - E::Scalar::ONE),
+      ];
+
+      let alloc_claims_mem_0 = {
+        let alloc_neg_w_plus_r_inv_row = alloc_negate(
+          cs.namespace(|| format!("neg_w_plus_r_inv_row_{i}")),
+          &alloc_w_plus_r_inv_row,
+        )?;
+        alloc_t_plus_r_inv_row.add(
+          cs.namespace(|| format!("t_plus_r_inv_row - w_plus_r_inv_row_{i}")),
+          &alloc_neg_w_plus_r_inv_row,
+        )?
+      };
+
+      assert_eq!(alloc_claims_mem_0.get_value().unwrap(), claims_mem[0]);
+
+      // alloc_claims_mem_1
+      let alloc_claims_mem_1 = {
+        //   t_plus_r_inv_col - w_plus_r_inv_col,
+        let alloc_neg_w_plus_r_inv_col = alloc_negate(
+          cs.namespace(|| format!("neg_w_plus_r_inv_col_{i}")),
+          &alloc_w_plus_r_inv_col,
+        )?;
+        alloc_t_plus_r_inv_col.add(
+          cs.namespace(|| format!("t_plus_r_inv_col - w_plus_r_inv_col_{i}")),
+          &alloc_neg_w_plus_r_inv_col,
+        )?
+      };
+
+      assert_eq!(alloc_claims_mem_1.get_value().unwrap(), claims_mem[1]);
+
+      // alloc_claims_mem_2
+      let alloc_neg_ts_row =
+        alloc_negate(cs.namespace(|| format!("neg_ts_row_{i}")), &alloc_ts_row)?;
+      let alloc_t_plus_r_inv_row_times_t_plus_r_row = alloc_t_plus_r_inv_row.mul(
+        cs.namespace(|| format!("t_plus_r_inv_row * t_plus_r_row_{i}")),
+        &alloc_t_plus_r_row,
+      )?;
+      // (t_plus_r_inv_row * t_plus_r_row - ts_row)
+      let alloc_term = alloc_t_plus_r_inv_row_times_t_plus_r_row.add(
+        cs.namespace(|| format!("t_plus_r_inv_row * t_plus_r_row - ts_row_{i}")),
+        &alloc_neg_ts_row,
+      )?;
+      let alloc_claims_mem_2 = alloc_eq_rho.mul(
+        cs.namespace(|| format!("eq_rho * (t_plus_r_inv_row * t_plus_r_row - ts_row_{i})")),
+        &alloc_term,
+      )?;
+
+      assert_eq!(alloc_claims_mem_2.get_value().unwrap(), claims_mem[2]);
+
+      // alloc_claims_mem_3
+      let alloc_neg_one = alloc_negate(cs.namespace(|| format!("neg_one_{i}")), &alloc_one)?;
+      let alloc_w_plus_r_inv_row_times_w_plus_r_row = alloc_w_plus_r_inv_row.mul(
+        cs.namespace(|| format!("w_plus_r_inv_row * w_plus_r_row_{i}")),
+        &alloc_w_plus_r_row,
+      )?;
+      // (w_plus_r_inv_row * w_plus_r_row - E::Scalar::ONE)
+      let alloc_term = alloc_w_plus_r_inv_row_times_w_plus_r_row.add(
+        cs.namespace(|| format!("w_plus_r_inv_row * w_plus_r_row - E::Scalar::ONE_{i}")),
+        &alloc_neg_one,
+      )?;
+      let alloc_claims_mem_3 = alloc_eq_rho.mul(
+        cs.namespace(|| format!("eq_rho * (w_plus_r_inv_row * w_plus_r_row - E::Scalar::ONE_{i})")),
+        &alloc_term,
+      )?;
+
+      assert_eq!(alloc_claims_mem_3.get_value().unwrap(), claims_mem[3]);
+
+      // alloc_claims_mem_4
+      let alloc_neg_ts_col =
+        alloc_negate(cs.namespace(|| format!("neg_ts_col_{i}")), &alloc_ts_col)?;
+      let alloc_t_plus_r_inv_col_times_t_plus_r_col = alloc_t_plus_r_inv_col.mul(
+        cs.namespace(|| format!("t_plus_r_inv_col * t_plus_r_col_{i}")),
+        &alloc_t_plus_r_col,
+      )?;
+      // (t_plus_r_inv_col * t_plus_r_col - ts_col)
+      let alloc_term = alloc_t_plus_r_inv_col_times_t_plus_r_col.add(
+        cs.namespace(|| format!("t_plus_r_inv_col * t_plus_r_col - ts_col_{i}")),
+        &alloc_neg_ts_col,
+      )?;
+      let alloc_claims_mem_4 = alloc_eq_rho.mul(
+        cs.namespace(|| format!("eq_rho * (t_plus_r_inv_col * t_plus_r_col - ts_col_{i})")),
+        &alloc_term,
+      )?;
+
+      assert_eq!(alloc_claims_mem_4.get_value().unwrap(), claims_mem[4]);
+
+      // alloc_claims_mem_5
+      let alloc_w_plus_r_inv_col_times_w_plus_r_col = alloc_w_plus_r_inv_col.mul(
+        cs.namespace(|| format!("w_plus_r_inv_col * w_plus_r_col_{i}")),
+        &alloc_w_plus_r_col,
+      )?;
+      // (w_plus_r_inv_col * w_plus_r_col - E::Scalar::ONE)
+      let alloc_term = alloc_w_plus_r_inv_col_times_w_plus_r_col.add(
+        cs.namespace(|| format!("w_plus_r_inv_col * w_plus_r_col - E::Scalar::ONE_{i}")),
+        &alloc_neg_one,
+      )?;
+      let alloc_claims_mem_5 = alloc_eq_rho.mul(
+        cs.namespace(|| format!("eq_rho * (w_plus_r_inv_col * w_plus_r_col - E::Scalar::ONE_{i})")),
+        &alloc_term,
+      )?;
+
+      assert_eq!(alloc_claims_mem_5.get_value().unwrap(), claims_mem[5]);
+
+      let alloc_claims_mem = [
+        //   t_plus_r_inv_row - w_plus_r_inv_row,
+        alloc_claims_mem_0,
+        //   t_plus_r_inv_col - w_plus_r_inv_col,
+        alloc_claims_mem_1,
+        //   eq_rho * (t_plus_r_inv_row * t_plus_r_row - ts_row),
+        alloc_claims_mem_2,
+        //   eq_rho * (w_plus_r_inv_row * w_plus_r_row - E::Scalar::ONE),
+        alloc_claims_mem_3,
+        //   eq_rho * (t_plus_r_inv_col * t_plus_r_col - ts_col),
+        alloc_claims_mem_4,
+        //   eq_rho * (w_plus_r_inv_col * w_plus_r_col - E::Scalar::ONE),
+        alloc_claims_mem_5,
+      ];
+
+      let claims_outer = [
+        eq_tau * (Az * Bz - U.u * Cz - E),
+        eq_tau * (Az + c * Bz + c * c * Cz),
+      ];
+
+      // claims_outer 1
+
+      // -E
+      let alloc_neg_E = alloc_negate(cs.namespace(|| format!("neg_E_{i}")), &alloc_E)?;
+      // U.u
+      let alloc_U_u = AllocatedNum::alloc(cs.namespace(|| format!("U_u_{i}")), || Ok(U.u))?;
+
+      // U.u * Cz
+      let alloc_U_u_times_Cz =
+        alloc_U_u.mul(cs.namespace(|| format!("U_u * Cz_{i}")), &alloc_Cz)?;
+
+      // Az * Bz
+      let alloc_Az_times_Bz = alloc_Az.mul(cs.namespace(|| format!("Az * Bz_{i}")), &alloc_Bz)?;
+
+      // - (U.u * Cz)
+      let alloc_neg_U_u_times_Cz = alloc_negate(
+        cs.namespace(|| format!("neg_U_u_times_Cz_{i}")),
+        &alloc_U_u_times_Cz,
+      )?;
+
+      // Az * Bz - U.u * Cz
+      let alloc_term_0 = alloc_Az_times_Bz.add(
+        cs.namespace(|| format!("Az * Bz_{i} - U.u * Cz")),
+        &alloc_neg_U_u_times_Cz,
+      )?;
+
+      // Az * Bz - U.u * Cz - E
+      let alloc_term_0 = alloc_term_0.add(
+        cs.namespace(|| format!("(Az * Bz - U.u * Cz - E)_{i}")),
+        &alloc_neg_E,
+      )?;
+
+      let alloc_claims_outer_0 = alloc_eq_tau.mul(
+        cs.namespace(|| format!("eq_tau * (Az * Bz - U.u * Cz - E_{i})")),
+        &alloc_term_0,
+      )?;
+
+      assert_eq!(alloc_claims_outer_0.get_value().unwrap(), claims_outer[0]);
+
+      // claims_outer 2
+      let alloc_c_times_Bz = alloc_c.mul(cs.namespace(|| format!("c * Bz_{i}")), &alloc_Bz)?;
+      let alloc_c_times_Cz = alloc_c.mul(cs.namespace(|| format!("c * Cz_{i}")), &alloc_Cz)?;
+      let alloc_c_times_c_times_Cz = alloc_c.mul(
+        cs.namespace(|| format!("c * c * Cz_{i}")),
+        &alloc_c_times_Cz,
+      )?;
+      let alloc_term = alloc_Az.add(cs.namespace(|| format!("Az_{i}")), &alloc_c_times_Bz)?;
+      let alloc_term = alloc_term.add(
+        cs.namespace(|| format!("(Az + c * Bz + c * c * Cz) {i}")),
+        &alloc_c_times_c_times_Cz,
+      )?;
+      let alloc_claims_outer_1 = alloc_eq_tau.mul(
+        cs.namespace(|| format!("eq_tau * (Az + c * Bz + c * c * Cz_{i})")),
+        &alloc_term,
+      )?;
+
+      assert_eq!(alloc_claims_outer_1.get_value().unwrap(), claims_outer[1]);
+
+      let alloc_claims_outer = [
+        // eq_tau * (Az * Bz - U.u * Cz - E),
+        alloc_claims_outer_0,
+        // eq_tau * (Az + c * Bz + c * c * Cz),
+        alloc_claims_outer_1,
+      ];
+
+      let claims_inner = [L_row * L_col * (val_A + c * val_B + c * c * val_C)];
+
+      // L_row * L_col * (val_A + c * val_B + c * c * val_C)
+      let alloc_claims_inner_elem = {
+        // c * val_C
+        let alloc_c_times_val_C =
+          alloc_c.mul(cs.namespace(|| format!("c * val_C_{i}")), &alloc_val_C)?;
+
+        // c * c * val_C
+        let alloc_c_times_c_times_val_C = alloc_c.mul(
+          cs.namespace(|| format!("c * c * val_C_{i}")),
+          &alloc_c_times_val_C,
+        )?;
+
+        // c * val_B
+        let alloc_c_times_val_B =
+          alloc_c.mul(cs.namespace(|| format!("c * val_B_{i}")), &alloc_val_B)?;
+
+        // val_A + c * val_B
+        let alloc_term = alloc_val_A.add(
+          cs.namespace(|| format!("val_A + c * val_B_{i}")),
+          &alloc_c_times_val_B,
+        )?;
+
+        // val_A + c * val_B + c * c * val_C
+        let alloc_term = alloc_term.add(
+          cs.namespace(|| format!("val_A + c * val_B + c * c * val_C_{i}")),
+          &alloc_c_times_c_times_val_C,
+        )?;
+
+        // L_col * L_row * (val_A + c * val_B + c * c * val_C)
+        let res = alloc_L_row.mul(
+          cs.namespace(|| format!("L_row * (val_A + c * val_B + c * c * val_C_{i})")),
+          &alloc_term,
+        )?;
+
+        res.mul(
+          cs.namespace(|| format!("L_col * L_row * (val_A + c * val_B + c * c * val_C_{i})")),
+          alloc_L_col,
+        )?
+      };
+
+      assert_eq!(
+        alloc_claims_inner_elem.get_value().unwrap(),
+        claims_inner[0]
+      );
+
+      let alloc_claims_inner = [alloc_claims_inner_elem];
+
+      let claims_witness = [eq_masked_tau * W];
+
+      let alloc_claims_witness =
+        [alloc_eq_masked_tau.mul(cs.namespace(|| format!("eq_masked_tau * W_{i}")), &alloc_W)?];
+
+      assert_eq!(
+        alloc_claims_witness[0].get_value().unwrap(),
+        claims_witness[0]
+      );
+
+      chained_claims.push(chain![
+        claims_mem,
+        claims_outer,
+        claims_inner,
+        claims_witness
+      ]);
+
+      alloc_chained_claims.push(chain![
+        alloc_claims_mem,
+        alloc_claims_outer,
+        alloc_claims_inner,
+        alloc_claims_witness
+      ]);
+    }
+
+    let claim_sc_final_expected = chained_claims
+      .into_iter()
+      .flatten()
+      .zip_eq(s_powers)
+      .fold(E::Scalar::ZERO, |acc, (claim, s)| acc + s * claim);
+
+    let mut alloc_claim_sc_final_expected = alloc_zero.clone();
+
+    for (i, (claim, s)) in alloc_chained_claims
+      .into_iter()
+      .flatten()
+      .zip_eq(alloc_s_powers)
+      .enumerate()
+    {
+      let claim_times_s = claim.mul(cs.namespace(|| format!("claim * s_{i}")), &s)?;
+      alloc_claim_sc_final_expected = alloc_claim_sc_final_expected.add(
+        cs.namespace(|| format!("final_claim: claim * s_{i}")),
+        &claim_times_s,
+      )?;
+    }
+
+    assert_eq!(
+      alloc_claim_sc_final_expected.get_value().unwrap(),
+      claim_sc_final_expected
+    );
+
+    if claim_sc_final_expected != claim_sc_final {
+      return Err(NovaError::InvalidSumcheckProof);
+    }
+
+    cs.enforce(
+      || "enforce claim_sc_final",
+      |lc| lc + alloc_claim_sc_final.get_variable(),
+      |lc| lc + CS::one(),
+      |lc| lc + alloc_claim_sc_final_expected.get_variable(),
+    );
+
+    let evals_vec = zip_with!(
+      iter,
+      (
+        self.evals_Az_Bz_Cz_W_E,
+        self.evals_L_row_col,
+        self.evals_mem_oracle,
+        self.evals_mem_preprocessed
+      ),
+      |Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed| {
+        chain![Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed]
+          .cloned()
+          .collect::<Vec<_>>()
+      }
+    )
+    .collect::<Vec<_>>();
+
+    // // Add all Sumcheck evaluations to the transcript
+    // for evals in evals_vec.iter() {
+    //   transcript.absorb(b"e", &evals.as_slice()); // comm_vec is already in the transcript
+    // }
+
+    let c = transcript.squeeze(String::from("c_1"))?;
+
+    // Compute batched polynomial evaluation instance at rand_sc
+    let _u = {
+      let num_evals = evals_vec[0].len();
+
+      let evals_vec = evals_vec.into_iter().flatten().collect::<Vec<_>>();
+
+      let num_vars = num_rounds
+        .iter()
+        .flat_map(|num_rounds| vec![*num_rounds; num_evals].into_iter())
+        .collect::<Vec<_>>();
+
+      let comms_vec = zip_with!(
+        (
+          comms_Az_Bz_Cz.into_iter(),
+          U.iter(),
+          comms_L_row_col.into_iter(),
+          comms_mem_oracles.into_iter(),
+          vk.S_comm.iter()
+        ),
+        |Az_Bz_Cz, U, L_row_col, mem_oracles, S_comm| {
+          chain![
+            Az_Bz_Cz,
+            [U.comm_W, U.comm_E],
+            L_row_col,
+            mem_oracles,
+            [
+              S_comm.comm_val_A,
+              S_comm.comm_val_B,
+              S_comm.comm_val_C,
+              S_comm.comm_row,
+              S_comm.comm_col,
+              S_comm.comm_ts_row,
+              S_comm.comm_ts_col,
+            ]
+          ]
+        }
+      )
+      .flatten()
+      .collect::<Vec<_>>();
+
+      PolyEvalInstance::<E>::batch_diff_size(&comms_vec, &evals_vec, &num_vars, rand_sc, c)
+    };
+
+    // verify
+    // ipa_pc::EvaluationEngine::verify(&vk.vk_ee, &mut transcript, &u.c, &u.x, &u.e, &self.eval_arg)?;
+
+    Ok(())
+  }
+
   /// Runs the batched Sumcheck protocol for the claims of multiple instance of possibly different sizes.
   ///
   /// # Details
@@ -1106,7 +2183,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARK<E, EE> {
     mut outer: Vec<T2>,
     mut inner: Vec<T3>,
     mut witness: Vec<T4>,
-    transcript: &mut E::TE,
+    transcript: &mut PoseidonTranscript<'_, E>,
   ) -> Result<
     (
       SumcheckProof<E>,
@@ -1167,7 +2244,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARK<E, EE> {
     .collect::<Vec<E::Scalar>>();
 
     // Sample a challenge for the random linear combination of all scaled claims
-    let s = transcript.squeeze(b"r")?;
+    let s = transcript.squeeze(String::from("s"))?;
     let coeffs = powers(&s, claims.len());
 
     // At the start of each round, the running claim is equal to the random linear combination
@@ -1233,10 +2310,10 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARK<E, EE> {
       let poly = UniPoly::from_evals(&evals);
 
       // append the prover's message to the transcript
-      transcript.absorb(b"p", &poly);
+      // transcript.absorb(b"p", &poly);
 
       // derive the verifier's challenge for the next round
-      let r_i = transcript.squeeze(b"c")?;
+      let r_i = transcript.squeeze(String::from(format!("r_{i}")))?;
       r.push(r_i);
 
       // Bind the variable X_i of polynomials across all claims to r_i.
@@ -1332,12 +2409,14 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARK<E, EE> {
   }
 }
 
-impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E>
-  for BatchedRelaxedR1CSSNARK<E, EE>
+impl<E: Engine> RelaxedR1CSSNARKTrait<E> for BatchedRelaxedR1CSSNARK<E>
+where
+  E::GE: DlogGroup,
+  CommitmentKey<E>: CommitmentKeyExtTrait<E>,
 {
-  type ProverKey = ProverKey<E, EE>;
+  type ProverKey = ProverKey<E>;
 
-  type VerifierKey = VerifierKey<E, EE>;
+  type VerifierKey = VerifierKey<E>;
 
   fn ck_floor() -> Box<dyn for<'a> Fn(&'a R1CSShape<E>) -> usize> {
     <Self as BatchedRelaxedR1CSSNARKTrait<E>>::ck_floor()

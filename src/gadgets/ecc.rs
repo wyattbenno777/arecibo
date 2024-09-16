@@ -586,6 +586,32 @@ impl<G: Group> AllocatedPoint<G> {
 
     Ok(Self { x, y, is_infinity })
   }
+
+  /// Check if another point is equal to this point
+  pub fn enforce_equal<CS: ConstraintSystem<G::Base>>(
+    &self,
+    mut cs: CS,
+    other: &Self,
+  ) -> Result<(), SynthesisError> {
+    let x_eq = alloc_num_equals(cs.namespace(|| "x_eq"), &self.x, &other.x)?;
+    let y_eq = alloc_num_equals(cs.namespace(|| "y_eq"), &self.y, &other.y)?;
+
+    cs.enforce(
+      || "x_eq and y_eq implies equality",
+      |lc| lc + x_eq.get_variable(),
+      |lc| lc + y_eq.get_variable(),
+      |lc| lc + CS::one(),
+    );
+
+    cs.enforce(
+      || "check is_infinity equal",
+      |lc| lc + CS::one() - self.is_infinity.get_variable(),
+      |lc| lc + CS::one(),
+      |lc| lc + CS::one() - other.is_infinity.get_variable(),
+    );
+
+    Ok(())
+  }
 }
 
 #[derive(Clone, Debug)]

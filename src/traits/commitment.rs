@@ -1,16 +1,16 @@
 //! This module defines a collection of traits that define the behavior of a commitment engine
 //! We require the commitment engine to provide a commitment to vectors with a single group element
+use crate::provider::traits::DlogGroup;
 use crate::{
   errors::NovaError,
   traits::{AbsorbInROTrait, Engine, TranscriptReprTrait},
 };
-use group::prime::PrimeCurve;
-use crate::provider::traits::DlogGroup;
 use abomonation::Abomonation;
 use core::{
   fmt::Debug,
   ops::{Add, Mul, MulAssign},
 };
+use group::prime::PrimeCurve;
 use serde::{Deserialize, Serialize};
 
 /// A helper trait for types implementing scalar multiplication.
@@ -92,12 +92,10 @@ pub trait CommitmentEngineTrait<E: Engine>: Clone + Send + Sync {
 
   /// Commits to the provided vector using the provided generators
   fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar]) -> Self::Commitment;
-
 }
 
 /// A trait that defines additional methods specific to zk commitments
 pub trait ZKCommitmentEngineTrait<E: Engine>: CommitmentEngineTrait<E> {
-
   /// Samples a new commitment key of a specified size
   fn setup_exact(label: &'static [u8], n: usize) -> Self::CommitmentKey;
 
@@ -120,23 +118,17 @@ pub trait ZKCommitmentEngineTrait<E: Engine>: CommitmentEngineTrait<E> {
     E::GE: DlogGroup;
 
   /// Converts a commitment into generators (with no blinding generator)
-  fn from_preprocessed(
-      com: Vec<<<E as Engine>::GE as PrimeCurve>::Affine>,
-  ) -> Self::CommitmentKey
+  fn from_preprocessed(com: Vec<<<E as Engine>::GE as PrimeCurve>::Affine>) -> Self::CommitmentKey
   where
-      E::GE: DlogGroup;
+    E::GE: DlogGroup;
 
   /// Returns the generators of the commitment
-  fn get_gens(
-    ck: &Self::CommitmentKey,
-  ) -> Vec<<<E as Engine>::GE as PrimeCurve>::Affine>
+  fn get_gens(ck: &Self::CommitmentKey) -> Vec<<<E as Engine>::GE as PrimeCurve>::Affine>
   where
     E::GE: DlogGroup;
 
   /// Returns the blinding generator of the commitment
-  fn get_blinding_gen(
-    ck: &Self::CommitmentKey,
-  ) -> <<E as Engine>::GE as PrimeCurve>::Affine
+  fn get_blinding_gen(ck: &Self::CommitmentKey) -> <<E as Engine>::GE as PrimeCurve>::Affine
   where
     E::GE: DlogGroup;
 

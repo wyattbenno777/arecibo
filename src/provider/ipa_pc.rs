@@ -1,18 +1,22 @@
 //! This module implements `EvaluationEngine` using an IPA-based polynomial commitment scheme
+
+use crate::traits::commitment::CommitmentTrait;
+
 use crate::{
   digest::SimpleDigestible,
   errors::{NovaError, PCSError},
   provider::{pedersen::CommitmentKeyExtTrait, traits::DlogGroup, util::field::batch_invert},
   spartan::polys::eq::EqPolynomial,
   traits::{
-    commitment::{CommitmentEngineTrait, CommitmentTrait},
-    evaluation::EvaluationEngineTrait,
-    Engine, TranscriptEngineTrait, TranscriptReprTrait,
+    commitment::CommitmentEngineTrait, evaluation::EvaluationEngineTrait, Engine,
+    TranscriptEngineTrait, TranscriptReprTrait,
   },
   zip_with, Commitment, CommitmentKey, CompressedCommitment, CE,
 };
+
 use core::iter;
 use ff::Field;
+
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -28,8 +32,8 @@ pub struct ProverKey<E: Engine> {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct VerifierKey<E: Engine> {
-  pub(in crate::provider) ck_v: Arc<CommitmentKey<E>>,
-  pub(in crate::provider) ck_s: CommitmentKey<E>,
+  pub(crate) ck_v: Arc<CommitmentKey<E>>,
+  pub(crate) ck_s: CommitmentKey<E>,
 }
 
 impl<E: Engine> SimpleDigestible for VerifierKey<E> {}
@@ -149,9 +153,9 @@ impl<E: Engine> InnerProductWitness<E> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct InnerProductArgument<E: Engine> {
-  pub(in crate::provider) L_vec: Vec<CompressedCommitment<E>>,
-  pub(in crate::provider) R_vec: Vec<CompressedCommitment<E>>,
-  pub(in crate::provider) a_hat: E::Scalar,
+  pub(crate) L_vec: Vec<CompressedCommitment<E>>,
+  pub(crate) R_vec: Vec<CompressedCommitment<E>>,
+  pub(crate) a_hat: E::Scalar,
 }
 
 impl<E> InnerProductArgument<E>
@@ -377,10 +381,11 @@ where
 
 #[cfg(test)]
 mod test {
-  use crate::provider::ipa_pc::EvaluationEngine;
-  use crate::provider::util::test_utils::prove_verify_from_num_vars;
+
   use crate::provider::GrumpkinEngine;
 
+  use super::EvaluationEngine;
+  use crate::provider::util::test_utils::prove_verify_from_num_vars;
   #[test]
   fn test_multiple_polynomial_size() {
     for num_vars in [4, 5, 6] {

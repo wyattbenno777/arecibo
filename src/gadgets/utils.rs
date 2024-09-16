@@ -196,6 +196,7 @@ pub fn conditionally_select_allocated_bit<F: PrimeField, CS: ConstraintSystem<F>
 
   Ok(c)
 }
+
 /// If condition return a otherwise b where a and b are `BigNats`
 pub fn conditionally_select_bignat<F: PrimeField, CS: ConstraintSystem<F>>(
   mut cs: CS,
@@ -400,4 +401,21 @@ pub fn select_num_or_one<F: PrimeField, CS: ConstraintSystem<F>>(
   );
 
   Ok(c)
+}
+
+/// Negate an AllocatedNum
+pub fn alloc_negate<F: PrimeField, CS: ConstraintSystem<F>>(
+  mut cs: CS,
+  a: &AllocatedNum<F>,
+) -> Result<AllocatedNum<F>, SynthesisError> {
+  let b = AllocatedNum::alloc(cs.namespace(|| "y"), || Ok(-*a.get_value().get()?))?;
+
+  cs.enforce(
+    || "check y = - self.y",
+    |lc| lc + a.get_variable(),
+    |lc| lc + CS::one(),
+    |lc| lc - b.get_variable(),
+  );
+
+  Ok(b)
 }

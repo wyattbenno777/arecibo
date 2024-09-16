@@ -242,7 +242,7 @@ pub mod emulated {
   use ff::Field;
 
   /// An allocated version of a curve point from the non-native curve
-  #[derive(Clone)]
+  #[derive(Clone, Debug)]
   pub struct AllocatedEmulPoint<G>
   where
     G: Group,

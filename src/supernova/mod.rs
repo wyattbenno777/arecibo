@@ -42,7 +42,7 @@ use bellpepper_core::ConstraintSystem;
 
 use crate::nifs::NIFS;
 
-mod circuit; // declare the module first
+pub(crate) mod circuit; // declare the module first
 pub use circuit::{StepCircuit, TrivialSecondaryCircuit, TrivialTestCircuit};
 use circuit::{
   SuperNovaAugmentedCircuit, SuperNovaAugmentedCircuitInputs, SuperNovaAugmentedCircuitParams,
@@ -92,7 +92,7 @@ where
 
   ro_consts_primary: ROConstants<E1>,
   ro_consts_circuit_primary: ROConstantsCircuit<Dual<E1>>,
-  ck_primary: Arc<CommitmentKey<E1>>, // This is shared between all circuit params
+  pub(crate) ck_primary: Arc<CommitmentKey<E1>>, // This is shared between all circuit params
   augmented_circuit_params_primary: SuperNovaAugmentedCircuitParams,
 
   ro_consts_secondary: ROConstants<Dual<E1>>,
@@ -456,7 +456,7 @@ where
   }
 
   /// Returns all the primary R1CS Shapes
-  fn primary_r1cs_shapes(&self) -> Vec<&R1CSShape<E1>> {
+  pub(crate) fn primary_r1cs_shapes(&self) -> Vec<&R1CSShape<E1>> {
     self
       .circuit_shapes
       .iter()
@@ -509,8 +509,8 @@ where
 
   // Relaxed instances for the primary circuits
   // Entries are `None` if the circuit has not been executed yet
-  r_W_primary: Vec<Option<RelaxedR1CSWitness<E1>>>,
-  r_U_primary: Vec<Option<RelaxedR1CSInstance<E1>>>,
+  pub(crate) r_W_primary: Vec<Option<RelaxedR1CSWitness<E1>>>,
+  pub(crate) r_U_primary: Vec<Option<RelaxedR1CSInstance<E1>>>,
 
   // Inputs and outputs of the secondary circuit
   z0_secondary: Vec<<Dual<E1> as Engine>::Scalar>,
@@ -1204,7 +1204,7 @@ fn num_ro_inputs(num_circuits: usize, num_limbs: usize, arity: usize, is_primary
 
 pub mod error;
 pub mod snark;
-mod utils;
+pub(crate) mod utils;
 
 #[cfg(test)]
 mod test;

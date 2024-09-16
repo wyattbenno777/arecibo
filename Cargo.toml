@@ -1,7 +1,10 @@
 [package]
 name = "arecibo"
 version = "0.2.0"
-authors = ["Srinath Setty <srinath@microsoft.com>", "Lurk Engineering <engineering@lurk-lab.com>"]
+authors = [
+  "Srinath Setty <srinath@microsoft.com>",
+  "Lurk Engineering <engineering@lurk-lab.com>",
+]
 edition = "2021"
 description = "Recursive zkSNARKs without trusted setup"
 documentation = "https://docs.rs/arecibo/"
@@ -9,11 +12,11 @@ readme = "README.md"
 repository = "https://github.com/lurk-lab/arecibo"
 license-file = "LICENSE"
 keywords = ["zkSNARKs", "cryptography", "proofs"]
-rust-version="1.74.1"
+rust-version = "1.74.1"
 
 [dependencies]
 bellpepper-core = { version = "0.4.0", default-features = false }
-bellpepper = { git="https://github.com/lurk-lab/bellpepper", branch="dev", default-features = false }
+bellpepper = { git = "https://github.com/lurk-lab/bellpepper", branch = "dev", default-features = false }
 ff = { version = "0.13.0", features = ["derive"] }
 digest = "0.10"
 halo2curves = { version = "0.6.0", features = ["bits", "derive_serde"] }
@@ -23,7 +26,9 @@ rand_core = { version = "0.6", default-features = false }
 rand_chacha = "0.3"
 subtle = "2.5"
 pasta_curves = { version = "0.5.0", features = ["repr-c", "serde"] }
-neptune = { git = "https://github.com/lurk-lab/neptune", branch="dev", default-features = false, features = ["abomonation"] }
+neptune = { git = "https://github.com/lurk-lab/neptune", branch = "dev", default-features = false, features = [
+  "abomonation",
+] }
 generic-array = "1.0.0"
 num-bigint = { version = "0.4", features = ["serde", "rand"] }
 num-traits = "0.2"
@@ -47,6 +52,7 @@ derive_more = "0.99.17" # lightens impl macros for pasta
 static_assertions = "1.1.0"
 rayon-scan = "0.1.0"
 unzip-n = "0.1.2"
+poseidon_sponge = { git = "https://github.com/Forpee/poseidon_sponge", branch = "main" }
 
 [target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
 # grumpkin-msm has been patched to support MSMs for the pasta curve cycle
