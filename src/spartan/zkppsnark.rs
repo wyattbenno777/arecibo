@@ -1238,7 +1238,9 @@ where
       blinds_polys_mem_oracles[3].clone(),
       pk.S_comm.r_comm_ts_col.clone(),
     ];
+
     let points = vec![rand_sc; comm_vec.len()];
+
     let blind_eval_vec = vec![
       blind_eval_W,
       blind_eval_Az,
@@ -1259,7 +1261,27 @@ where
       blind_eval_w_plus_r_inv_col,
       blind_eval_ts_col,
     ];
-    let comm_eval_vec = vec![];
+
+    let comm_eval_vec = vec![
+      comm_eval_W.clone(),
+      comm_eval_Az.clone(),
+      comm_eval_Bz.clone(),
+      comm_eval_Cz.clone(),
+      comm_eval_E.clone(),
+      comm_eval_L_row.clone(),
+      comm_eval_L_col.clone(),
+      comm_eval_val_A.clone(),
+      comm_eval_val_B.clone(),
+      comm_eval_val_C.clone(),
+      comm_eval_t_plus_r_inv_row.clone(),
+      comm_eval_row.clone(),
+      comm_eval_w_plus_r_inv_row.clone(),
+      comm_eval_ts_row.clone(),
+      comm_eval_t_plus_r_inv_col.clone(),
+      comm_eval_col.clone(),
+      comm_eval_w_plus_r_inv_col.clone(),
+      comm_eval_ts_col.clone(),
+    ];
 
     transcript.absorb(b"e", &eval_vec.as_slice()); // comm_vec is already in the transcript
 
@@ -1275,8 +1297,6 @@ where
       &blind_eval_vec,
       &comm_eval_vec,
     )?;
-
-
 
     Ok(Self {
       comm_Az: comm_Az.compress(),
