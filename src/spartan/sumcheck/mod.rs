@@ -1,20 +1,30 @@
 use crate::errors::NovaError;
+
 use crate::spartan::polys::{
   multilinear::MultilinearPolynomial,
   univariate::{CompressedUniPoly, UniPoly},
 };
+
 use crate::traits::{Engine, TranscriptEngineTrait};
+
+#[cfg(test)]
+use bellpepper_core::ConstraintSystem;
+#[cfg(test)]
+use bellpepper_core::Namespace;
 use ff::Field;
+
 use itertools::Itertools as _;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+
+use super::verify_circuit::gadgets::poseidon_transcript::PoseidonTranscript;
 
 pub(in crate::spartan) mod engine;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub(crate) struct SumcheckProof<E: Engine> {
-  compressed_polys: Vec<CompressedUniPoly<E::Scalar>>,
+pub struct SumcheckProof<E: Engine> {
+  pub compressed_polys: Vec<CompressedUniPoly<E::Scalar>>,
 }
 
 impl<E: Engine> SumcheckProof<E> {
@@ -96,6 +106,169 @@ impl<E: Engine> SumcheckProof<E> {
     .sum();
 
     self.verify(claim, num_rounds_max, degree_bound, transcript)
+  }
+
+  pub fn verify_poseidon(
+    &self,
+    claim: E::Scalar,
+    num_rounds: usize,
+    degree_bound: usize,
+    transcript: &mut PoseidonTranscript<'_, E>,
+  ) -> Result<(E::Scalar, Vec<E::Scalar>), NovaError> {
+    let mut e = claim;
+    let mut r: Vec<E::Scalar> = Vec::new();
+
+    // verify that there is a univariate polynomial for each round
+    if self.compressed_polys.len() != num_rounds {
+      return Err(NovaError::InvalidSumcheckProof);
+    }
+
+    for i in 0..self.compressed_polys.len() {
+      let poly = self.compressed_polys[i].decompress(&e);
+
+      // verify degree bound
+      if poly.degree() != degree_bound {
+        return Err(NovaError::InvalidSumcheckProof);
+      }
+
+      // we do not need to check if poly(0) + poly(1) = e, as
+      // decompress() call above already ensures that holds
+      debug_assert_eq!(poly.eval_at_zero() + poly.eval_at_one(), e);
+
+      // append the prover's message to the transcript
+      // transcript.absorb(b"p", &poly);
+
+      //derive the verifier's challenge for the next round
+      let r_i = transcript.squeeze(String::from(format!("sumcheck r_{i}")))?;
+
+      r.push(r_i);
+
+      // evaluate the claimed degree-ell polynomial at r_i
+      e = poly.evaluate(&r_i);
+    }
+
+    Ok((e, r))
+  }
+
+  pub fn verify_batch_poseidon(
+    &self,
+    claims: &[E::Scalar],
+    num_rounds: &[usize],
+    coeffs: &[E::Scalar],
+    degree_bound: usize,
+    transcript: &mut PoseidonTranscript<'_, E>,
+  ) -> Result<(E::Scalar, Vec<E::Scalar>), NovaError> {
+    let num_instances = claims.len();
+    assert_eq!(num_rounds.len(), num_instances);
+    assert_eq!(coeffs.len(), num_instances);
+
+    // n = maxᵢ{nᵢ}
+    let num_rounds_max = *num_rounds.iter().max().unwrap();
+
+    // Random linear combination of claims,
+    // where each claim is scaled by 2^{n-nᵢ} to account for the padding.
+    //
+    // claim = ∑ᵢ coeffᵢ⋅2^{n-nᵢ}⋅cᵢ
+    let claim = zip_with!(
+      (
+        zip_with!(iter, (claims, num_rounds), |claim, num_rounds| {
+          let scaling_factor = 1 << (num_rounds_max - num_rounds);
+          E::Scalar::from(scaling_factor as u64) * claim
+        }),
+        coeffs.iter()
+      ),
+      |scaled_claim, coeff| scaled_claim * coeff
+    )
+    .sum();
+
+    self.verify_poseidon(claim, num_rounds_max, degree_bound, transcript)
+  }
+
+  #[cfg(test)]
+  #[allow(dead_code)]
+  pub fn verify_batch_poseidon_cs<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    cs: &mut Namespace<'_, E::Scalar, CS>,
+    claims: &[E::Scalar],
+    num_rounds: &[usize],
+    coeffs: &[E::Scalar],
+    degree_bound: usize,
+    transcript: &mut PoseidonTranscript<'_, E>,
+  ) -> Result<(E::Scalar, Vec<E::Scalar>), NovaError> {
+    use crate::gadgets::alloc_zero;
+    use bellpepper_core::num::AllocatedNum;
+
+    let _alloc_claims = claims
+      .iter()
+      .enumerate()
+      .map(|(i, &claim)| AllocatedNum::alloc(cs.namespace(|| format!("claim_{}", i)), || Ok(claim)))
+      .collect::<Result<Vec<_>, _>>()?;
+
+    let alloc_coeffs = coeffs
+      .iter()
+      .enumerate()
+      .map(|(i, &coeff)| AllocatedNum::alloc(cs.namespace(|| format!("coeff_{}", i)), || Ok(coeff)))
+      .collect::<Result<Vec<_>, _>>()?;
+
+    let num_instances = claims.len();
+    assert_eq!(num_rounds.len(), num_instances);
+    assert_eq!(coeffs.len(), num_instances);
+
+    // n = maxᵢ{nᵢ}
+    let num_rounds_max = *num_rounds.iter().max().unwrap();
+
+    // Random linear combination of claims,
+    // where each claim is scaled by 2^{n-nᵢ} to account for the padding.
+    //
+    // claim = ∑ᵢ coeffᵢ⋅2^{n-nᵢ}⋅cᵢ
+    let claim = zip_with!(
+      (
+        zip_with!(iter, (claims, num_rounds), |claim, num_rounds| {
+          let scaling_factor = 1 << (num_rounds_max - num_rounds);
+          E::Scalar::from(scaling_factor as u64) * claim
+        }),
+        coeffs.iter()
+      ),
+      |scaled_claim, coeff| scaled_claim * coeff
+    )
+    .sum();
+
+    let alloc_claim = {
+      let scaled_claims = claims
+        .iter()
+        .zip_eq(num_rounds.iter())
+        .enumerate()
+        .map(|(i, (claim, num_rounds))| {
+          let scaling_factor = 1 << (num_rounds_max - num_rounds);
+          AllocatedNum::alloc(cs.namespace(|| format!("scaled_claim_{i}")), || {
+            Ok(E::Scalar::from(scaling_factor as u64) * claim)
+          })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+      let coeff_mul_scaled_claims = scaled_claims
+        .iter()
+        .zip_eq(alloc_coeffs.iter())
+        .enumerate()
+        .map(|(i, (claim, coeff))| {
+          claim.mul(cs.namespace(|| format!("claim_mul_coeff_{i}")), coeff)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+      let mut claim = alloc_zero(cs.namespace(|| "claim"));
+
+      for (i, claim_i) in coeff_mul_scaled_claims.iter().enumerate() {
+        claim = claim
+          .add(cs.namespace(|| format!("claim_add_{i}")), &claim_i)
+          .expect("sum up claims");
+      }
+
+      claim
+    };
+
+    assert_eq!(claim, alloc_claim.get_value().unwrap());
+
+    self.verify_poseidon(claim, num_rounds_max, degree_bound, transcript)
   }
 
   #[inline]
@@ -252,6 +425,129 @@ impl<E: Engine> SumcheckProof<E> {
 
       // derive the verifier's challenge for the next round
       let r_i = transcript.squeeze(b"c")?;
+      r.push(r_i);
+
+      // bound all tables to the verifier's challenge
+      zip_with_for_each!(
+        (
+          num_rounds.par_iter(),
+          poly_A_vec.par_iter_mut(),
+          poly_B_vec.par_iter_mut()
+        ),
+        |num_rounds, poly_A, poly_B| {
+          if remaining_rounds <= *num_rounds {
+            let _ = rayon::join(
+              || poly_A.bind_poly_var_top(&r_i),
+              || poly_B.bind_poly_var_top(&r_i),
+            );
+          }
+        }
+      );
+
+      e = poly.evaluate(&r_i);
+      quad_polys.push(poly.compress());
+    }
+    poly_A_vec.iter().for_each(|p| assert_eq!(p.len(), 1));
+    poly_B_vec.iter().for_each(|p| assert_eq!(p.len(), 1));
+
+    let poly_A_final = poly_A_vec
+      .into_iter()
+      .map(|poly| poly[0])
+      .collect::<Vec<_>>();
+    let poly_B_final = poly_B_vec
+      .into_iter()
+      .map(|poly| poly[0])
+      .collect::<Vec<_>>();
+
+    let eval_expected = zip_with!(
+      iter,
+      (poly_A_final, poly_B_final, coeffs),
+      |eA, eB, coeff| comb_func(eA, eB) * coeff
+    )
+    .sum::<E::Scalar>();
+    assert_eq!(e, eval_expected);
+
+    let claims_prod = (poly_A_final, poly_B_final);
+
+    Ok((Self::new(quad_polys), r, claims_prod))
+  }
+
+  pub fn prove_quad_batch_poseidon<F>(
+    claims: &[E::Scalar],
+    num_rounds: &[usize],
+    mut poly_A_vec: Vec<MultilinearPolynomial<E::Scalar>>,
+    mut poly_B_vec: Vec<MultilinearPolynomial<E::Scalar>>,
+    coeffs: &[E::Scalar],
+    comb_func: F,
+    transcript: &mut PoseidonTranscript<'_, E>,
+  ) -> Result<(Self, Vec<E::Scalar>, (Vec<E::Scalar>, Vec<E::Scalar>)), NovaError>
+  where
+    F: Fn(&E::Scalar, &E::Scalar) -> E::Scalar + Sync,
+  {
+    let num_claims = claims.len();
+
+    assert_eq!(num_rounds.len(), num_claims);
+    assert_eq!(poly_A_vec.len(), num_claims);
+    assert_eq!(poly_B_vec.len(), num_claims);
+    assert_eq!(coeffs.len(), num_claims);
+
+    for (i, &num_rounds) in num_rounds.iter().enumerate() {
+      let expected_size = 1 << num_rounds;
+
+      // Direct indexing with the assumption that the index will always be in bounds
+      let a = &poly_A_vec[i];
+      let b = &poly_B_vec[i];
+
+      for (l, polyname) in [(a.len(), "poly_A_vec"), (b.len(), "poly_B_vec")].iter() {
+        assert_eq!(
+          *l, expected_size,
+          "Mismatch in size for {} at index {}",
+          polyname, i
+        );
+      }
+    }
+
+    let num_rounds_max = *num_rounds.iter().max().unwrap();
+    let mut e = zip_with!(
+      iter,
+      (claims, num_rounds, coeffs),
+      |claim, num_rounds, coeff| {
+        let scaled_claim = E::Scalar::from((1 << (num_rounds_max - num_rounds)) as u64) * claim;
+        scaled_claim * coeff
+      }
+    )
+    .sum();
+    let mut r: Vec<E::Scalar> = Vec::new();
+    let mut quad_polys: Vec<CompressedUniPoly<E::Scalar>> = Vec::new();
+
+    for current_round in 0..num_rounds_max {
+      let remaining_rounds = num_rounds_max - current_round;
+      let evals: Vec<(E::Scalar, E::Scalar)> = zip_with!(
+        par_iter,
+        (num_rounds, claims, poly_A_vec, poly_B_vec),
+        |num_rounds, claim, poly_A, poly_B| {
+          if remaining_rounds <= *num_rounds {
+            Self::compute_eval_points_quad(poly_A, poly_B, &comb_func)
+          } else {
+            let remaining_variables = remaining_rounds - num_rounds - 1;
+            let scaled_claim = E::Scalar::from((1 << remaining_variables) as u64) * claim;
+            (scaled_claim, scaled_claim)
+          }
+        }
+      )
+      .collect();
+
+      let evals_combined_0 = (0..evals.len()).map(|i| evals[i].0 * coeffs[i]).sum();
+      let evals_combined_2 = (0..evals.len()).map(|i| evals[i].1 * coeffs[i]).sum();
+
+      let evals = vec![evals_combined_0, e - evals_combined_0, evals_combined_2];
+      let poly = UniPoly::from_evals(&evals);
+
+      // append the prover's message to the transcript
+      // transcript.absorb(b"p", &poly);
+
+      // derive the verifier's challenge for the next round
+      let r_i = transcript.squeeze(String::from(format!("r: prove quad batch_{current_round}")))?;
       r.push(r_i);
 
       // bound all tables to the verifier's challenge
@@ -569,6 +865,155 @@ impl<E: Engine> SumcheckProof<E> {
 
       //derive the verifier's challenge for the next round
       let r_i = transcript.squeeze(b"c")?;
+      r.push(r_i);
+
+      polys.push(poly.compress());
+
+      // Set up next round
+      claim_per_round = poly.evaluate(&r_i);
+
+      // bound all the tables to the verifier's challenge
+
+      zip_with_for_each!(
+        (
+          num_rounds.par_iter(),
+          poly_A_vec.par_iter_mut(),
+          poly_B_vec.par_iter_mut(),
+          poly_C_vec.par_iter_mut(),
+          poly_D_vec.par_iter_mut()
+        ),
+        |num_rounds, poly_A, poly_B, poly_C, poly_D| {
+          if remaining_rounds <= *num_rounds {
+            let _ = rayon::join(
+              || {
+                rayon::join(
+                  || poly_A.bind_poly_var_top(&r_i),
+                  || poly_B.bind_poly_var_top(&r_i),
+                )
+              },
+              || {
+                rayon::join(
+                  || poly_C.bind_poly_var_top(&r_i),
+                  || poly_D.bind_poly_var_top(&r_i),
+                )
+              },
+            );
+          }
+        }
+      );
+    }
+
+    let poly_A_final = poly_A_vec.into_iter().map(|poly| poly[0]).collect();
+    let poly_B_final = poly_B_vec.into_iter().map(|poly| poly[0]).collect();
+    let poly_C_final = poly_C_vec.into_iter().map(|poly| poly[0]).collect();
+    let poly_D_final = poly_D_vec.into_iter().map(|poly| poly[0]).collect();
+
+    Ok((
+      Self {
+        compressed_polys: polys,
+      },
+      r,
+      vec![poly_A_final, poly_B_final, poly_C_final, poly_D_final],
+    ))
+  }
+
+  pub fn prove_cubic_with_additive_term_batch_poseidon<F>(
+    claims: &[E::Scalar],
+    num_rounds: &[usize],
+    mut poly_A_vec: Vec<MultilinearPolynomial<E::Scalar>>,
+    mut poly_B_vec: Vec<MultilinearPolynomial<E::Scalar>>,
+    mut poly_C_vec: Vec<MultilinearPolynomial<E::Scalar>>,
+    mut poly_D_vec: Vec<MultilinearPolynomial<E::Scalar>>,
+    coeffs: &[E::Scalar],
+    comb_func: F,
+    transcript: &mut PoseidonTranscript<'_, E>,
+  ) -> Result<(Self, Vec<E::Scalar>, Vec<Vec<E::Scalar>>), NovaError>
+  where
+    F: Fn(&E::Scalar, &E::Scalar, &E::Scalar, &E::Scalar) -> E::Scalar + Sync,
+  {
+    let num_instances = claims.len();
+    assert_eq!(num_rounds.len(), num_instances);
+    assert_eq!(coeffs.len(), num_instances);
+    assert_eq!(poly_A_vec.len(), num_instances);
+    assert_eq!(poly_B_vec.len(), num_instances);
+    assert_eq!(poly_C_vec.len(), num_instances);
+    assert_eq!(poly_D_vec.len(), num_instances);
+
+    for (i, &num_rounds) in num_rounds.iter().enumerate() {
+      let expected_size = 1 << num_rounds;
+
+      // Direct indexing with the assumption that the index will always be in bounds
+      let a = &poly_A_vec[i];
+      let b = &poly_B_vec[i];
+      let c = &poly_C_vec[i];
+      let d = &poly_D_vec[i];
+
+      for (l, polyname) in [
+        (a.len(), "poly_A"),
+        (b.len(), "poly_B"),
+        (c.len(), "poly_C"),
+        (d.len(), "poly_D"),
+      ]
+      .iter()
+      {
+        assert_eq!(
+          *l, expected_size,
+          "Mismatch in size for {} at index {}",
+          polyname, i
+        );
+      }
+    }
+
+    let num_rounds_max = *num_rounds.iter().max().unwrap();
+
+    let mut r: Vec<E::Scalar> = Vec::new();
+    let mut polys: Vec<CompressedUniPoly<E::Scalar>> = Vec::new();
+    let mut claim_per_round = zip_with!(
+      iter,
+      (claims, num_rounds, coeffs),
+      |claim, num_rounds, coeff| {
+        let scaled_claim = E::Scalar::from((1 << (num_rounds_max - num_rounds)) as u64) * claim;
+        scaled_claim * *coeff
+      }
+    )
+    .sum();
+
+    for current_round in 0..num_rounds_max {
+      let remaining_rounds = num_rounds_max - current_round;
+      let evals: Vec<(E::Scalar, E::Scalar, E::Scalar)> = zip_with!(
+        par_iter,
+        (num_rounds, claims, poly_A_vec, poly_B_vec, poly_C_vec, poly_D_vec),
+        |num_rounds, claim, poly_A, poly_B, poly_C, poly_D| {
+          if remaining_rounds <= *num_rounds {
+            Self::compute_eval_points_cubic_with_additive_term(
+              poly_A, poly_B, poly_C, poly_D, &comb_func,
+            )
+          } else {
+            let remaining_variables = remaining_rounds - num_rounds - 1;
+            let scaled_claim = E::Scalar::from((1 << remaining_variables) as u64) * claim;
+            (scaled_claim, scaled_claim, scaled_claim)
+          }
+        }
+      )
+      .collect();
+
+      let evals_combined_0 = (0..num_instances).map(|i| evals[i].0 * coeffs[i]).sum();
+      let evals_combined_2 = (0..num_instances).map(|i| evals[i].1 * coeffs[i]).sum();
+      let evals_combined_3 = (0..num_instances).map(|i| evals[i].2 * coeffs[i]).sum();
+
+      let evals = vec![
+        evals_combined_0,
+        claim_per_round - evals_combined_0,
+        evals_combined_2,
+        evals_combined_3,
+      ];
+      let poly = UniPoly::from_evals(&evals);
+
+      // append the prover's message to the transcript
+      // transcript.absorb(b"p", &poly);
+
+      //derive the verifier's challenge for the next round
+      let r_i = transcript.squeeze(format!("outer sc {current_round}"))?;
       r.push(r_i);
 
       polys.push(poly.compress());

@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 /// All Poseidon Constants that are used in Nova
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Abomonation)]
 #[abomonation_bounds(where Scalar::Repr: Abomonation)]
-pub struct PoseidonConstantsCircuit<Scalar: PrimeField>(PoseidonConstants<Scalar, U24>);
+pub struct PoseidonConstantsCircuit<Scalar: PrimeField>(pub(crate) PoseidonConstants<Scalar, U24>);
 
 impl<Scalar: PrimeField> Default for PoseidonConstantsCircuit<Scalar> {
   /// Generate Poseidon constants
@@ -210,7 +210,9 @@ mod tests {
     bellpepper::solver::SatisfyingAssignment, constants::NUM_CHALLENGE_BITS,
     gadgets::le_bits_to_num, traits::Engine,
   };
+
   use ff::Field;
+
   use rand::rngs::OsRng;
 
   fn test_poseidon_ro_with<E: Engine>()

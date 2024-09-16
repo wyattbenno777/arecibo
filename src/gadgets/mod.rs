@@ -15,9 +15,9 @@ pub(crate) use r1cs::{
 pub(crate) use r1cs::{AllocatedR1CSInstance, AllocatedRelaxedR1CSInstance};
 
 mod utils;
-#[cfg(test)]
-pub(crate) use utils::alloc_one;
+
 pub(crate) use utils::{
-  alloc_bignat_constant, alloc_num_equals, alloc_scalar_as_base, alloc_zero,
-  conditionally_select_allocated_bit, conditionally_select_bignat, le_bits_to_num, scalar_as_base,
+  alloc_bignat_constant, alloc_negate, alloc_num_equals, alloc_one, alloc_scalar_as_base,
+  alloc_zero, conditionally_select_allocated_bit, conditionally_select_bignat, le_bits_to_num,
+  scalar_as_base,
 };

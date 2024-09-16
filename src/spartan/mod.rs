@@ -10,6 +10,7 @@ pub mod batched;
 pub mod batched_ppsnark;
 pub mod batched_zkppsnark;
 pub mod ipa_batched_ppsnark;
+pub mod verify_circuit;
 #[macro_use]
 mod macros;
 pub mod lookup_ppsnark;
@@ -116,8 +117,8 @@ impl<E: Engine> PolyEvalWitness<E> {
 }
 
 /// A type that holds a polynomial evaluation instance
-#[derive(Debug)]
-struct PolyEvalInstance<E: Engine> {
+#[derive(Debug, Clone)]
+pub(crate) struct PolyEvalInstance<E: Engine> {
   c: Commitment<E>,  // commitment to the polynomial
   x: Vec<E::Scalar>, // evaluation point
   e: E::Scalar,      // claimed evaluation
@@ -332,5 +333,16 @@ mod tests {
         prop_assert_eq!(res.x, res2.x);
         prop_assert_eq!(res.e, res2.e);
       }
+  }
+
+  #[test]
+  fn test_powers() {
+    let s = Scalar::from(2u64);
+    let n = 10;
+    let powers = powers(&s, n);
+    let expected = (0..n)
+      .map(|i| Scalar::from(2u64).pow([i as u64]))
+      .collect::<Vec<_>>();
+    assert_eq!(powers, expected);
   }
 }

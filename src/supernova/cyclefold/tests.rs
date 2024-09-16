@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 use std::time::Instant;
 
 use crate::provider::PallasEngine;
-use crate::supernova::cyclefold::snark::PublicParams;
+use crate::supernova::cyclefold::PublicParams;
 use crate::traits::snark::default_ck_hint;
 use crate::traits::Engine;
 use crate::{
@@ -18,8 +18,8 @@ use tap::TapOptional;
 use tracing::debug;
 
 use super::augmented_circuit::SuperNovaAugmentedCircuit;
-use super::snark::NonUniformCircuit;
-use super::snark::RecursiveSNARK;
+use super::NonUniformCircuit;
+use super::RecursiveSNARK;
 
 #[derive(Clone, Debug, Default)]
 struct CubicCircuit<F> {
@@ -36,60 +36,6 @@ impl<F> CubicCircuit<F> {
       _p: PhantomData,
     }
   }
-}
-
-fn next_rom_index_and_pc<F: PrimeField, CS: ConstraintSystem<F>>(
-  cs: &mut CS,
-  rom_index: &AllocatedNum<F>,
-  allocated_rom: &[AllocatedNum<F>],
-  pc: &AllocatedNum<F>,
-) -> Result<(AllocatedNum<F>, AllocatedNum<F>), SynthesisError> {
-  // Compute a selector for the current rom_index in allocated_rom
-  let current_rom_selector = get_selector_vec_from_index(
-    cs.namespace(|| "rom selector"),
-    rom_index,
-    allocated_rom.len(),
-  )?;
-
-  // Enforce that allocated_rom[rom_index] = pc
-  for (rom, bit) in allocated_rom.iter().zip_eq(current_rom_selector.iter()) {
-    // if bit = 1, then rom = pc
-    // bit * (rom - pc) = 0
-    cs.enforce(
-      || "enforce bit = 1 => rom = pc",
-      |lc| lc + &bit.lc(CS::one(), F::ONE),
-      |lc| lc + rom.get_variable() - pc.get_variable(),
-      |lc| lc,
-    );
-  }
-
-  // Get the index of the current rom, or the index of the invalid rom if no match
-  let current_rom_index = current_rom_selector
-    .iter()
-    .position(|bit| bit.get_value().is_some_and(|v| v))
-    .unwrap_or_default();
-  let next_rom_index = current_rom_index + 1;
-
-  let rom_index_next = AllocatedNum::alloc_infallible(cs.namespace(|| "next rom index"), || {
-    F::from(next_rom_index as u64)
-  });
-  cs.enforce(
-    || " rom_index + 1 - next_rom_index_num = 0",
-    |lc| lc,
-    |lc| lc,
-    |lc| lc + rom_index.get_variable() + CS::one() - rom_index_next.get_variable(),
-  );
-
-  // Allocate the next pc without checking.
-  // The next iteration will check whether the next pc is valid.
-  let pc_next = AllocatedNum::alloc_infallible(cs.namespace(|| "next pc"), || {
-    allocated_rom
-      .get(next_rom_index)
-      .and_then(|v| v.get_value())
-      .unwrap_or(-F::ONE)
-  });
-
-  Ok((rom_index_next, pc_next))
 }
 
 impl<F> StepCircuit<F> for CubicCircuit<F>
@@ -250,6 +196,60 @@ fn print_constraints_name_on_error_index<E1, C1: StepCircuit<E1::Scalar>>(
     }
     _ => (),
   }
+}
+
+fn next_rom_index_and_pc<F: PrimeField, CS: ConstraintSystem<F>>(
+  cs: &mut CS,
+  rom_index: &AllocatedNum<F>,
+  allocated_rom: &[AllocatedNum<F>],
+  pc: &AllocatedNum<F>,
+) -> Result<(AllocatedNum<F>, AllocatedNum<F>), SynthesisError> {
+  // Compute a selector for the current rom_index in allocated_rom
+  let current_rom_selector = get_selector_vec_from_index(
+    cs.namespace(|| "rom selector"),
+    rom_index,
+    allocated_rom.len(),
+  )?;
+
+  // Enforce that allocated_rom[rom_index] = pc
+  for (rom, bit) in allocated_rom.iter().zip_eq(current_rom_selector.iter()) {
+    // if bit = 1, then rom = pc
+    // bit * (rom - pc) = 0
+    cs.enforce(
+      || "enforce bit = 1 => rom = pc",
+      |lc| lc + &bit.lc(CS::one(), F::ONE),
+      |lc| lc + rom.get_variable() - pc.get_variable(),
+      |lc| lc,
+    );
+  }
+
+  // Get the index of the current rom, or the index of the invalid rom if no match
+  let current_rom_index = current_rom_selector
+    .iter()
+    .position(|bit| bit.get_value().is_some_and(|v| v))
+    .unwrap_or_default();
+  let next_rom_index = current_rom_index + 1;
+
+  let rom_index_next = AllocatedNum::alloc_infallible(cs.namespace(|| "next rom index"), || {
+    F::from(next_rom_index as u64)
+  });
+  cs.enforce(
+    || " rom_index + 1 - next_rom_index_num = 0",
+    |lc| lc,
+    |lc| lc,
+    |lc| lc + rom_index.get_variable() + CS::one() - rom_index_next.get_variable(),
+  );
+
+  // Allocate the next pc without checking.
+  // The next iteration will check whether the next pc is valid.
+  let pc_next = AllocatedNum::alloc_infallible(cs.namespace(|| "next pc"), || {
+    allocated_rom
+      .get(next_rom_index)
+      .and_then(|v| v.get_value())
+      .unwrap_or(-F::ONE)
+  });
+
+  Ok((rom_index_next, pc_next))
 }
 
 const OPCODE_0: usize = 0;
