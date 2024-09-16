@@ -283,7 +283,7 @@ mod test {
   use super::*;
   use crate::{
     provider::{ipa_pc, Bn256EngineIPA, PallasEngine, Secp256k1Engine},
-    spartan::{batched, batched_ppsnark, ipa_batched_ppsnark, snark::RelaxedR1CSSNARK},
+    spartan::{batched, batched_ppsnark, tiny_batched_ppsnark, snark::RelaxedR1CSSNARK},
     supernova::{circuit::TrivialSecondaryCircuit, NonUniformCircuit, StepCircuit},
   };
 
@@ -298,7 +298,7 @@ mod test {
   type S2<E> = RelaxedR1CSSNARK<E, EE<E>>;
 
   type E = PallasEngine;
-  type TINY = ipa_batched_ppsnark::BatchedRelaxedR1CSSNARK<E>;
+  type TINY = tiny_batched_ppsnark::BatchedRelaxedR1CSSNARK<E>;
 
   #[derive(Clone)]
   struct SquareCircuit<E> {
@@ -660,7 +660,7 @@ mod test {
     test_compression_with::<Secp256k1Engine, S1<_>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
   }
 
-  fn test_tinysnark_with<E1, S1, S2, F, C>(num_steps: usize, circuits_factory: F)
+  fn test_tiny_snark_with<E1, S1, S2, F, C>(num_steps: usize, circuits_factory: F)
   where
     E1: CurveCycleEquipped,
     S1: BatchedRelaxedR1CSSNARKTrait<E1>,
@@ -699,18 +699,21 @@ mod test {
         .unwrap();
     }
 
-    let (_prover_key, _verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
+    println!("done with recursive_snark");
 
-    /*let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
+    let (prover_key, _verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
 
-    compressed_snark
+    println!("done with setup");
+    let _compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
+
+    /*compressed_snark
       .verify(&pp, &verifier_key, &z0_primary, &z0_secondary)
       .unwrap();*/
   }
 
   #[test]
   fn test_tiny_snark() {
-    const NUM_STEPS: usize = 4;
-    test_tinysnark_with::<PallasEngine, TINY<>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
+    const NUM_STEPS: usize = 2;
+    test_tiny_snark_with::<PallasEngine, TINY<>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
   }
 }

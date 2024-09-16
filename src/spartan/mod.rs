@@ -10,6 +10,7 @@ pub mod batched;
 pub mod batched_ppsnark;
 pub mod batched_zkppsnark;
 pub mod ipa_batched_ppsnark;
+pub mod tiny_batched_ppsnark;
 #[macro_use]
 mod macros;
 pub mod lookup_ppsnark;
@@ -48,7 +49,7 @@ pub fn powers<F: Field>(s: &F, n: usize) -> Vec<F> {
 /// A type that holds a witness to a polynomial evaluation instance
 #[repr(transparent)]
 #[derive(Debug, RefCast)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct PolyEvalWitness<E: Engine> {
   p: Vec<E::Scalar>, // polynomial
 }
@@ -118,8 +119,7 @@ impl<E: Engine> PolyEvalWitness<E> {
 }
 
 /// A type that holds a polynomial evaluation instance
-#[derive(Debug)]
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(serialize = "E::Scalar: Serialize, Commitment<E>: Serialize"))]
 #[serde(bound(deserialize = "E::Scalar: Deserialize<'de>, Commitment<E>: Deserialize<'de>"))]
 struct PolyEvalInstance<E: Engine> {
