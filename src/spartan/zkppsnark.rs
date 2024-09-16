@@ -655,6 +655,9 @@ where
     let tau = transcript.squeeze(b"t")?;
     let tau_coords = PowPolynomial::new(&tau, num_rounds_sc).coordinates();
 
+    let r_W = W.r_W;
+    let r_E =  W.r_E;
+
     // (1) send commitments to Az, Bz, and Cz along with their evaluations at tau
     let (Az, Bz, Cz, W, E) = {
       Az.resize(pk.S_repr.N, <E as Engine>::Scalar::ZERO);
@@ -772,7 +775,7 @@ where
 
         // hash the tuples of (addr,val) memory contents and read responses into a single field element using `hash_func`
 
-        let (comm_mem_oracles, mem_oracles, mem_aux, _) =
+        let (comm_mem_oracles, mem_oracles, mem_aux, blinds_polys_mem_oracles) =
           MemorySumcheckInstance::<E>::compute_oracles(
             ck,
             &r,
@@ -802,11 +805,12 @@ where
           ),
           comm_mem_oracles,
           mem_oracles,
+          blinds_polys_mem_oracles,
         ))
       },
     );
 
-    let (mut mem_sc_inst, comm_mem_oracles, mem_oracles) = mem_res?;
+    let (mut mem_sc_inst, comm_mem_oracles, mem_oracles, blinds_polys_mem_oracles) = mem_res?;
 
     let mut witness_sc_inst = WitnessBoundSumcheck::new(tau, W.clone(), S.num_vars);
 
@@ -1214,7 +1218,26 @@ where
       pk.S_repr.ts_col.clone(),
     ];
 
-    let blind_poly_vec = vec![];
+    let blind_poly_vec = vec![
+      r_W,
+      blind_poly_Az,
+      blind_poly_Bz,
+      blind_poly_Cz,
+      r_E,
+      blind_L_row,
+      blind_L_col,
+      pk.S_comm.r_comm_val_A.clone(),
+      pk.S_comm.r_comm_val_B.clone(),
+      pk.S_comm.r_comm_val_C.clone(),
+      blinds_polys_mem_oracles[0].clone(),
+      pk.S_comm.r_comm_row.clone(),
+      blinds_polys_mem_oracles[1].clone(),
+      pk.S_comm.r_comm_ts_row.clone(),
+      blinds_polys_mem_oracles[2].clone(),
+      pk.S_comm.r_comm_col.clone(),
+      blinds_polys_mem_oracles[3].clone(),
+      pk.S_comm.r_comm_ts_col.clone(),
+    ];
     let points = vec![];
     let blind_eval_vec = vec![];
     let comm_eval_vec = vec![];
