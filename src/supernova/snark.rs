@@ -274,6 +274,14 @@ where
 
     Ok((self.zn_primary.clone(), self.zn_secondary.clone()))
   }
+
+  /// Return the primary SNARK and instance
+  pub fn primary_snark_and_U(&self) -> (S1, Vec<RelaxedR1CSInstance<E1>>)
+  where
+    S1: Clone,
+  {
+    (self.r_W_snark_primary.clone(), self.r_U_primary.clone())
+  }
 }
 
 fn field_as_usize<F: PrimeField>(x: F) -> usize {
