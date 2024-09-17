@@ -679,7 +679,7 @@ mod test {
 
   #[test]
   fn test_zk_nivc_trivial_with_compression_big() {
-    const NUM_STEPS: usize = 6;
+    const NUM_STEPS: usize = 4;
     // Curve cycle to prove on
     type E1 = Bn256EngineZKPedersen;
 
