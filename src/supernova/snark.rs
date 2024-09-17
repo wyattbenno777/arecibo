@@ -38,6 +38,18 @@ where
   vk_secondary: S2::VerifierKey,
 }
 
+impl<E1, S1, S2> VerifierKey<E1, S1, S2>
+where
+  E1: CurveCycleEquipped,
+  S1: BatchedRelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+{
+  /// Get primary vk
+  pub fn primary(&self) -> &S1::VerifierKey {
+    &self.vk_primary
+  }
+}
+
 /// A SNARK that proves the knowledge of a valid `RecursiveSNARK`
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]

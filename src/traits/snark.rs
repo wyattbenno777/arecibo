@@ -84,7 +84,6 @@ pub trait RelaxedR1CSLookupSNARKTrait<E: Engine>:
   where
     <E as Engine>::Scalar: Ord;
 
-  
   /// Produces a new SNARK for a relaxed R1CS
   ///
   fn prove(
@@ -111,7 +110,6 @@ pub trait RelaxedR1CSLookupSNARKTrait<E: Engine>:
   where
     E: Engine<Base = <E2 as Engine>::Scalar>,
     E2: Engine<Base = <E as Engine>::Scalar>;
-
 }
 
 /// A trait that defines the behavior of a `zkSNARK` to prove knowledge of satisfying witness to batches of relaxed R1CS instances.
