@@ -21,6 +21,7 @@ use crate::{
     self, commitment::{CommitmentTrait, Len}, zkevaluation::EvaluationEngineTrait, zksnark::{DigestHelperTrait, RelaxedR1CSSNARKTrait}, Engine, TranscriptEngineTrait, TranscriptReprTrait
   }, zip_with, Commitment, CommitmentKey, CompressedCommitment
 };
+use crate::spartan::nizk::DotProductProof;
 use crate::traits::commitment::ZKCommitmentEngineTrait;
 // use crate::provider::E;
 use crate::spartan::zksnark::SumcheckGens;
@@ -395,6 +396,8 @@ where
     outer: &mut T2,
     inner: &mut T3,
     witness: &mut T4,
+    ck_1: &CommitmentKey<E>, // generator of size 1
+    ck_n: &CommitmentKey<E>, // generators of size n
     transcript: &mut <E as Engine>::TE,
   ) -> Result<
     (
@@ -432,17 +435,34 @@ where
       .chain(witness.initial_claims())
       .collect::<Vec<<E as Engine>::Scalar>>();
 
+    let blind_claims = mem
+      .initial_blinds()
+      .into_iter()
+      .chain(outer.initial_blinds())
+      .chain(inner.initial_blinds())
+      .chain(witness.initial_blinds())
+      .collect::<Vec<<E as Engine>::Scalar>>();
+
     let s = transcript.squeeze(b"r")?;
     let coeffs = powers(&s, claims.len());
 
     // compute the joint claim
-    let claim = zip_with!(iter, (claims, coeffs), |c_1, c_2| *c_1 * c_2).sum();
+    // let claim = zip_with!(iter, (claims, coeffs), |c_1, c_2| *c_1 * c_2).sum();
 
-    let mut e = claim;
+    let mut claim_per_round = zip_with!(iter, (claims, coeffs), |c_1, c_2| *c_1 * c_2).sum();
+
+    let blind_claim = zip_with!(iter, (blind_claims, coeffs), |c_1, c_2| *c_1 * c_2).sum();;
+
+    let mut comm_claim_per_round =
+    <E as Engine>::CE::zkcommit(ck_1, &[claim_per_round], &blind_claim).compress();
+
+    let comm_claim = comm_claim_per_round.clone();
+
+    let mut e = claim_per_round;
     let mut r: Vec<<E as Engine>::Scalar> = Vec::new();
     let mut comm_polys = Vec::new();
     let mut comm_evals = Vec::new();
-    let proofs = Vec::new();
+    let mut proofs = Vec::new();
     
     let num_rounds = mem.size().log_2();
 
@@ -501,7 +521,102 @@ where
 
       let comm_poly: crate::provider::zk_pedersen::CompressedCommitment<E> = <E as Engine>::CE::zkcommit(ck, &poly.coeffs, &blinds_poly[j]).compress();
       comm_polys.push(comm_poly);
-      comm_evals.push(comm_e);
+      // comm_evals.push(comm_e);
+
+            // produce a proof of sum-check an of evaluation
+            let (proof, claim_next_round, comm_claim_next_round) = {
+              let eval = poly.evaluate(&r_i);
+              let comm_eval = <E as Engine>::CE::zkcommit(ck_1, &[eval], &blinds_evals[j]).compress();
+    
+              // we need to prove the following under homomorphic commitments:
+              // (1) poly(0) + poly(1) = claim_per_round
+              // (2) poly(r_j) = eval
+    
+              // Our technique is to leverage dot product proofs:
+              // (1) we can prove: <poly_in_coeffs_form, (2, 1, 1, 1)> = claim_per_round
+              // (2) we can prove: <poly_in_coeffs_form, (1, r_j, r^2_j, ..) = eval
+              // for efficiency we batch them using random weights
+    
+              // add two claims to transcript
+              transcript.absorb(b"comm_claim_per_round", &comm_claim_per_round);
+              transcript.absorb(b"comm_eval", &comm_eval);
+    
+              // produce two weights
+              let w0 = transcript.squeeze(b"combine_two_claims_to_one_0")?;
+              let w1 = transcript.squeeze(b"combine_two_claims_to_one_1")?;
+    
+              let decompressed_comm_claim_per_round = Commitment::<E>::decompress(&comm_claim_per_round)?;
+              let decompressed_comm_eval = Commitment::<E>::decompress(&comm_eval)?;
+    
+              // compute a weighted sum of the RHS
+              let target = claim_per_round * w0 + eval * w1;
+    
+              let comm_target =
+                  (decompressed_comm_claim_per_round * w0 + decompressed_comm_eval * w1).compress();
+    
+              let blind = {
+                  let blind_sc = if j == 0 {
+                      &blind_claim
+                  } else {
+                      &blinds_evals[j - 1]
+                  };
+    
+                  let blind_eval = &blinds_evals[j];
+    
+                  w0 * blind_sc + w1 * blind_eval
+              };
+    
+    
+              assert_eq!(
+                  <E as Engine>::CE::zkcommit(ck_1, &[target], &blind).compress(),
+                  comm_target
+              );
+    
+              let a = {
+                  // the vector to use to decommit for sum-check test
+                  let a_sc = {
+                      let mut a = vec![<E as Engine>::Scalar::ONE; poly.degree() + 1];
+                      a[0] += <E as Engine>::Scalar::ONE;
+                      a
+                  };
+    
+                  // the vector to use to decommit for evaluation
+                  let a_eval = {
+                      let mut a = vec![<E as Engine>::Scalar::ONE; poly.degree() + 1];
+                      for i in 1..a.len() {
+                          a[i] = a[i - 1] * r_i;
+                      }
+                      a
+                  };
+    
+                  // take a weighted sum of the two vectors using w
+                  assert_eq!(a_sc.len(), a_eval.len());
+                  
+                  (0..a_sc.len())
+                      .map(|i| w0 * a_sc[i] + w1 * a_eval[i])
+                      .collect::<Vec<<E as Engine>::Scalar>>()
+              };
+    
+              let (proof, _comm_poly, _comm_sc_eval) = DotProductProof::prove(
+                  ck_1,
+                  ck_n,
+                  transcript,
+                  &poly.coeffs,
+                  &blinds_poly[j],
+                  &a,
+                  &target,
+                  &blind,
+              )?;
+    
+              (proof, eval, comm_eval)
+          };
+
+          claim_per_round = claim_next_round;
+          comm_claim_per_round = comm_claim_next_round.clone();
+    
+          proofs.push(proof);
+          r.push(r_i);
+          comm_evals.push(comm_claim_per_round.clone());
     }
 
     let mem_claims = mem.final_claims();
@@ -820,6 +935,8 @@ where
       &mut outer_sc_inst,
       &mut inner_sc_inst,
       &mut witness_sc_inst,
+      &pk.sumcheck_gens.ck_1,
+      &pk.sumcheck_gens.ck_4,
       &mut transcript,
     )?;
 
@@ -1408,105 +1525,6 @@ where
 
     let comm_claim: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_claim)?;
 
-    let comm_prod_eval_Az_eval_Bz: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_Az_eval_Bz)?;
-
-    self.proof_prod_eval_Az_eval_Bz.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        &self.comm_eval_Az,
-        &self.comm_eval_Bz,
-        &self.comm_prod_eval_Az_eval_Bz,
-    )?;
-
-    self.proof_prod_eval_L_row_eval_L_col.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        &self.comm_eval_L_row,
-        &self.comm_eval_L_col,
-        &self.comm_prod_eval_L_row_eval_L_col,
-    )?;
-
-    let comm_prod_eval_L_row_eval_L_col_eval_val_A: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_L_row_eval_L_col_eval_val_A)?;
-
-    self.proof_prod_eval_L_row_eval_L_col_eval_val_A.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        &self.comm_prod_eval_L_row_eval_L_col,
-        &self.comm_eval_val_A,
-        &self.comm_prod_eval_L_row_eval_L_col_eval_val_A,
-    )?;
-
-    let comm_prod_eval_L_row_eval_L_col_eval_val_B: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_L_row_eval_L_col_eval_val_B)?;
-
-    self.proof_prod_eval_L_row_eval_L_col_eval_val_B.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        &self.comm_prod_eval_L_row_eval_L_col,
-        &self.comm_eval_val_B,
-        &self.comm_prod_eval_L_row_eval_L_col_eval_val_B,
-    )?;
-
-
-    let comm_prod_eval_L_row_eval_L_col_eval_val_C: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_L_row_eval_L_col_eval_val_C)?;
-
-    self.proof_prod_eval_L_row_eval_L_col_eval_val_C.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        &self.comm_prod_eval_L_row_eval_L_col,
-        &self.comm_eval_val_C,
-        &self.comm_prod_eval_L_row_eval_L_col_eval_val_C,
-    )?;
-
-    let comm_prod_eval_t_plus_r_inv_col_eval_W_X: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_t_plus_r_inv_col_eval_W_X)?;
-
-    self.proof_prod_eval_t_plus_r_inv_col_eval_W_X.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        &self.comm_eval_t_plus_r_inv_col,
-        &self.comm_eval_W_X,
-        &self.comm_prod_eval_t_plus_r_inv_col_eval_W_X,
-    )?;
-
-    let comm_prod_eval_row_eval_w_plus_r_inv_row: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_row_eval_w_plus_r_inv_row)?;
-
-    self.proof_prod_eval_row_eval_w_plus_r_inv_row.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        &self.comm_eval_row,
-        &self.comm_eval_w_plus_r_inv_row,
-        &self.comm_prod_eval_row_eval_w_plus_r_inv_row,
-    )?;
-
-    let comm_prod_eval_L_row_eval_w_plus_r_inv_row: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_L_row_eval_w_plus_r_inv_row)?;
-
-    self.proof_prod_eval_L_row_eval_w_plus_r_inv_row.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        &self.comm_eval_L_row,
-        &self.comm_eval_w_plus_r_inv_row,
-        &self.comm_prod_eval_L_row_eval_w_plus_r_inv_row,
-    )?;
-
-    let comm_prod_eval_w_plus_r_inv_col_eval_col: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_w_plus_r_inv_col_eval_col)?;
-
-    self.proof_prod_eval_w_plus_r_inv_col_eval_col.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        &self.comm_eval_w_plus_r_inv_col,
-        &self.comm_eval_col,
-        &self.comm_prod_eval_w_plus_r_inv_col_eval_col,
-    )?;
-
-    let comm_prod_eval_w_plus_r_inv_col_eval_L_col: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_w_plus_r_inv_col_eval_L_col)?;
-
-    self.proof_prod_eval_w_plus_r_inv_col_eval_L_col.verify(
-        &vk.sumcheck_gens.ck_1,
-        &mut transcript,
-        &self.comm_eval_w_plus_r_inv_col,
-        &self.comm_eval_L_col,
-        &self.comm_prod_eval_w_plus_r_inv_col_eval_L_col,
-    )?;
-
     transcript.absorb(b"c", &[comm_Az, comm_Bz, comm_Cz].as_slice());
 
     let num_rounds_sc = vk.S_comm.N.log_2();
@@ -1545,6 +1563,130 @@ where
         &mut transcript,
     )?;
 
+
+    let comm_prod_eval_Az_eval_Bz: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_Az_eval_Bz)?;
+
+    println!("zkppsnark pre proof_prod_eval_Az_eval_Bz ");
+
+    self.proof_prod_eval_Az_eval_Bz.verify(
+        &vk.sumcheck_gens.ck_1,
+        &mut transcript,
+        &self.comm_eval_Az,
+        &self.comm_eval_Bz,
+        &self.comm_prod_eval_Az_eval_Bz,
+    )?;
+
+    println!("zkppsnark pre proof_prod_eval_L_row_eval_L_col ");
+
+    self.proof_prod_eval_L_row_eval_L_col.verify(
+        &vk.sumcheck_gens.ck_1,
+        &mut transcript,
+        &self.comm_eval_L_row,
+        &self.comm_eval_L_col,
+        &self.comm_prod_eval_L_row_eval_L_col,
+    )?;
+
+    println!("zkppsnark pre proof_prod_eval_L_row_eval_L_col_eval_val_A ");
+
+
+    let comm_prod_eval_L_row_eval_L_col_eval_val_A: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_L_row_eval_L_col_eval_val_A)?;
+
+    self.proof_prod_eval_L_row_eval_L_col_eval_val_A.verify(
+        &vk.sumcheck_gens.ck_1,
+        &mut transcript,
+        &self.comm_prod_eval_L_row_eval_L_col,
+        &self.comm_eval_val_A,
+        &self.comm_prod_eval_L_row_eval_L_col_eval_val_A,
+    )?;
+
+    println!("zkppsnark pre proof_prod_eval_L_row_eval_L_col_eval_val_B ");
+
+    let comm_prod_eval_L_row_eval_L_col_eval_val_B: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_L_row_eval_L_col_eval_val_B)?;
+
+    self.proof_prod_eval_L_row_eval_L_col_eval_val_B.verify(
+        &vk.sumcheck_gens.ck_1,
+        &mut transcript,
+        &self.comm_prod_eval_L_row_eval_L_col,
+        &self.comm_eval_val_B,
+        &self.comm_prod_eval_L_row_eval_L_col_eval_val_B,
+    )?;
+
+    println!("zkppsnark pre proof_prod_eval_L_row_eval_L_col_eval_val_C ");
+
+    let comm_prod_eval_L_row_eval_L_col_eval_val_C: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_L_row_eval_L_col_eval_val_C)?;
+
+    self.proof_prod_eval_L_row_eval_L_col_eval_val_C.verify(
+        &vk.sumcheck_gens.ck_1,
+        &mut transcript,
+        &self.comm_prod_eval_L_row_eval_L_col,
+        &self.comm_eval_val_C,
+        &self.comm_prod_eval_L_row_eval_L_col_eval_val_C,
+    )?;
+
+    println!("zkppsnark pre proof_prod_eval_t_plus_r_inv_col_eval_W_X ");
+
+    let comm_prod_eval_t_plus_r_inv_col_eval_W_X: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_t_plus_r_inv_col_eval_W_X)?;
+
+    self.proof_prod_eval_t_plus_r_inv_col_eval_W_X.verify(
+        &vk.sumcheck_gens.ck_1,
+        &mut transcript,
+        &self.comm_eval_t_plus_r_inv_col,
+        &self.comm_eval_W_X,
+        &self.comm_prod_eval_t_plus_r_inv_col_eval_W_X,
+    )?;
+
+    println!("zkppsnark pre proof_prod_eval_row_eval_w_plus_r_inv_row ");
+
+    let comm_prod_eval_row_eval_w_plus_r_inv_row: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_row_eval_w_plus_r_inv_row)?;
+
+    self.proof_prod_eval_row_eval_w_plus_r_inv_row.verify(
+        &vk.sumcheck_gens.ck_1,
+        &mut transcript,
+        &self.comm_eval_row,
+        &self.comm_eval_w_plus_r_inv_row,
+        &self.comm_prod_eval_row_eval_w_plus_r_inv_row,
+    )?;
+
+    println!("zkppsnark pre proof_prod_eval_L_row_eval_w_plus_r_inv_row ");
+
+
+    let comm_prod_eval_L_row_eval_w_plus_r_inv_row: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_L_row_eval_w_plus_r_inv_row)?;
+
+    self.proof_prod_eval_L_row_eval_w_plus_r_inv_row.verify(
+        &vk.sumcheck_gens.ck_1,
+        &mut transcript,
+        &self.comm_eval_L_row,
+        &self.comm_eval_w_plus_r_inv_row,
+        &self.comm_prod_eval_L_row_eval_w_plus_r_inv_row,
+    )?;
+
+    println!("zkppsnark pre proof_prod_eval_w_plus_r_inv_col_eval_col ");
+
+    let comm_prod_eval_w_plus_r_inv_col_eval_col: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_w_plus_r_inv_col_eval_col)?;
+
+    self.proof_prod_eval_w_plus_r_inv_col_eval_col.verify(
+        &vk.sumcheck_gens.ck_1,
+        &mut transcript,
+        &self.comm_eval_w_plus_r_inv_col,
+        &self.comm_eval_col,
+        &self.comm_prod_eval_w_plus_r_inv_col_eval_col,
+    )?;
+
+    println!("zkppsnark pre proof_prod_eval_w_plus_r_inv_col_eval_L_col ");
+
+    let comm_prod_eval_w_plus_r_inv_col_eval_L_col: crate::provider::zk_pedersen::Commitment<E> = Commitment::<E>::decompress(&self.comm_prod_eval_w_plus_r_inv_col_eval_L_col)?;
+
+    self.proof_prod_eval_w_plus_r_inv_col_eval_L_col.verify(
+        &vk.sumcheck_gens.ck_1,
+        &mut transcript,
+        &self.comm_eval_w_plus_r_inv_col,
+        &self.comm_eval_L_col,
+        &self.comm_prod_eval_w_plus_r_inv_col_eval_L_col,
+    )?;
+
+    println!("zkppsnark post prod proofs !!!!!!! ");
+
+    
     // verify claim_sc_final
     let claim_sc_final_expected = {
       let rand_eq_bound_rand_sc = PowPolynomial::new(&rho, num_rounds_sc).evaluate(&rand_sc);
