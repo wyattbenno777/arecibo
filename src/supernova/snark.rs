@@ -47,8 +47,10 @@ where
   S1: BatchedRelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
 {
-  r_U_primary: Vec<RelaxedR1CSInstance<E1>>,
-  r_W_snark_primary: S1,
+  /// R1CS instance used for verifying `S1`
+  pub r_U_primary: Vec<RelaxedR1CSInstance<E1>>,
+  /// Final SNARK on primary curve
+  pub r_W_snark_primary: S1,
 
   r_U_secondary: RelaxedR1CSInstance<Dual<E1>>,
   l_u_secondary: R1CSInstance<Dual<E1>>,
