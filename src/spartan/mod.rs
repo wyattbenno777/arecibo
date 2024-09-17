@@ -11,6 +11,7 @@ pub mod batched_ppsnark;
 pub mod batched_zkppsnark;
 pub mod ipa_batched_ppsnark;
 pub mod tiny_batched_ppsnark;
+pub mod tiny_batched_zkppsnark;
 #[macro_use]
 mod macros;
 pub mod lookup_ppsnark;

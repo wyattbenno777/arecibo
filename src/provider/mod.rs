@@ -204,7 +204,7 @@ impl CurveCycleEquipped for PallasEngine {
 }
 
 /// An implementation of the Nova `Engine` trait with Pallas curve and Pedersen commitment scheme
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ZKPallasEngine;
 
 /// An implementation of the Nova `Engine` trait with Vesta curve and Pedersen commitment scheme
@@ -218,7 +218,7 @@ impl Engine for ZKPallasEngine {
   type RO = PoseidonRO<Self::Base, Self::Scalar>;
   type ROCircuit = PoseidonROCircuit<Self::Base>;
   type TE = Keccak256Transcript<Self>;
-  type CE = PedersenCommitmentEngine<Self>;
+  type CE = zk_pedersen::CommitmentEngine<Self>;
 }
 
 impl Engine for ZKVestaEngine {
