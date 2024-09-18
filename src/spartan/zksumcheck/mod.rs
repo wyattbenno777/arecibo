@@ -22,9 +22,9 @@ pub(in crate::spartan) mod engine;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct ZKSumcheckProof<E: Engine> {
-  comm_polys: Vec<CompressedCommitment<E>>,
-  comm_evals: Vec<CompressedCommitment<E>>,
-  proofs: Vec<DotProductProof<E>>,
+  pub comm_polys: Vec<CompressedCommitment<E>>,
+  pub comm_evals: Vec<CompressedCommitment<E>>,
+  pub proofs: Vec<DotProductProof<E>>,
 }
 
 impl<E: Engine> ZKSumcheckProof<E> where E::CE: ZKCommitmentEngineTrait<E>, E::GE: DlogGroup<ScalarExt = E::Scalar>,  E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>,{

@@ -1,38 +1,44 @@
-//! batched pp snark
+//! batched zk pp snark
 //!
 //!
 
 use crate::{
   digest::{DigestComputer, SimpleDigestible},
   errors::NovaError,
-  provider::{ipa_pc, pedersen::CommitmentKeyExtTrait, traits::DlogGroup},
   r1cs::{R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
   spartan::{
+    powers,
     math::Math,
     polys::{
       eq::EqPolynomial,
       power::PowPolynomial,
       univariate::{CompressedUniPoly, UniPoly},
     },
-    powers,
-    ppsnark::{R1CSShapeSparkCommitment, R1CSShapeSparkRepr},
-    sumcheck::{
+    zksumcheck::{
       engine::{
-        SumcheckEngine,
+        ZKSumcheckEngine,
         WitnessBoundSumcheck,
       },
-      SumcheckProof,
+      ZKSumcheckProof,
     },
+    zkppsnark::{ZKR1CSShapeSparkCommitment, R1CSShapeSparkRepr},
     PolyEvalInstance, PolyEvalWitness
   },
   traits::{
-    commitment::{CommitmentEngineTrait, Len},
-    evaluation::EvaluationEngineTrait,
+    commitment::{CommitmentEngineTrait,  CommitmentTrait, Len, ZKCommitmentEngineTrait},
+    zkevaluation::EvaluationEngineTrait,
     snark::{BatchedRelaxedR1CSSNARKTrait, DigestHelperTrait, RelaxedR1CSSNARKTrait},
     Engine, TranscriptEngineTrait,
   },
-  zip_with, zip_with_for_each, Commitment, CommitmentKey,
+  Commitment, CommitmentKey, CompressedCommitment,
+  zip_with
 };
+//use crate::spartan::nizk::ProductProof;
+use core::ops::{Add, Sub, Mul};
+use crate::spartan::zksnark::SumcheckGens;
+use crate::provider::zk_pedersen;
+use crate::provider::zk_ipa_pc;
+use crate::provider::traits::DlogGroup;
 use core::slice;
 use ff::Field;
 use itertools::{Itertools as _};
@@ -40,75 +46,65 @@ use once_cell::sync::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use rand_core::OsRng;
+use crate::provider::zk_pedersen::CommitmentKeyExtTrait;
+use unzip_n::unzip_n;
 use std::fs;
 use tracing::error;
+
+unzip_n!(pub 3);
+unzip_n!(pub 5);
 
 /// A type that represents the prover's key
 #[derive(Debug)]
 #[allow(unused)]
 pub struct ProverKey<E: Engine> {
-  pk_ee: ipa_pc::ProverKey<E>,
+  pk_ee: zk_ipa_pc::ProverKey<E>,
+  sumcheck_gens: SumcheckGens<E>,
   S_repr: Vec<R1CSShapeSparkRepr<E>>,
-  S_comm: Vec<R1CSShapeSparkCommitment<E>>,
+  S_comm: Vec<ZKR1CSShapeSparkCommitment<E>>,
   vk_digest: E::Scalar, // digest of verifier's key
 }
 
 
 /// A type that represents the verifier's key
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 #[serde(bound = "")]
 pub struct VerifierKey<E: Engine> {
-  vk_ee: ipa_pc::VerifierKey<E>,
-  S_comm: Vec<R1CSShapeSparkCommitment<E>>,
+  vk_ee: zk_ipa_pc::VerifierKey<E>,
+  S_comm: Vec<ZKR1CSShapeSparkCommitment<E>>,
+  sumcheck_gens: SumcheckGens<E>,
   num_vars: Vec<usize>,
   #[serde(skip, default = "OnceCell::new")]
   digest: OnceCell<E::Scalar>,
 }
-impl<E: Engine> VerifierKey<E> {
-  fn new(
-    num_vars: Vec<usize>,
-    S_comm: Vec<R1CSShapeSparkCommitment<E>>,
-    vk_ee: ipa_pc::VerifierKey<E>,
-  ) -> Self {
-    Self {
-      num_vars,
-      S_comm,
-      vk_ee,
-      digest: Default::default(),
+
+impl<E> VerifierKey<E>
+where 
+    E: Engine + Serialize + for<'de> Deserialize<'de>,
+    <E as Engine>::CE: CommitmentEngineTrait<E>,
+    <E as Engine>::GE: DlogGroup<ScalarExt = E::Scalar>,
+    <E as Engine>::CE: ZKCommitmentEngineTrait<E>,
+    <<E as Engine>::CE as CommitmentEngineTrait<E>>::CommitmentKey: CommitmentKeyExtTrait<E>,
+{
+    fn new(
+        num_vars: Vec<usize>,
+        S_comm: Vec<ZKR1CSShapeSparkCommitment<E>>,
+        vk_ee: zk_ipa_pc::VerifierKey<E>,
+    ) -> Self
+    where
+      E::CE: CommitmentEngineTrait<E>,
+    {
+        let scalar_gen = zk_ipa_pc::EvaluationEngine::get_scalar_gen_vk(vk_ee.clone());
+
+        Self {
+            num_vars,
+            S_comm,
+            vk_ee,
+            sumcheck_gens: SumcheckGens::<E>::new(b"gens_s", &scalar_gen),
+            digest: Default::default(),
+        }
     }
-  }
-}
-
-/// The remove untrusted prover will be given all of the data that it
-/// needs to verify the batched proofs from the smaller trusted prover.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(bound = "E: Engine")]
-pub struct DataForUntrustedRemote<E: Engine> {
-  polys_Az_Bz_Cz: Vec<[Vec<E::Scalar>; 3]>,
-  ck: CommitmentKey<E>,
-  //transcript_state: E::TE,
-  polys_tau: Vec<Vec<E::Scalar>>, 
-  coords_tau: Vec<Vec<E::Scalar>>,
-  polys_L_row_col: Vec<[Vec<E::Scalar>; 2]>,
-  polys_E: Vec<Vec<E::Scalar>>, 
-  us: Vec<E::Scalar>, 
-  polys_Z: Vec<Vec<E::Scalar>>,
-  N_max: usize,
-  Nis: Vec<usize>,
-  num_rounds_sc: usize,
-  rand_sc: Vec<E::Scalar>,
-  blinded_witness_comms: Vec<Commitment<E>>,
-  u_batch_witness: PolyEvalInstance<E>,
-  w_batch_witness: PolyEvalWitness<E>,
-}
-
-/// A succinct proof of knowledge of a witness to a relaxed R1CS instance
-/// The proof is produced using Spartan's combination of the sum-check and
-/// the commitment to a vector viewed as a polynomial commitment
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(bound = "E: Engine")]
-pub struct BatchedRelaxedR1CSSNARK<E: Engine> {
-  data: DataForUntrustedRemote<E>
 }
 
 
@@ -126,6 +122,47 @@ impl<E: Engine> DigestHelperTrait<E> for VerifierKey<E> {
       .cloned()
       .expect("Failure to retrieve digest!")
   }
+}
+
+/// The remove untrusted prover will be given all of the data that it
+/// needs to verify the batched proofs from the smaller trusted prover.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "E: Engine")]
+pub struct DataForUntrustedRemote<E: Engine> {
+  polys_Az_Bz_Cz: Vec<[Vec<E::Scalar>; 3]>,
+  ck: CommitmentKey<E>,
+  polys_tau: Vec<Vec<E::Scalar>>, 
+  coords_tau: Vec<Vec<E::Scalar>>,
+  polys_L_row_col: Vec<[Vec<E::Scalar>; 2]>,
+  polys_E: Vec<Vec<E::Scalar>>, 
+  us: Vec<E::Scalar>, 
+  polys_Z: Vec<Vec<E::Scalar>>,
+  N_max: usize,
+  Nis: Vec<usize>,
+  num_rounds_sc: usize,
+  rand_sc: Vec<E::Scalar>,
+  blinded_witness_comms: Vec<Commitment<E>>,
+  u_batch_witness: PolyEvalInstance<E>,
+  w_batch_witness: PolyEvalWitness<E>,
+  claims_witness: Vec<Vec<Vec<E::Scalar>>>,
+  sumcheck_comm_polys: Vec<CompressedCommitment<E>>,
+  sumcheck_comm_evals: Vec<CompressedCommitment<E>>,
+  sumcheck_deltas: Vec<CompressedCommitment<E>>,
+  sumcheck_betas: Vec<CompressedCommitment<E>>,
+  sumcheck_zs: Vec<Vec<<E as Engine>::Scalar>>,
+  sumcheck_z_deltas: Vec<<E as Engine>::Scalar>,
+  sumcheck_z_betas: Vec<<E as Engine>::Scalar>,
+}
+
+/// A succinct proof of knowledge of a witness to a relaxed R1CS instance
+/// The proof is produced using Spartan's combination of the sum-check and
+/// the commitment to a vector viewed as a polynomial commitment
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound(
+  deserialize = "E: Deserialize<'de>"
+))]
+pub struct BatchedRelaxedR1CSSNARK<E: Engine + Serialize> {
+  data: DataForUntrustedRemote<E>
 }
 
 #[allow(unused)]
@@ -168,14 +205,30 @@ where
     serialize_field("blinded_witness_comms", &data.blinded_witness_comms);
     serialize_field("u_batch_witness", &data.u_batch_witness);
     serialize_field("w_batch_witness", &data.w_batch_witness);
+    serialize_field("claims_witness", &data.claims_witness);
+    serialize_field("sumcheck_comm_polys", &data.sumcheck_comm_polys);
+    serialize_field("sumcheck_comm_evals", &data.sumcheck_comm_evals);
+    serialize_field("sumcheck_deltas", &data.sumcheck_deltas);
+    serialize_field("sumcheck_betas", &data.sumcheck_betas);
+    serialize_field("sumcheck_zs", &data.sumcheck_zs);
+    serialize_field("sumcheck_z_deltas", &data.sumcheck_z_deltas);
+    serialize_field("sumcheck_z_betas", &data.sumcheck_z_betas);
 
     println!("Serialization of DataForUntrustedRemote complete.");
 }
 
-impl<E: Engine> BatchedRelaxedR1CSSNARKTrait<E> for BatchedRelaxedR1CSSNARK<E>
-where
-  E::GE: DlogGroup,
-  CommitmentKey<E>: CommitmentKeyExtTrait<E>,
+
+impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARKTrait<E>
+  for BatchedRelaxedR1CSSNARK<E> 
+where 
+  E: Engine<CE = zk_pedersen::CommitmentEngine<E>>,
+  <E as Engine>::CE: ZKCommitmentEngineTrait<E>,
+  <E as Engine>::GE: DlogGroup<ScalarExt = E::Scalar>,
+  E::CE: CommitmentEngineTrait<E>,
+  E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>,
+  <E::CE as CommitmentEngineTrait<E>>::Commitment: Add<Output = <<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment>, 
+  <E::CE as CommitmentEngineTrait<E>>::Commitment: Sub<Output = <<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment>, 
+  <<<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment as Sub>::Output as Mul<<E as Engine>::Scalar>>::Output: Add<<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment> 
 {
   type ProverKey = ProverKey<E>;
   type VerifierKey = VerifierKey<E>;
@@ -201,7 +254,7 @@ where
         return Err(NovaError::InternalError);
       }
     }
-    let (pk_ee, vk_ee) = ipa_pc::EvaluationEngine::setup(ck.clone());
+    let (pk_ee, vk_ee) = zk_ipa_pc::EvaluationEngine::setup(ck.clone());
 
     let S = S.iter().map(|s| s.pad()).collect::<Vec<_>>();
     let S_repr = S.iter().map(R1CSShapeSparkRepr::new).collect::<Vec<_>>();
@@ -211,8 +264,11 @@ where
       .collect::<Vec<_>>();
     let num_vars = S.iter().map(|s| s.num_vars).collect::<Vec<_>>();
     let vk = VerifierKey::new(num_vars, S_comm.clone(), vk_ee);
+
+    let scalar_gen: crate::provider::zk_pedersen::CommitmentKey<E> = zk_ipa_pc::EvaluationEngine::get_scalar_gen_pk(pk_ee.clone());
     let pk = ProverKey {
       pk_ee,
+      sumcheck_gens: SumcheckGens::<E>::new(b"gens_s", &scalar_gen),
       S_repr,
       S_comm,
       vk_digest: vk.digest(),
@@ -227,7 +283,7 @@ where
     U: &[RelaxedR1CSInstance<E>],
     W: &[RelaxedR1CSWitness<E>],
   ) -> Result<Self, NovaError> {
-    
+
     // Pad shapes so that num_vars = num_cons = Nᵢ and check the sizes are correct
     let S = S.par_iter().map(|s| s.pad()).collect::<Vec<_>>();
 
@@ -290,15 +346,15 @@ where
       })
       .unzip();
     
-    // Pad [Az, Bz, Cz] to Ni
+      // Pad [Az, Bz, Cz] to Ni
     polys_Az_Bz_Cz
-      .par_iter_mut()
-      .zip_eq(Nis.par_iter())
-      .for_each(|(az_bz_cz, &Ni)| {
-        az_bz_cz
-          .par_iter_mut()
-          .for_each(|mz| mz.resize(Ni, E::Scalar::ZERO))
-      });
+    .par_iter_mut()
+    .zip_eq(Nis.par_iter())
+    .for_each(|(az_bz_cz, &Ni)| {
+      az_bz_cz
+        .par_iter_mut()
+        .for_each(|mz| mz.resize(Ni, E::Scalar::ZERO))
+    });
 
     //let evals_Az_Bz_Cz_at_tau: Vec<[E::Scalar; 3]> = vec![[E::Scalar::zero(); 3]; polys_Az_Bz_Cz.len()];
 
@@ -310,7 +366,7 @@ where
         poly_Z.resize(Ni, E::Scalar::ZERO);
         poly_Z
       })
-      .collect::<Vec<_>>();
+    .collect::<Vec<_>>();
 
     // Pad both W,E to have the same size. This is inefficient for W since the second half is empty,
     // but it makes it easier to handle the batching at the end.
@@ -331,7 +387,7 @@ where
         poly_W
       })
       .collect::<Vec<_>>();
-
+    
     // (2) send commitments to the following two oracles
     // L_row(i) = eq(tau, row(i)) for all i in [0..Nᵢ]
     // L_col(i) = z(col(i)) for all i in [0..Nᵢ]
@@ -365,14 +421,15 @@ where
     .collect::<Vec<_>>();
 
 
-    let (_sc, rand_sc, claims_witness) = Self::prove_witness(
+    let (sumcheck_result, rand_sc, claims_witness) = Self::prove_witness(
+      ck,
       num_rounds_sc,
       witness_sc_inst,
       &mut transcript,
     )?;
 
     //need to start ipa proof here for witness.
-    let evals_W = claims_witness
+    let evals_W = claims_witness.clone()
     .into_iter()
     .map(|claims| claims[0][0])
     .collect::<Vec<_>>();
@@ -422,9 +479,9 @@ where
 
     // Commit to the blinded witness polynomials
     let blinded_witness_comms = blinded_witness_polys
-      .iter()
-      .map(|poly| E::CE::commit(ck, &poly.p))
-      .collect::<Vec<_>>();
+    .iter()
+    .map(|poly| E::CE::commit(ck, &poly.p))
+    .collect::<Vec<_>>();
 
     // Absorb each commitment individually
     for comm in &blinded_witness_comms {
@@ -478,139 +535,55 @@ where
       blinded_witness_comms,
       u_batch_witness,
       w_batch_witness,
+      claims_witness,
+      sumcheck_comm_polys: sumcheck_result.comm_polys,
+      sumcheck_comm_evals: sumcheck_result.comm_evals,
+      sumcheck_deltas: sumcheck_result.proofs.iter().map(|p| p.delta.clone()).collect(),
+      sumcheck_betas: sumcheck_result.proofs.iter().map(|p| p.beta.clone()).collect(),
+      sumcheck_zs: sumcheck_result.proofs.iter().map(|p| p.z.clone()).collect(),
+      sumcheck_z_deltas: sumcheck_result.proofs.iter().map(|p| p.z_delta).collect(),
+      sumcheck_z_betas: sumcheck_result.proofs.iter().map(|p| p.z_beta).collect(),
     };
 
     //serialize_data_for_remote(&data_for_remote);
 
     println!("done tiny prover");
-
+    
     Ok(Self {
       data: data_for_remote
     })
   }
 
-  fn verify(&self, vk: &Self::VerifierKey, U: &[RelaxedR1CSInstance<E>]) -> Result<(), NovaError> {
-    let num_instances = U.len();
-    let _num_claims_per_instance = 10;
-  
-    // number of rounds of sum-check
-    let num_rounds = vk.S_comm.iter().map(|s| s.N.log_2()).collect::<Vec<_>>();
-    let _num_rounds_max = *num_rounds.iter().max().unwrap();
-  
-    let mut transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
-  
-    transcript.absorb(b"vk", &vk.digest());
-    if num_instances > 1 {
-      let num_instances_field = E::Scalar::from(num_instances as u64);
-      transcript.absorb(b"n", &num_instances_field);
-    }
-  
-    let _tau = transcript.squeeze(b"t")?;
-  
-    let _c_witness = transcript.squeeze(b"c_witness")?;
-  
-    /*let (claim_sc_final, rand_sc) = {
-      // Number of rounds for each claim
-      let num_rounds_by_claim = self.data.Nis.iter()
-          .map(|&Ni| Ni.log_2())
-          .collect::<Vec<_>>();
-  
-      // Verify the sumcheck proof
-      self.data.sc.verify_batch(
-          &[], // We don't pass initial claims, as they should be part of the sumcheck proof
-          &num_rounds_by_claim,
-          &[E::Scalar::ONE],  // We don't use s_powers in the current prover
-          1,  // degree of the polynomials in the sumcheck (adjust if needed)
-          &mut transcript
-      )?
-    };*/
-  
-    // Decompress commitments
-    let blinded_witness_comms = &self.data.blinded_witness_comms;
-
-    // Add commitments to the transcript
-    for comm in blinded_witness_comms {
-        transcript.absorb(b"c", comm);
-    }
-  
-    // Truncated sumcheck randomness for each instance
-    /*let rand_sc_i = num_rounds
-      .iter()
-      .map(|num_rounds| rand_sc[(num_rounds_max - num_rounds)..].to_vec())
-      .collect::<Vec<_>>();
-  
-    let claim_sc_final_expected = {
-      // Reconstruct the initial claims for the witness sumcheck
-      let initial_claims = self.data.evals_W_E.iter()
-          .map(|evals| evals[0])  // We only use the W evaluation
-          .collect::<Vec<_>>();
-  
-      // Calculate the expected final claim
-      initial_claims.into_iter()
-          .zip(self.data.Nis.iter())
-          .map(|(claim, &Ni)| {
-              let num_rounds = Ni.log_2();
-              let rand_sc_i = &rand_sc[self.data.N_max.log_2() - num_rounds..];
-              
-              // Evaluate the claim polynomial at rand_sc_i
-              rand_sc_i.iter().fold(claim, |acc, &r| {
-                  acc * (E::Scalar::ONE - r) + acc * r  // This is a simplification and may need adjustment
-              })
-          })
-          .sum()
-    };
-    
-    // Compare the expected and actual final claims
-    if claim_sc_final_expected != claim_sc_final {
-        return Err(NovaError::InvalidSumcheckProof);
-    }
-  
-    // Compute batched polynomial evaluation instance for witness polynomials
-    let u_batch_witness = {
-        // Use the data directly from the prover
-        let blinded_witness_comms = &self.data.blinded_witness_comms;
-        let evals_W_E = self.data.evals_W_E.iter().flatten().cloned().collect::<Vec<_>>();
-        let num_vars_witness = self.data.Nis.iter().map(|&Ni| Ni.log_2()).collect::<Vec<_>>();
-  
-        PolyEvalInstance::<E>::batch_diff_size(
-            blinded_witness_comms,
-            &evals_W_E,
-            &num_vars_witness,
-            &self.data.rand_sc,
-            c_witness
-        )
-    };
-  
-    // Compare the computed u_batch_witness with the one from the prover
-    if u_batch_witness != self.data.u_batch_witness {
-        return Err(NovaError::InvalidWitnessPolyEval);
-    }*/
-  
-    // verify
-    //ipa_pc::EvaluationEngine::verify(&vk.vk_ee, &mut transcript, &u.c, &u.x, &u.e, &self.eval_arg)?;
-  
+  fn verify(&self, _vk: &Self::VerifierKey, _U: &[RelaxedR1CSInstance<E>]) -> Result<(), NovaError> {
     Ok(())
   }
-  
 }
 
-impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
+impl<E: Engine + Serialize> BatchedRelaxedR1CSSNARK<E> 
+where
+  E::CE: ZKCommitmentEngineTrait<E>,
+  E::GE: DlogGroup<ScalarExt = E::Scalar>,
+  E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>,
+  <<E::CE as CommitmentEngineTrait<E>>::Commitment as CommitmentTrait<E>>::CompressedCommitment: Into<CompressedCommitment<E>>,
+{
+  
   //Prove only the witness claims.
   #[allow(unused)]
   fn prove_witness<T1>(
+    ck: &CommitmentKey<E>,
     num_rounds: usize,
     mut witness: Vec<T1>,
     transcript: &mut E::TE,
   ) -> Result<
     (
-      SumcheckProof<E>,
+      ZKSumcheckProof<E>,
       Vec<E::Scalar>,
       Vec<Vec<Vec<E::Scalar>>>,
     ),
     NovaError,
   >
   where
-    T1: SumcheckEngine<E>,
+    T1: ZKSumcheckEngine<E>,
   {
 
     for inst in witness.iter() {
@@ -635,6 +608,21 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
     // in each round
     let mut r: Vec<E::Scalar> = Vec::new();
     let mut cubic_polys: Vec<CompressedUniPoly<E::Scalar>> = Vec::new();
+
+    let mut comm_polys = Vec::new();
+    let mut comm_evals = Vec::new();
+    let proofs = Vec::new();
+
+    let (blinds_poly, blinds_evals) = {
+      (
+          (0..num_rounds)
+              .map(|_i| <E as Engine>::Scalar::random(&mut OsRng))
+              .collect::<Vec<<E as Engine>::Scalar>>(),
+          (0..num_rounds)
+              .map(|_i| <E as Engine>::Scalar::random(&mut OsRng))
+              .collect::<Vec<<E as Engine>::Scalar>>(),
+      )
+    };
 
     for i in 0..num_rounds {
       // At the start of round i, the input polynomials are defined over at most n-i variables.
@@ -680,6 +668,12 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
         .for_each(|witness| Self::bind(witness, remaining_variables, &r_i));
     
       running_claim = poly.evaluate(&r_i);
+
+      let comm_e = <E::CE as ZKCommitmentEngineTrait<E>>::zkcommit(ck, &[running_claim], &blinds_evals[i]).compress();
+      let comm_poly = <E::CE as ZKCommitmentEngineTrait<E>>::zkcommit(ck, &poly.coeffs, &blinds_poly[i]).compress();
+
+      comm_polys.push(comm_poly);
+      comm_evals.push(comm_e);
       cubic_polys.push(poly.compress());
     }
 
@@ -690,231 +684,10 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
       .map(|inst| inst.final_claims())
       .collect();
 
-    Ok((
-      SumcheckProof::new(cubic_polys),
-      r,
-      claims_witness,
-    ))
-  }
-
-  /// Runs the batched Sumcheck protocol for the claims of multiple instance of possibly different sizes.
-  ///
-  /// # Details
-  ///
-  /// In order to avoid padding all polynomials to the same maximum size, we adopt the following strategy.
-  ///
-  /// Let n be the number of variables for the largest instance,
-  /// and let m be the number of variables for a shorter one.
-  /// Let P(X_{0},...,X_{m-1}) be one of the MLEs of the short instance, which has been committed to
-  /// by taking the MSM of its evaluations with the first 2^m basis points of the commitment key.
-  ///
-  /// This Sumcheck prover will interpret it as the polynomial
-  ///   P'(X_{0},...,X_{n-1}) = P(X_{n-m},...,X_{n-1}),
-  /// whose MLE evaluations over {0,1}^m is equal to 2^{n-m} repetitions of the evaluations of P.
-  ///
-  /// In order to account for these "imagined" repetitions, the initial claims for this short instances
-  /// are scaled by 2^{n-m}.
-  ///
-  /// For the first n-m rounds, the univariate polynomials relating to this shorter claim will be constant,
-  /// and equal to the initial claims, scaled by 2^{n-m-i}, where i is the round number.
-  /// By definition, P' does not depend on X_i, so binding P' to r_i has no effect on the evaluations.
-  /// The Sumcheck prover will then interpret the polynomial P' as having half as many repetitions
-  /// in the next round.
-  ///
-  /// When we get to round n-m, the Sumcheck proceeds as usual since the polynomials are the expected size
-  /// for the round.
-  ///
-  /// Note that at the end of the protocol, the prover returns the evaluation
-  ///   u' = P'(r_{0},...,r_{n-1}) = P(r_{n-m},...,r_{n-1})
-  /// However, the polynomial we actually committed to over {0,1}^n is
-  ///   P''(X_{0},...,X_{n-1}) = L_0(X_{0},...,X_{n-m-1}) * P(X_{n-m},...,X_{n-1})
-  /// The SNARK prover/verifier will need to rescale the evaluation by the first Lagrange polynomial
-  ///   u'' = L_0(r_{0},...,r_{n-m-1}) * u'
-  /// in order batch all evaluations with a single PCS call.
-  #[allow(unused)]
-  fn prove_helper<T1, T2, T3, T4>(
-    num_rounds: usize,
-    mut mem: Vec<T1>,
-    mut outer: Vec<T2>,
-    mut inner: Vec<T3>,
-    mut witness: Vec<T4>,
-    transcript: &mut E::TE,
-  ) -> Result<
-    (
-      SumcheckProof<E>,
-      Vec<E::Scalar>,
-      Vec<Vec<Vec<E::Scalar>>>,
-      Vec<Vec<Vec<E::Scalar>>>,
-      Vec<Vec<Vec<E::Scalar>>>,
-      Vec<Vec<Vec<E::Scalar>>>,
-    ),
-    NovaError,
-  >
-  where
-    T1: SumcheckEngine<E>,
-    T2: SumcheckEngine<E>,
-    T3: SumcheckEngine<E>,
-    T4: SumcheckEngine<E>,
-  {
-    // sanity checks
-    let num_instances = mem.len();
-    assert_eq!(outer.len(), num_instances);
-    assert_eq!(inner.len(), num_instances);
-    assert_eq!(witness.len(), num_instances);
-
-    for inst in mem.iter_mut() {
-      assert!(inst.size().is_power_of_two());
-    }
-    for inst in outer.iter() {
-      assert!(inst.size().is_power_of_two());
-    }
-    for inst in inner.iter() {
-      assert!(inst.size().is_power_of_two());
-    }
-    for inst in witness.iter() {
-      assert!(inst.size().is_power_of_two());
-    }
-
-    let degree = mem[0].degree();
-    assert!(mem.iter().all(|inst| inst.degree() == degree));
-    assert!(outer.iter().all(|inst| inst.degree() == degree));
-    assert!(inner.iter().all(|inst| inst.degree() == degree));
-    assert!(witness.iter().all(|inst| inst.degree() == degree));
-
-    // Collect all claims from the instances. If the instances is defined over `m` variables,
-    // which is less that the total number of rounds `n`,
-    // the individual claims σ are scaled by 2^{n-m}.
-    let claims = zip_with!(
-      iter,
-      (mem, outer, inner, witness),
-      |mem, outer, inner, witness| {
-        Self::scaled_claims(mem, num_rounds)
-          .into_iter()
-          .chain(Self::scaled_claims(outer, num_rounds))
-          .chain(Self::scaled_claims(inner, num_rounds))
-          .chain(Self::scaled_claims(witness, num_rounds))
-      }
-    )
-    .flatten()
-    .collect::<Vec<E::Scalar>>();
-
-    // Sample a challenge for the random linear combination of all scaled claims
-    let s = transcript.squeeze(b"r")?;
-    let coeffs = powers(&s, claims.len());
-
-    // At the start of each round, the running claim is equal to the random linear combination
-    // of the Sumcheck claims, evaluated over the bound polynomials.
-    // Initially, it is equal to the random linear combination of the scaled input claims.
-    let mut running_claim = zip_with!(iter, (claims, coeffs), |c_1, c_2| *c_1 * c_2).sum();
-
-    // Keep track of the verifier challenges r, and the univariate polynomials sent by the prover
-    // in each round
-    let mut r: Vec<E::Scalar> = Vec::new();
-    let mut cubic_polys: Vec<CompressedUniPoly<E::Scalar>> = Vec::new();
-
-    for i in 0..num_rounds {
-      // At the start of round i, there input polynomials are defined over at most n-i variables.
-      let remaining_variables = num_rounds - i;
-
-      // For each claim j, compute the evaluations of its univariate polynomial S_j(X_i)
-      // at X = 0, 2, 3. The polynomial is such that S_{j-1}(r_{j-1}) = S_j(0) + S_j(1).
-      // If the number of variable m of the claim is m < n-i, then the polynomial is
-      // constants and equal to the initial claim σ_j scaled by 2^{n-m-i-1}.
-      let evals = zip_with!(
-        par_iter,
-        (mem, outer, inner, witness),
-        |mem, outer, inner, witness| {
-          let ((evals_mem, evals_outer), (evals_inner, evals_witness)) = rayon::join(
-            || {
-              rayon::join(
-                || Self::get_evals(mem, remaining_variables),
-                || Self::get_evals(outer, remaining_variables),
-              )
-            },
-            || {
-              rayon::join(
-                || Self::get_evals(inner, remaining_variables),
-                || Self::get_evals(witness, remaining_variables),
-              )
-            },
-          );
-          evals_mem
-            .into_par_iter()
-            .chain(evals_outer.into_par_iter())
-            .chain(evals_inner.into_par_iter())
-            .chain(evals_witness.into_par_iter())
-        }
-      )
-      .flatten()
-      .collect::<Vec<_>>();
-
-      assert_eq!(evals.len(), claims.len());
-
-      // Random linear combination of the univariate evaluations at X_i = 0, 2, 3
-      let evals_combined_0 = (0..evals.len()).map(|i| evals[i][0] * coeffs[i]).sum();
-      let evals_combined_2 = (0..evals.len()).map(|i| evals[i][1] * coeffs[i]).sum();
-      let evals_combined_3 = (0..evals.len()).map(|i| evals[i][2] * coeffs[i]).sum();
-
-      let evals = vec![
-        evals_combined_0,
-        running_claim - evals_combined_0,
-        evals_combined_2,
-        evals_combined_3,
-      ];
-      // Coefficient representation of S(X_i)
-      let poly = UniPoly::from_evals(&evals);
-
-      // append the prover's message to the transcript
-      transcript.absorb(b"p", &poly);
-
-      // derive the verifier's challenge for the next round
-      let r_i = transcript.squeeze(b"c")?;
-      r.push(r_i);
-
-      // Bind the variable X_i of polynomials across all claims to r_i.
-      // If the claim is defined over m variables and m < n-i, then
-      // binding has no effect on the polynomial.
-      zip_with_for_each!(
-        par_iter_mut,
-        (mem, outer, inner, witness),
-        |mem, outer, inner, witness| {
-          rayon::join(
-            || {
-              rayon::join(
-                || Self::bind(mem, remaining_variables, &r_i),
-                || Self::bind(outer, remaining_variables, &r_i),
-              )
-            },
-            || {
-              rayon::join(
-                || Self::bind(inner, remaining_variables, &r_i),
-                || Self::bind(witness, remaining_variables, &r_i),
-              )
-            },
-          );
-        }
-      );
-
-      running_claim = poly.evaluate(&r_i);
-      cubic_polys.push(poly.compress());
-    }
-
-    // Collect evaluations at (r_{n-m}, ..., r_{n-1}) of polynomials over all claims,
-    // where m is the initial number of variables the individual claims are defined over.
-    let claims_outer = outer.into_iter().map(|inst| inst.final_claims()).collect();
-    let claims_inner = inner.into_iter().map(|inst| inst.final_claims()).collect();
-    let claims_mem = mem.into_iter().map(|inst| inst.final_claims()).collect();
-    let claims_witness = witness
-      .into_iter()
-      .map(|inst| inst.final_claims())
-      .collect();
 
     Ok((
-      SumcheckProof::new(cubic_polys),
+      ZKSumcheckProof::<E>::new(comm_polys, comm_evals, proofs),
       r,
-      claims_outer,
-      claims_inner,
-      claims_mem,
       claims_witness,
     ))
   }
@@ -925,7 +698,7 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
   /// We define `remaining_variables` as n-i.
   /// If m < n-i, then the polynomials in the instance are not defined over X_i, so the univariate
   /// polynomial is constant and equal to 2^{n-m-i-1}*σ, where σ is the initial claim.
-  fn get_evals<T: SumcheckEngine<E>>(inst: &T, remaining_variables: usize) -> Vec<Vec<E::Scalar>> {
+  fn get_evals<T: ZKSumcheckEngine<E>>(inst: &T, remaining_variables: usize) -> Vec<Vec<E::Scalar>> {
     let num_instance_variables = inst.size().log_2(); // m
     if num_instance_variables < remaining_variables {
       let deg = inst.degree();
@@ -943,7 +716,7 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
   /// In round i after receiving challenge r_i, we partially evaluate all polynomials in the instance
   /// at X_i = r_i. If the instance is defined over m variables m which is less than n-i, then
   /// the polynomials do not depend on X_i, so binding them to r_i has no effect.  
-  fn bind<T: SumcheckEngine<E>>(inst: &mut T, remaining_variables: usize, r: &E::Scalar) {
+  fn bind<T: ZKSumcheckEngine<E>>(inst: &mut T, remaining_variables: usize, r: &E::Scalar) {
     let num_instance_variables = inst.size().log_2(); // m
     if remaining_variables <= num_instance_variables {
       inst.bound(r)
@@ -952,7 +725,7 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
 
   /// Given an instance defined over m variables, the sum over n = `remaining_variables` is equal
   /// to the initial claim scaled by 2^{n-m}, when m ≤ n.   
-  fn scaled_claims<T: SumcheckEngine<E>>(inst: &T, remaining_variables: usize) -> Vec<E::Scalar> {
+  fn scaled_claims<T: ZKSumcheckEngine<E>>(inst: &T, remaining_variables: usize) -> Vec<E::Scalar> {
     let num_instance_variables = inst.size().log_2(); // m
     let num_repetitions = 1 << (remaining_variables - num_instance_variables);
     let scaling = E::Scalar::from(num_repetitions as u64);
@@ -964,10 +737,14 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
   }
 }
 
-impl<E: Engine> RelaxedR1CSSNARKTrait<E> for BatchedRelaxedR1CSSNARK<E>
-where
-  E::GE: DlogGroup,
-  CommitmentKey<E>: CommitmentKeyExtTrait<E>,
+
+impl<E: Engine + Serialize + for<'de> Deserialize<'de>> RelaxedR1CSSNARKTrait<E>
+  for BatchedRelaxedR1CSSNARK<E> 
+where 
+  E: Engine<CE = zk_pedersen::CommitmentEngine<E>>,
+  E::CE: ZKCommitmentEngineTrait<E>, 
+  <E as Engine>::GE: DlogGroup<ScalarExt = <E as Engine>::Scalar>,
+  E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>,
 {
   type ProverKey = ProverKey<E>;
 
@@ -984,7 +761,6 @@ where
     <Self as BatchedRelaxedR1CSSNARKTrait<E>>::setup(ck, vec![S])
   }
 
-  //tiny prove
   fn prove(
     ck: &CommitmentKey<E>,
     pk: &Self::ProverKey,

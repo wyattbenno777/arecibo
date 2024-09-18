@@ -43,11 +43,11 @@ pub struct ProductProof<E: Engine> {
 /// DocProductProof
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DotProductProof<E: Engine> {
-  delta: CompressedCommitment<E>,
-  beta: CompressedCommitment<E>,
-  z: Vec<<E as Engine>::Scalar>,
-  z_delta: <E as Engine>::Scalar,
-  z_beta: <E as Engine>::Scalar,
+  pub delta: CompressedCommitment<E>,
+  pub beta: CompressedCommitment<E>,
+  pub z: Vec<<E as Engine>::Scalar>,
+  pub z_delta: <E as Engine>::Scalar,
+  pub z_beta: <E as Engine>::Scalar,
 }
 
 /// KnowledgeProof

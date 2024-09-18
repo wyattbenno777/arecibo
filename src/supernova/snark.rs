@@ -283,7 +283,7 @@ mod test {
   use super::*;
   use crate::{
     provider::{ipa_pc, Bn256EngineIPA, PallasEngine, ZKPallasEngine, Secp256k1Engine},
-    spartan::{batched, batched_ppsnark, tiny_batched_ppsnark, snark::RelaxedR1CSSNARK},
+    spartan::{batched, batched_ppsnark, tiny_batched_zk_ppsnark, snark::RelaxedR1CSSNARK},
     supernova::{circuit::TrivialSecondaryCircuit, NonUniformCircuit, StepCircuit},
   };
 
@@ -291,16 +291,13 @@ mod test {
   use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
   use ff::{Field, PrimeField};
   use std::marker::PhantomData;
-  use crate::spartan::tiny_batched_zkppsnark;
 
   type EE<E> = ipa_pc::EvaluationEngine<E>;
   type S1<E> = batched::BatchedRelaxedR1CSSNARK<E, EE<E>>;
   type S1PP<E> = batched_ppsnark::BatchedRelaxedR1CSSNARK<E, EE<E>>;
   type S2<E> = RelaxedR1CSSNARK<E, EE<E>>;
 
-  type E = PallasEngine;
-  type TINY = tiny_batched_ppsnark::BatchedRelaxedR1CSSNARK<E>;
-  type ZKTINY = tiny_batched_zkppsnark::BatchedRelaxedR1CSSNARK<ZKPallasEngine>;
+  type ZKTINY = tiny_batched_zk_ppsnark::BatchedRelaxedR1CSSNARK<ZKPallasEngine>;
 
   #[derive(Clone)]
   struct SquareCircuit<E> {
@@ -711,12 +708,6 @@ mod test {
     /*compressed_snark
       .verify(&pp, &verifier_key, &z0_primary, &z0_secondary)
       .unwrap();*/
-  }
-
-  #[test]
-  fn test_tiny_snark() {
-    const NUM_STEPS: usize = 2;
-    test_tiny_snark_with::<PallasEngine, TINY<>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
   }
 
   #[test]
