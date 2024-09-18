@@ -131,6 +131,8 @@ impl<E: Engine> DigestHelperTrait<E> for VerifierKey<E> {
 pub struct DataForUntrustedRemote<E: Engine> {
   polys_Az_Bz_Cz: Vec<[Vec<E::Scalar>; 3]>,
   ck: CommitmentKey<E>,
+  //transcript: E::TE,
+  pk_ee: CommitmentKey<E>,
   polys_tau: Vec<Vec<E::Scalar>>, 
   coords_tau: Vec<Vec<E::Scalar>>,
   polys_L_row_col: Vec<[Vec<E::Scalar>; 2]>,
@@ -505,23 +507,10 @@ where
     // Create w_batch for blinded witness polynomials
     let w_batch_witness = PolyEvalWitness::<E>::batch_diff_size(&blinded_witness_poly_refs, c_witness);
 
-    /*
-    // Perform IPA for witness polynomials
-    let eval_arg_witness = ipa_pc::EvaluationEngine::prove(
-        ck,
-        &pk.pk_ee,
-        &mut transcript,
-        &u_batch_witness.c,
-        &w_batch_witness.p,
-        &u_batch_witness.x,
-        &u_batch_witness.e,
-    )?;
-    */
-
     let data_for_remote: DataForUntrustedRemote<E> = DataForUntrustedRemote {
       polys_Az_Bz_Cz: polys_Az_Bz_Cz.clone(), // Clone the polynomials
       ck: ck.clone(),
-      //transcript_state: transcript, // Clone the current state of the transcript
+      pk_ee: pk.pk_ee.ck_s.clone(),
       polys_tau: polys_tau.clone(),
       coords_tau: coords_tau.clone(),
       polys_L_row_col: polys_L_row_col.clone(),
@@ -557,6 +546,7 @@ where
   fn verify(&self, _vk: &Self::VerifierKey, _U: &[RelaxedR1CSInstance<E>]) -> Result<(), NovaError> {
     Ok(())
   }
+
 }
 
 impl<E: Engine + Serialize> BatchedRelaxedR1CSSNARK<E> 
@@ -566,6 +556,25 @@ where
   E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>,
   <<E::CE as CommitmentEngineTrait<E>>::Commitment as CommitmentTrait<E>>::CompressedCommitment: Into<CompressedCommitment<E>>,
 {
+
+  // This takes DataForUntrustedRemote
+  pub fn prove_unstrusted(
+    &self,
+    _data: &DataForUntrustedRemote<E>,
+  ) -> Result<(), NovaError> {
+    // Perform IPA for witness polynomials
+    /*let _eval_arg_witness = zk_ipa_pc::EvaluationEngine::prove_not_zk(
+      ck,
+      &pk.pk_ee,
+      &mut transcript,
+      &u_batch_witness.c,
+      &w_batch_witness.p,
+      &u_batch_witness.x,
+      &u_batch_witness.e,
+    )?;*/
+
+    Ok(())
+  }
   
   //Prove only the witness claims.
   #[allow(unused)]

@@ -24,7 +24,7 @@ use std::sync::Arc;
 /// Provides an implementation of the prover key
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProverKey<E: Engine> {
-  ck_s: CommitmentKey<E>,
+  pub ck_s: CommitmentKey<E>,
 }
 
 /// Provides an implementation of the verifier key
@@ -101,6 +101,28 @@ where
 
   fn get_vector_gen_vk(vk: Self::VerifierKey) -> Arc<CommitmentKey<E>> {
     vk.ck_v
+  }
+
+  fn prove_not_zk(
+    ck: &CommitmentKey<E>,
+    pk: &Self::ProverKey,
+    transcript: &mut E::TE,
+    comm: &Commitment<E>,
+    poly: &[E::Scalar],
+    point: &[E::Scalar],
+    eval: &E::Scalar,
+  ) -> Result<Self::EvaluationArgument, NovaError> {
+    let u = InnerProductInstanceNotZK::new(comm, &EqPolynomial::evals_from_points(point), eval);
+    let w = InnerProductWitnessNotZK::new(poly);
+
+    let ipa = InnerProductArgument::prove_not_zk(ck.clone(), pk.ck_s.clone(), &u, &w, transcript)?;
+
+    // Wrap the InnerProductArgument in an EvaluationArgument
+    Ok(EvaluationArgument {
+        nifs: Vec::new(), // Empty NIFS vector for non-ZK proof
+        ipa,
+        eval_commitments: vec![CommitmentTrait::compress(comm)], // Use the input commitment
+    })
   }
 
   fn prove_batch(
@@ -218,6 +240,39 @@ fn inner_product<T: Field + Send + Sync>(a: &[T], b: &[T]) -> T {
   zip_with!(par_iter, (a, b), |x, y| *x * y).sum()
 }
 
+/// An inner product instance consists of a commitment to a vector `a` and another vector `b`
+/// and the claim that c = <a, b>.
+struct InnerProductInstanceNotZK<E: Engine> {
+  comm_a_vec: Commitment<E>,
+  b_vec: Vec<E::Scalar>,
+  c: E::Scalar,
+}
+
+impl<E> InnerProductInstanceNotZK<E>
+where
+  E: Engine,
+  E::GE: DlogGroup,
+{
+  fn new(comm_a_vec: &Commitment<E>, b_vec: &[E::Scalar], c: &E::Scalar) -> Self {
+    Self {
+      comm_a_vec: *comm_a_vec,
+      b_vec: b_vec.to_vec(),
+      c: *c,
+    }
+  }
+}
+
+impl<E: Engine> TranscriptReprTrait<E::GE> for InnerProductInstanceNotZK<E> {
+  fn to_transcript_bytes(&self) -> Vec<u8> {
+    // we do not need to include self.b_vec as in our context it is produced from the transcript
+    [
+      self.comm_a_vec.to_transcript_bytes(),
+      self.c.to_transcript_bytes(),
+    ]
+    .concat()
+  }
+}
+
 /// An inner product instance consists of a commitment to a vector `x` and another vector `a`
 /// and the claim that y = <x, a>.
 pub struct InnerProductInstance<E: Engine> {
@@ -292,6 +347,18 @@ impl<E: Engine> InnerProductWitness<E> {
       r_x: self.r_x,
       y: self.y,
       r_y: self.r_y,
+    }
+  }
+}
+
+struct InnerProductWitnessNotZK<E: Engine> {
+  a_vec: Vec<E::Scalar>,
+}
+
+impl<E: Engine> InnerProductWitnessNotZK<E> {
+  fn new(a_vec: &[E::Scalar]) -> Self {
+    Self {
+      a_vec: a_vec.to_vec(),
     }
   }
 }
@@ -548,6 +615,122 @@ where
       a_vec_prime,
       gens_folded,
     ))
+  }
+
+  fn prove_not_zk(
+    ck: CommitmentKey<E>,
+    mut ck_c: CommitmentKey<E>,
+    U: &InnerProductInstanceNotZK<E>,
+    W: &InnerProductWitnessNotZK<E>,
+    transcript: &mut E::TE,
+  ) -> Result<Self, NovaError> {
+    transcript.dom_sep(Self::protocol_name());
+
+    let (ck, _) = ck.split_at(U.b_vec.len());
+
+    if U.b_vec.len() != W.a_vec.len() {
+      return Err(NovaError::InvalidInputLength);
+    }
+
+    // absorb the instance in the transcript
+    transcript.absorb(b"U", U);
+
+    // sample a random base for committing to the inner product
+    let r = transcript.squeeze(b"r")?;
+    ck_c.scale(&r);
+
+    // a closure that executes a step of the recursive inner product argument
+    let prove_inner = |a_vec: &[E::Scalar],
+                       b_vec: &[E::Scalar],
+                       ck: CommitmentKey<E>,
+                       transcript: &mut E::TE|
+     -> Result<
+      (
+        CompressedCommitment<E>,
+        CompressedCommitment<E>,
+        Vec<E::Scalar>,
+        Vec<E::Scalar>,
+        CommitmentKey<E>,
+      ),
+      NovaError,
+    > {
+      let n = a_vec.len();
+      let (ck_L, ck_R) = ck.clone().split_at(n / 2);
+
+      let c_L = inner_product(&a_vec[0..n / 2], &b_vec[n / 2..n]);
+      let c_R = inner_product(&a_vec[n / 2..n], &b_vec[0..n / 2]);
+
+      let L = CE::<E>::commit(
+        &ck_R.combine(&ck_c),
+        &a_vec[0..n / 2]
+          .iter()
+          .chain(iter::once(&c_L))
+          .copied()
+          .collect::<Vec<E::Scalar>>(),
+      )
+      .compress();
+      let R = CE::<E>::commit(
+        &ck_L.combine(&ck_c),
+        &a_vec[n / 2..n]
+          .iter()
+          .chain(iter::once(&c_R))
+          .copied()
+          .collect::<Vec<E::Scalar>>(),
+      )
+      .compress();
+
+      transcript.absorb(b"L", &L);
+      transcript.absorb(b"R", &R);
+
+      let r = transcript.squeeze(b"r")?;
+      let r_inverse = r.invert().unwrap();
+
+      // fold the left half and the right half
+      let a_vec_folded = zip_with!(
+        (a_vec[0..n / 2].par_iter(), a_vec[n / 2..n].par_iter()),
+        |a_L, a_R| *a_L * r + r_inverse * *a_R
+      )
+      .collect::<Vec<E::Scalar>>();
+
+      let b_vec_folded = zip_with!(
+        (b_vec[0..n / 2].par_iter(), b_vec[n / 2..n].par_iter()),
+        |b_L, b_R| *b_L * r_inverse + r * *b_R
+      )
+      .collect::<Vec<E::Scalar>>();
+
+      let ck_folded = CommitmentKeyExtTrait::fold(&ck, &ck_L, &ck_R, &r_inverse, &r);
+
+      Ok((L, R, a_vec_folded, b_vec_folded, ck_folded))
+    };
+
+    // two vectors to hold the logarithmic number of group elements
+    let mut L_vec: Vec<CompressedCommitment<E>> = Vec::new();
+    let mut R_vec: Vec<CompressedCommitment<E>> = Vec::new();
+
+    // we create mutable copies of vectors and generators
+    let mut a_vec = W.a_vec.to_vec();
+    let mut b_vec = U.b_vec.to_vec();
+    let mut ck = ck;
+    for _i in 0..usize::try_from(U.b_vec.len().ilog2()).unwrap() {
+      let (L, R, a_vec_folded, b_vec_folded, ck_folded) =
+        prove_inner(&a_vec, &b_vec, ck, transcript)?;
+      L_vec.push(L);
+      R_vec.push(R);
+
+      a_vec = a_vec_folded;
+      b_vec = b_vec_folded;
+      ck = ck_folded;
+    }
+
+    Ok(Self {
+      P_L_vec: L_vec.clone(),
+      P_R_vec: R_vec.clone(),
+      delta: R_vec[0].clone(),
+      beta: L_vec[0].clone(),
+      z_1: a_vec[0],
+      z_2: a_vec[0],
+      _p: Default::default(),
+    })
   }
 
   /// prover inner product argument
