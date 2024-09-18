@@ -93,7 +93,7 @@ fn test_aggregator_single() -> anyhow::Result<()> {
   Ok(())
 }
 
-fn sim_network(num_snarks: usize) -> Vec<AggregatorSNARKData<E1>> {
+fn sim_network(num_snarks: usize) -> Vec<AggregatorSNARKData<'static, E1>> {
   println!("simulating proving nodes (sequentially)");
   let mut snarks_data_for_agg = vec![];
 
@@ -103,7 +103,7 @@ fn sim_network(num_snarks: usize) -> Vec<AggregatorSNARKData<E1>> {
 
     let TestSNARK { snark, instance: U } = snark;
 
-    let aggregator_snark_data = AggregatorSNARKData::new(snark, vk, U);
+    let aggregator_snark_data = AggregatorSNARKData::new(snark, &vk, U);
 
     snarks_data_for_agg.push(aggregator_snark_data)
   }

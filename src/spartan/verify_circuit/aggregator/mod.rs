@@ -45,7 +45,7 @@ where
 {
   ///  Set up builder to create `PublicParams` for a pair of circuits (one for primary curve and one for secondary curve)
   pub fn setup(
-    snarks_data: &[AggregatorSNARKData<E1>],
+    snarks_data: &[AggregatorSNARKData<'_, E1>],
     ck_hint1: &CommitmentKeyHint<E1>,
     ck_hint2: &CommitmentKeyHint<Dual<E1>>,
   ) -> Result<Self, NovaError> {
@@ -128,7 +128,7 @@ where
   pub fn prove(
     pp: &PublicParams<E1>,
     pk: &ProverKey<E1, S1, S2>,
-    snarks_data: &[AggregatorSNARKData<E1>],
+    snarks_data: &[AggregatorSNARKData<'_, E1>],
   ) -> Result<Self, NovaError> {
     let circuits = build_circuits(snarks_data)?;
     let mut cs_primary = SatisfyingAssignment::<E1>::new();
@@ -219,17 +219,17 @@ where
 }
 
 /// Data structure that holds the required data needed for proof aggregation
-pub struct AggregatorSNARKData<E: Engine> {
+pub struct AggregatorSNARKData<'a, E: Engine> {
   snark: batched::BatchedRelaxedR1CSSNARK<E>,
-  vk: batched::VerifierKey<E>,
+  vk: &'a batched::VerifierKey<E>,
   U: Vec<RelaxedR1CSInstance<E>>,
 }
 
-impl<E: Engine> AggregatorSNARKData<E> {
+impl<'a, E: Engine> AggregatorSNARKData<'a, E> {
   /// Create a new instance of `AggregatorSNARKData`
   pub fn new(
     snark: batched::BatchedRelaxedR1CSSNARK<E>,
-    vk: batched::VerifierKey<E>,
+    vk: &'a batched::VerifierKey<E>,
     U: Vec<RelaxedR1CSInstance<E>>,
   ) -> Self {
     Self { snark, vk, U }
@@ -238,11 +238,11 @@ impl<E: Engine> AggregatorSNARKData<E> {
 
 #[derive(Clone)]
 struct IOPCircuit<'a, E: Engine> {
-  snark_data: &'a AggregatorSNARKData<E>,
+  snark_data: &'a AggregatorSNARKData<'a, E>,
 }
 
 impl<'a, E: Engine> IOPCircuit<'a, E> {
-  pub fn new(snark_data: &'a AggregatorSNARKData<E>) -> Result<Self, NovaError> {
+  pub fn new(snark_data: &'a AggregatorSNARKData<'a, E>) -> Result<Self, NovaError> {
     Ok(Self { snark_data })
   }
 }
@@ -264,7 +264,7 @@ impl<'a, E: Engine> IOPCircuit<'a, E> {
 
 #[derive(Clone)]
 struct FFACircuit<'a, E1: Engine> {
-  snark_data: &'a AggregatorSNARKData<E1>,
+  snark_data: &'a AggregatorSNARKData<'a, E1>,
   arg: PolyEvalInstance<E1>,
 }
 
@@ -273,7 +273,7 @@ where
   E1::GE: DlogGroup,
   CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
 {
-  pub fn new(snark_data: &'a AggregatorSNARKData<E1>) -> Result<Self, NovaError> {
+  pub fn new(snark_data: &'a AggregatorSNARKData<'a, E1>) -> Result<Self, NovaError> {
     let arg = snark_data
       .snark
       .verify_execution_trace(&snark_data.vk, &snark_data.U)?;
@@ -304,9 +304,9 @@ where
   }
 }
 
-fn build_circuits<E1>(
-  snarks_data: &[AggregatorSNARKData<E1>],
-) -> Result<Vec<(IOPCircuit<'_, E1>, FFACircuit<'_, E1>)>, NovaError>
+fn build_circuits<'a, E1>(
+  snarks_data: &'a [AggregatorSNARKData<'a, E1>],
+) -> Result<Vec<(IOPCircuit<'a, E1>, FFACircuit<'a, E1>)>, NovaError>
 where
   E1: CurveCycleEquipped,
   <E1 as Engine>::GE: DlogGroup,
