@@ -51,6 +51,7 @@ use crate::provider::zk_pedersen::CommitmentKeyExtTrait;
 use unzip_n::unzip_n;
 use std::fs;
 use tracing::error;
+use ff::PrimeField;
 
 unzip_n!(pub 3);
 unzip_n!(pub 5);
@@ -549,32 +550,36 @@ where
 
 }
 
-impl<E: Engine + Serialize> BatchedRelaxedR1CSSNARK<E> 
+impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<E> 
 where
-  E::CE: ZKCommitmentEngineTrait<E>,
-  E::GE: DlogGroup<ScalarExt = E::Scalar>,
-  E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>,
-  <<E::CE as CommitmentEngineTrait<E>>::Commitment as CommitmentTrait<E>>::CompressedCommitment: Into<CompressedCommitment<E>>,
+    E::CE: ZKCommitmentEngineTrait<E>,
+    E::GE: DlogGroup<ScalarExt = E::Scalar>,
+    E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>,
+    <<E::CE as CommitmentEngineTrait<E>>::Commitment as CommitmentTrait<E>>::CompressedCommitment: Into<CompressedCommitment<E>>,
+    zk_pedersen::CommitmentKey<E>: zk_pedersen::CommitmentKeyExtTrait<E>,
 {
+    pub fn prove_unstrusted(
+        data: &DataForUntrustedRemote<E>,
+    ) -> Result<(), NovaError>
+    where
+        E::Scalar: PrimeField,
+    {
+        let mut transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
+        
+        // Perform IPA for witness polynomials
+        let _eval_arg_witness = zk_ipa_pc::EvaluationEngine::<E>::prove_not_zk(
+            &data.ck,
+            &data.pk_ee,
+            &mut transcript,
+            &data.u_batch_witness.c,
+            &data.w_batch_witness.p,
+            &data.u_batch_witness.x,
+            &data.u_batch_witness.e,
+        )?;
 
-  // This takes DataForUntrustedRemote
-  pub fn prove_unstrusted(
-    &self,
-    _data: &DataForUntrustedRemote<E>,
-  ) -> Result<(), NovaError> {
-    // Perform IPA for witness polynomials
-    /*let _eval_arg_witness = zk_ipa_pc::EvaluationEngine::prove_not_zk(
-      ck,
-      &pk.pk_ee,
-      &mut transcript,
-      &u_batch_witness.c,
-      &w_batch_witness.p,
-      &u_batch_witness.x,
-      &u_batch_witness.e,
-    )?;*/
 
-    Ok(())
-  }
+        Ok(())
+    }
   
   //Prove only the witness claims.
   #[allow(unused)]

@@ -105,7 +105,7 @@ where
 
   fn prove_not_zk(
     ck: &CommitmentKey<E>,
-    pk: &Self::ProverKey,
+    pk: &CommitmentKey<E>,
     transcript: &mut E::TE,
     comm: &Commitment<E>,
     poly: &[E::Scalar],
@@ -115,7 +115,7 @@ where
     let u = InnerProductInstanceNotZK::new(comm, &EqPolynomial::evals_from_points(point), eval);
     let w = InnerProductWitnessNotZK::new(poly);
 
-    let ipa = InnerProductArgument::prove_not_zk(ck.clone(), pk.ck_s.clone(), &u, &w, transcript)?;
+    let ipa = InnerProductArgument::prove_not_zk(ck.clone(), pk.clone(), &u, &w, transcript)?;
 
     // Wrap the InnerProductArgument in an EvaluationArgument
     Ok(EvaluationArgument {
