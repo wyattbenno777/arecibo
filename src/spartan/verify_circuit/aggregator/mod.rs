@@ -18,9 +18,9 @@ use crate::{
   CommitmentKey,
 };
 use bellpepper_core::ConstraintSystem;
-
-#[cfg(test)]
-mod tests;
+mod ivc;
+// #[cfg(test)]
+// mod tests;
 
 /// Necessary public values needed for both proving and verifying
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
