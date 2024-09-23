@@ -44,7 +44,7 @@ fn padded<E: Engine>(v: &[<E as Engine>::Scalar], n: usize, e: &<E as Engine>::S
 }
 
 /// A type that holds `R1CSShape` in a form amenable to memory checking
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct R1CSShapeSparkRepr<E: Engine> {
   pub(in crate::spartan) N: usize, // size of the vectors

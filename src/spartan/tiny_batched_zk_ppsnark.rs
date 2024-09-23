@@ -13,6 +13,7 @@ use crate::{
       eq::EqPolynomial,
       power::PowPolynomial,
       univariate::{CompressedUniPoly, UniPoly},
+      multilinear::{MultilinearPolynomial},
     },
     zksumcheck::{
       engine::{
@@ -20,6 +21,13 @@ use crate::{
         WitnessBoundSumcheck,
       },
       ZKSumcheckProof,
+    },
+    sumcheck::{
+      engine::{
+        SumcheckEngine,
+        OuterSumcheckInstance, InnerSumcheckInstance, MemorySumcheckInstance
+      },
+      SumcheckProof
     },
     zkppsnark::{ZKR1CSShapeSparkCommitment, R1CSShapeSparkRepr},
     PolyEvalInstance, PolyEvalWitness
@@ -31,7 +39,7 @@ use crate::{
     Engine, TranscriptEngineTrait,
   },
   Commitment, CommitmentKey, CompressedCommitment,
-  zip_with
+  zip_with, zip_with_for_each
 };
 //use crate::spartan::nizk::ProductProof;
 use core::ops::{Add, Sub, Mul};
@@ -52,6 +60,7 @@ use unzip_n::unzip_n;
 use std::fs;
 use tracing::error;
 use ff::PrimeField;
+use crate::traits;
 
 unzip_n!(pub 3);
 unzip_n!(pub 5);
@@ -134,10 +143,14 @@ pub struct DataForUntrustedRemote<E: Engine> {
   ck: CommitmentKey<E>,
   //transcript: E::TE,
   pk_ee: CommitmentKey<E>,
+  vk_digest: E::Scalar,
   polys_tau: Vec<Vec<E::Scalar>>, 
   coords_tau: Vec<Vec<E::Scalar>>,
   polys_L_row_col: Vec<[Vec<E::Scalar>; 2]>,
   polys_E: Vec<Vec<E::Scalar>>, 
+  polys_Mz: Vec<Vec<E::Scalar>>,
+  comms_Az_Bz_Cz: Vec<[Commitment<E>; 3]>,
+  S_repr: Vec<R1CSShapeSparkRepr<E>>,
   us: Vec<E::Scalar>, 
   polys_Z: Vec<Vec<E::Scalar>>,
   N_max: usize,
@@ -195,10 +208,15 @@ where
 {
     serialize_field("polys_Az_Bz_Cz", &data.polys_Az_Bz_Cz);
     serialize_field("ck", &data.ck);
+    serialize_field("pk_ee", &data.pk_ee);
+    serialize_field("vk_digest", &data.vk_digest);
     serialize_field("polys_tau", &data.polys_tau);
     serialize_field("coords_tau", &data.coords_tau);
     serialize_field("polys_L_row_col", &data.polys_L_row_col);
     serialize_field("polys_E", &data.polys_E);
+    serialize_field("polys_Mz", &data.polys_Mz);
+    serialize_field("comms_Az_Bz_Cz", &data.comms_Az_Bz_Cz);
+    serialize_field("S_repr", &data.S_repr);
     serialize_field("us", &data.us);
     serialize_field("polys_Z", &data.polys_Z);
     serialize_field("N_max", &data.N_max);
@@ -290,8 +308,6 @@ where
     // Pad shapes so that num_vars = num_cons = Nᵢ and check the sizes are correct
     let S = S.par_iter().map(|s| s.pad()).collect::<Vec<_>>();
 
-    println!("In tiny prover");
-
     // N[i] = max(|Aᵢ|+|Bᵢ|+|Cᵢ|, 2*num_varsᵢ, num_consᵢ)
     let Nis = pk.S_repr.iter().map(|s| s.N).collect::<Vec<_>>();
     assert!(Nis.iter().all(|&Ni| Ni.is_power_of_two()));
@@ -334,6 +350,21 @@ where
     })
     .collect::<Result<Vec<_>, NovaError>>()?;
 
+    // Commit to [Az, Bz, Cz] and add to transcript
+    let comms_Az_Bz_Cz = polys_Az_Bz_Cz
+    .par_iter()
+    .map(|[Az, Bz, Cz]| {
+      let (comm_Az, (comm_Bz, comm_Cz)) = rayon::join(
+        || E::CE::commit(ck, Az),
+        || rayon::join(|| E::CE::commit(ck, Bz), || E::CE::commit(ck, Cz)),
+      );
+      [comm_Az, comm_Bz, comm_Cz]
+    })
+    .collect::<Vec<_>>();
+    comms_Az_Bz_Cz
+      .iter()
+      .for_each(|comms| transcript.absorb(b"c", &comms.as_slice()));
+
     // Compute eq(tau) for each instance in log2(Ni) variables
     let tau = transcript.squeeze(b"t")?;
     let all_taus = PowPolynomial::squares(&tau, N_max.log_2());
@@ -349,7 +380,8 @@ where
       })
       .unzip();
     
-      // Pad [Az, Bz, Cz] to Ni
+    // Pad [Az, Bz, Cz] to Ni 
+    // This is sent to the untrusted prover for futher processing.
     polys_Az_Bz_Cz
     .par_iter_mut()
     .zip_eq(Nis.par_iter())
@@ -359,7 +391,6 @@ where
         .for_each(|mz| mz.resize(Ni, E::Scalar::ZERO))
     });
 
-    //let evals_Az_Bz_Cz_at_tau: Vec<[E::Scalar; 3]> = vec![[E::Scalar::zero(); 3]; polys_Az_Bz_Cz.len()];
 
     // Pad Zᵢ, E to Nᵢ
     let polys_Z = polys_Z
@@ -417,6 +448,32 @@ where
       }
     )
     .collect::<Vec<_>>();
+
+    let comms_L_row_col = polys_L_row_col
+    .par_iter()
+    .map(|[L_row, L_col]| {
+      let (comm_L_row, comm_L_col) =
+        rayon::join(|| E::CE::commit(ck, L_row), || E::CE::commit(ck, L_col));
+      [comm_L_row, comm_L_col]
+    })
+    .collect::<Vec<_>>();
+
+    // absorb commitments to L_row and L_col in the transcript
+    for comms in comms_L_row_col.iter() {
+      transcript.absorb(b"e", &comms.as_slice());
+    }
+
+    // For each instance, batch Mz = Az + c*Bz + c^2*Cz
+    let c = transcript.squeeze(b"c")?;
+
+    let polys_Mz: Vec<_> = polys_Az_Bz_Cz
+      .par_iter()
+      .map(|polys_Az_Bz_Cz| {
+        let poly_vec: Vec<&Vec<_>> = polys_Az_Bz_Cz.iter().collect();
+        let w = PolyEvalWitness::<E>::batch(&poly_vec[..], &c);
+        w.p
+      })
+      .collect();
 
     let witness_sc_inst = zip_with!(par_iter, (polys_W, S), |poly_W, S| {
       WitnessBoundSumcheck::new(tau, poly_W.clone(), S.num_vars)
@@ -512,10 +569,14 @@ where
       polys_Az_Bz_Cz: polys_Az_Bz_Cz.clone(), // Clone the polynomials
       ck: ck.clone(),
       pk_ee: pk.pk_ee.ck_s.clone(),
+      vk_digest: pk.vk_digest.clone(),
       polys_tau: polys_tau.clone(),
       coords_tau: coords_tau.clone(),
       polys_L_row_col: polys_L_row_col.clone(),
       polys_E: polys_E.clone(),
+      polys_Mz: polys_Mz.clone(),
+      comms_Az_Bz_Cz: comms_Az_Bz_Cz.clone(),
+      S_repr: pk.S_repr.clone(),
       us: us.clone(),
       polys_Z: polys_Z.clone(),
       N_max: N_max,
@@ -534,6 +595,10 @@ where
       sumcheck_z_deltas: sumcheck_result.proofs.iter().map(|p| p.z_delta).collect(),
       sumcheck_z_betas: sumcheck_result.proofs.iter().map(|p| p.z_beta).collect(),
     };
+
+    /*let _ = Self::prove_unstrusted(
+      &data_for_remote,
+    )?;*/
 
     //serialize_data_for_remote(&data_for_remote);
 
@@ -558,28 +623,206 @@ where
     <<E::CE as CommitmentEngineTrait<E>>::Commitment as CommitmentTrait<E>>::CompressedCommitment: Into<CompressedCommitment<E>>,
     zk_pedersen::CommitmentKey<E>: zk_pedersen::CommitmentKeyExtTrait<E>,
 {
-    pub fn prove_unstrusted(
-        data: &DataForUntrustedRemote<E>,
-    ) -> Result<(), NovaError>
-    where
-        E::Scalar: PrimeField,
-    {
-        let mut transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
-        
-        // Perform IPA for witness polynomials
-        let _eval_arg_witness = zk_ipa_pc::EvaluationEngine::<E>::prove_not_zk(
-            &data.ck,
-            &data.pk_ee,
-            &mut transcript,
-            &data.u_batch_witness.c,
-            &data.w_batch_witness.p,
-            &data.u_batch_witness.x,
-            &data.u_batch_witness.e,
+  pub fn prove_unstrusted(
+      data: &DataForUntrustedRemote<E>,
+  ) -> Result<(), NovaError>
+  where
+      E::Scalar: PrimeField,
+  {
+    let mut transcript = E::TE::new(b"UntrustedProver");
+    transcript.absorb(b"vk", &data.vk_digest);
+
+    // Evaluate and commit to [Az(tau), Bz(tau), Cz(tau)]
+    let evals_Az_Bz_Cz_at_tau = zip_with!(
+      par_iter,
+      (data.polys_Az_Bz_Cz, data.coords_tau),
+      |ABCs, tau_coords| {
+        let [Az, Bz, Cz] = ABCs;
+        let (eval_Az, (eval_Bz, eval_Cz)) = rayon::join(
+          || MultilinearPolynomial::evaluate_with(Az, tau_coords),
+          || {
+            rayon::join(
+              || MultilinearPolynomial::evaluate_with(Bz, tau_coords),
+              || MultilinearPolynomial::evaluate_with(Cz, tau_coords),
+            )
+          },
+        );
+        [eval_Az, eval_Bz, eval_Cz]
+      }
+    )
+    .collect::<Vec<_>>();
+
+    // absorb the claimed evaluations into the transcript
+    for evals in evals_Az_Bz_Cz_at_tau.iter() {
+      transcript.absorb(b"e", &evals.as_slice());
+    }
+
+    let untrusted_c = transcript.squeeze(b"untrusted_c")?;
+
+    let evals_Mz: Vec<_> = zip_with!(
+      iter,
+      (data.comms_Az_Bz_Cz, evals_Az_Bz_Cz_at_tau),
+      |comm_Az_Bz_Cz, evals_Az_Bz_Cz_at_tau| {
+        let u = PolyEvalInstance::<E>::batch(
+          comm_Az_Bz_Cz.as_slice(),
+          vec![], // ignored by the function
+          evals_Az_Bz_Cz_at_tau.as_slice(),
+          &untrusted_c,
+        );
+        u.e
+      }
+    )
+    .collect();
+
+    // we now need to prove three claims for each instance
+    // (outer)
+    //   0 = \sum_x poly_tau(x) * (poly_Az(x) * poly_Bz(x) - poly_uCz_E(x))
+    //   eval_Az_at_tau + c * eval_Bz_at_tau + c^2 * eval_Cz_at_tau = (Az+c*Bz+c^2*Cz)(tau)
+    // (inner)
+    //   eval_Az_at_tau + c * eval_Bz_at_tau + c^2 * eval_Cz_at_tau = \sum_y L_row(y) * (val_A(y) + c * val_B(y) + c^2 * val_C(y)) * L_col(y)
+    // (mem)
+    //   L_row(i) = eq(tau, row(i))
+    //   L_col(i) = z(col(i))
+    let outer_sc_inst = zip_with!(
+      (
+        data.polys_Az_Bz_Cz.par_iter(),
+        data.polys_E.par_iter(),
+        <Vec<Vec<<E as traits::Engine>::Scalar>> as Clone>::clone(&data.polys_Mz).into_par_iter(),
+        data.polys_tau.par_iter(),
+        evals_Mz.par_iter(),
+        data.us.par_iter()
+      ),
+      |poly_ABC, poly_E, poly_Mz, poly_tau, eval_Mz, u| {
+        let [poly_Az, poly_Bz, poly_Cz] = poly_ABC;
+        let poly_uCz_E = zip_with!(par_iter, (poly_Cz, poly_E), |cz, e| *u * cz + e).collect();
+        OuterSumcheckInstance::<E>::new(
+          poly_tau.clone(),
+          poly_Az.clone(),
+          poly_Bz.clone(),
+          poly_uCz_E,
+          poly_Mz, // Mz = Az + c * Bz + c^2 * Cz
+          eval_Mz, // eval_Az_at_tau + c * eval_Az_at_tau + c^2 * eval_Cz_at_tau
+        )
+      }
+    )
+    .collect::<Vec<_>>();
+
+    let inner_sc_inst = zip_with!(
+      par_iter,
+      (data.S_repr, evals_Mz, data.polys_L_row_col),
+      |s_repr, eval_Mz, poly_L| {
+        let [poly_L_row, poly_L_col] = poly_L;
+        let c_square = untrusted_c.square();
+        let val = zip_with!(
+          par_iter,
+          (s_repr.val_A, s_repr.val_B, s_repr.val_C),
+          |v_a, v_b, v_c| *v_a + untrusted_c * *v_b + c_square * *v_c
+        )
+        .collect::<Vec<_>>();
+
+        InnerSumcheckInstance::<E>::new(
+          *eval_Mz,
+          MultilinearPolynomial::new(poly_L_row.clone()),
+          MultilinearPolynomial::new(poly_L_col.clone()),
+          MultilinearPolynomial::new(val),
+        )
+      }
+    )
+    .collect::<Vec<_>>();
+
+    // a third sum-check instance to prove the read-only memory claim
+    // we now need to prove that L_row and L_col are well-formed
+    let (mem_sc_inst, _comms_mem_oracles, _polys_mem_oracles) = {
+      let gamma = transcript.squeeze(b"g")?;
+      let r = transcript.squeeze(b"r")?;
+
+      // We start by computing oracles and auxiliary polynomials to help prove the claim
+      // oracles correspond to [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col]
+      let (comms_mem_oracles, polys_mem_oracles, mem_aux) = data.
+        S_repr
+        .iter()
+        .zip_eq(data.polys_tau.iter())
+        .zip_eq(data.polys_Z.iter())
+        .zip_eq(data.polys_L_row_col.iter())
+        .try_fold(
+          (Vec::new(), Vec::new(), Vec::new()),
+          |(mut comms, mut polys, mut aux), (((s_repr, poly_tau), poly_Z), [L_row, L_col])| {
+            let (comm, poly, a) = MemorySumcheckInstance::<E>::compute_oracles(
+              &data.ck,
+              &r,
+              &gamma,
+              poly_tau,
+              &s_repr.row,
+              L_row,
+              &s_repr.ts_row,
+              poly_Z,
+              &s_repr.col,
+              L_col,
+              &s_repr.ts_col,
+            )?;
+
+            comms.push(comm);
+            polys.push(poly);
+            aux.push(a);
+
+            Ok::<_, NovaError>((comms, polys, aux))
+          },
         )?;
 
+      // Commit to oracles
+      for comms in comms_mem_oracles.iter() {
+        transcript.absorb(b"l", &comms.as_slice());
+      }
 
-        Ok(())
-    }
+      // Sample new random variable for eq polynomial
+      let rho = transcript.squeeze(b"r")?;
+      let all_rhos = PowPolynomial::squares(&rho, data.N_max.log_2());
+
+      let instances = zip_with!(
+        (
+          data.S_repr.par_iter(),
+          data.Nis.par_iter(),
+          polys_mem_oracles.par_iter(),
+          mem_aux.into_par_iter()
+        ),
+        |s_repr, Ni, polys_mem_oracles, polys_aux| {
+          MemorySumcheckInstance::<E>::new(
+            polys_mem_oracles.clone(),
+            polys_aux,
+            PowPolynomial::evals_with_powers(&all_rhos, Ni.log_2()),
+            s_repr.ts_row.clone(),
+            s_repr.ts_col.clone(),
+          )
+        }
+      )
+      .collect::<Vec<_>>();
+      (instances, comms_mem_oracles, polys_mem_oracles)
+    };
+
+    
+    // Run batched Sumcheck for the 3 claims for all instances.
+    // Note that the polynomials for claims relating to instance i have size Ni.
+    let (_sc, _rand_sc, _claims_outer, _claims_inner, _claims_mem) = Self::prove_helper(
+      data.num_rounds_sc,
+      mem_sc_inst,
+      outer_sc_inst,
+      inner_sc_inst,
+      &mut transcript,
+    )?;
+        
+    // Perform IPA for batched witness polynomials
+    let _eval_arg_witness = zk_ipa_pc::EvaluationEngine::<E>::prove_not_zk(
+        &data.ck,
+        &data.pk_ee,
+        &mut transcript,
+        &data.u_batch_witness.c,
+        &data.w_batch_witness.p,
+        &data.u_batch_witness.x,
+        &data.u_batch_witness.e,
+    )?;
+
+    Ok(())
+  }
   
   //Prove only the witness claims.
   #[allow(unused)]
@@ -706,6 +949,198 @@ where
     ))
   }
 
+  /// Runs the batched Sumcheck protocol for the claims of multiple instance of possibly different sizes.
+  ///
+  /// # Details
+  ///
+  /// In order to avoid padding all polynomials to the same maximum size, we adopt the following strategy.
+  ///
+  /// Let n be the number of variables for the largest instance,
+  /// and let m be the number of variables for a shorter one.
+  /// Let P(X_{0},...,X_{m-1}) be one of the MLEs of the short instance, which has been committed to
+  /// by taking the MSM of its evaluations with the first 2^m basis points of the commitment key.
+  ///
+  /// This Sumcheck prover will interpret it as the polynomial
+  ///   P'(X_{0},...,X_{n-1}) = P(X_{n-m},...,X_{n-1}),
+  /// whose MLE evaluations over {0,1}^m is equal to 2^{n-m} repetitions of the evaluations of P.
+  ///
+  /// In order to account for these "imagined" repetitions, the initial claims for this short instances
+  /// are scaled by 2^{n-m}.
+  ///
+  /// For the first n-m rounds, the univariate polynomials relating to this shorter claim will be constant,
+  /// and equal to the initial claims, scaled by 2^{n-m-i}, where i is the round number.
+  /// By definition, P' does not depend on X_i, so binding P' to r_i has no effect on the evaluations.
+  /// The Sumcheck prover will then interpret the polynomial P' as having half as many repetitions
+  /// in the next round.
+  ///
+  /// When we get to round n-m, the Sumcheck proceeds as usual since the polynomials are the expected size
+  /// for the round.
+  ///
+  /// Note that at the end of the protocol, the prover returns the evaluation
+  ///   u' = P'(r_{0},...,r_{n-1}) = P(r_{n-m},...,r_{n-1})
+  /// However, the polynomial we actually committed to over {0,1}^n is
+  ///   P''(X_{0},...,X_{n-1}) = L_0(X_{0},...,X_{n-m-1}) * P(X_{n-m},...,X_{n-1})
+  /// The SNARK prover/verifier will need to rescale the evaluation by the first Lagrange polynomial
+  ///   u'' = L_0(r_{0},...,r_{n-m-1}) * u'
+  /// in order batch all evaluations with a single PCS call.
+  fn prove_helper<T1, T2, T3>(
+    num_rounds: usize,
+    mut mem: Vec<T1>,
+    mut outer: Vec<T2>,
+    mut inner: Vec<T3>,
+    transcript: &mut E::TE,
+  ) -> Result<
+    (
+      SumcheckProof<E>,
+      Vec<E::Scalar>,
+      Vec<Vec<Vec<E::Scalar>>>,
+      Vec<Vec<Vec<E::Scalar>>>,
+      Vec<Vec<Vec<E::Scalar>>>,
+    ),
+    NovaError,
+  >
+  where
+    T1: SumcheckEngine<E>,
+    T2: SumcheckEngine<E>,
+    T3: SumcheckEngine<E>,
+  {
+    // sanity checks
+    let num_instances = mem.len();
+    assert_eq!(outer.len(), num_instances);
+    assert_eq!(inner.len(), num_instances);
+
+    for inst in mem.iter_mut() {
+      assert!(SumcheckEngine::size(inst).is_power_of_two());
+    }
+    for inst in outer.iter() {
+      assert!(SumcheckEngine::size(inst).is_power_of_two());
+    }
+    for inst in inner.iter() {
+      assert!(SumcheckEngine::size(inst).is_power_of_two());
+    }
+
+    let degree = SumcheckEngine::degree(&mem[0]);
+    assert!(mem.iter().all(|inst|  SumcheckEngine::degree(inst) == degree));
+    assert!(outer.iter().all(|inst| SumcheckEngine::degree(inst) == degree));
+    assert!(inner.iter().all(|inst| SumcheckEngine::degree(inst) == degree));
+
+    // Collect all claims from the instances. If the instances is defined over `m` variables,
+    // which is less that the total number of rounds `n`,
+    // the individual claims σ are scaled by 2^{n-m}.
+    let claims = zip_with!(
+      iter,
+      (mem, outer, inner),
+      |mem, outer, inner| {
+        Self::scaled_claims_not_zk(mem, num_rounds)
+          .into_iter()
+          .chain(Self::scaled_claims_not_zk(outer, num_rounds))
+          .chain(Self::scaled_claims_not_zk(inner, num_rounds))
+      }
+    )
+    .flatten()
+    .collect::<Vec<E::Scalar>>();
+
+    // Sample a challenge for the random linear combination of all scaled claims
+    let s = transcript.squeeze(b"r")?;
+    let coeffs = powers(&s, claims.len());
+
+    // At the start of each round, the running claim is equal to the random linear combination
+    // of the Sumcheck claims, evaluated over the bound polynomials.
+    // Initially, it is equal to the random linear combination of the scaled input claims.
+    let mut running_claim = zip_with!(iter, (claims, coeffs), |c_1, c_2| *c_1 * c_2).sum();
+
+    // Keep track of the verifier challenges r, and the univariate polynomials sent by the prover
+    // in each round
+    let mut r: Vec<E::Scalar> = Vec::new();
+    let mut cubic_polys: Vec<CompressedUniPoly<E::Scalar>> = Vec::new();
+
+    for i in 0..num_rounds {
+      // At the start of round i, there input polynomials are defined over at most n-i variables.
+      let remaining_variables = num_rounds - i;
+
+      // For each claim j, compute the evaluations of its univariate polynomial S_j(X_i)
+      // at X = 0, 2, 3. The polynomial is such that S_{j-1}(r_{j-1}) = S_j(0) + S_j(1).
+      // If the number of variable m of the claim is m < n-i, then the polynomial is
+      // constants and equal to the initial claim σ_j scaled by 2^{n-m-i-1}.
+      let evals = zip_with!(
+        par_iter,
+        (mem, outer, inner),
+        |mem, outer, inner| {
+          let ((evals_mem, evals_outer), evals_inner) = rayon::join(
+            || rayon::join(
+              || Self::get_evals_not_zk(mem, remaining_variables),
+              || Self::get_evals_not_zk(outer, remaining_variables)
+            ),
+            || Self::get_evals_not_zk(inner, remaining_variables)
+          );
+          evals_mem
+            .into_par_iter()
+            .chain(evals_outer.into_par_iter())
+            .chain(evals_inner.into_par_iter())
+        }
+      )
+      .flatten()
+      .collect::<Vec<_>>();
+
+      assert_eq!(evals.len(), claims.len());
+
+      // Random linear combination of the univariate evaluations at X_i = 0, 2, 3
+      let evals_combined_0 = (0..evals.len()).map(|i| evals[i][0] * coeffs[i]).sum();
+      let evals_combined_2 = (0..evals.len()).map(|i| evals[i][1] * coeffs[i]).sum();
+      let evals_combined_3 = (0..evals.len()).map(|i| evals[i][2] * coeffs[i]).sum();
+
+      let evals = vec![
+        evals_combined_0,
+        running_claim - evals_combined_0,
+        evals_combined_2,
+        evals_combined_3,
+      ];
+      // Coefficient representation of S(X_i)
+      let poly = UniPoly::from_evals(&evals);
+
+      // append the prover's message to the transcript
+      transcript.absorb(b"p", &poly);
+
+      // derive the verifier's challenge for the next round
+      let r_i = transcript.squeeze(b"c")?;
+      r.push(r_i);
+
+      // Bind the variable X_i of polynomials across all claims to r_i.
+      // If the claim is defined over m variables and m < n-i, then
+      // binding has no effect on the polynomial.
+      zip_with_for_each!(
+        par_iter_mut,
+        (mem, outer, inner),
+        |mem, outer, inner| {
+          rayon::join(
+            || Self::bind_not_zk(mem, remaining_variables, &r_i),
+            || rayon::join(
+              || Self::bind_not_zk(outer, remaining_variables, &r_i),
+              || Self::bind_not_zk(inner, remaining_variables, &r_i),
+            ),
+          );
+        }
+      );
+
+      running_claim = poly.evaluate(&r_i);
+      cubic_polys.push(poly.compress());
+    }
+
+    // Collect evaluations at (r_{n-m}, ..., r_{n-1}) of polynomials over all claims,
+    // where m is the initial number of variables the individual claims are defined over.
+    let claims_outer = outer.into_iter().map(|inst| SumcheckEngine::final_claims(&inst)).collect();
+    let claims_inner = inner.into_iter().map(|inst| SumcheckEngine::final_claims(&inst)).collect();
+    let claims_mem = mem.into_iter().map(|inst| SumcheckEngine::final_claims(&inst)).collect();
+
+    Ok((
+      SumcheckProof::new(cubic_polys),
+      r,
+      claims_outer,
+      claims_inner,
+      claims_mem,
+    ))
+  }
+
   /// In round i, computes the evaluations at X_i = 0, 2, 3 of the univariate polynomials S(X_i)
   /// for each claim in the instance.
   /// Let `n` be the total number of Sumcheck rounds, and assume the instance is defined over `m` variables.
@@ -727,6 +1162,21 @@ where
     }
   }
 
+  fn get_evals_not_zk<T: SumcheckEngine<E>>(inst: &T, remaining_variables: usize) -> Vec<Vec<E::Scalar>> {
+    let num_instance_variables = inst.size().log_2(); // m
+    if num_instance_variables < remaining_variables {
+      let deg = inst.degree();
+
+      // The evaluations at X_i = 0, 2, 3 are all equal to the scaled claim
+      Self::scaled_claims_not_zk(inst, remaining_variables - 1)
+        .into_iter()
+        .map(|scaled_claim| vec![scaled_claim; deg])
+        .collect()
+    } else {
+      inst.evaluation_points()
+    }
+  }
+
   /// In round i after receiving challenge r_i, we partially evaluate all polynomials in the instance
   /// at X_i = r_i. If the instance is defined over m variables m which is less than n-i, then
   /// the polynomials do not depend on X_i, so binding them to r_i has no effect.  
@@ -737,9 +1187,29 @@ where
     }
   }
 
+  fn bind_not_zk<T: SumcheckEngine<E>>(inst: &mut T, remaining_variables: usize, r: &E::Scalar) {
+    let num_instance_variables = inst.size().log_2(); // m
+    if remaining_variables <= num_instance_variables {
+      inst.bound(r)
+    }
+  }
+
   /// Given an instance defined over m variables, the sum over n = `remaining_variables` is equal
   /// to the initial claim scaled by 2^{n-m}, when m ≤ n.   
   fn scaled_claims<T: ZKSumcheckEngine<E>>(inst: &T, remaining_variables: usize) -> Vec<E::Scalar> {
+    let num_instance_variables = inst.size().log_2(); // m
+    let num_repetitions = 1 << (remaining_variables - num_instance_variables);
+    let scaling = E::Scalar::from(num_repetitions as u64);
+    inst
+      .initial_claims()
+      .iter()
+      .map(|claim| scaling * claim)
+      .collect()
+  }
+
+    /// Given an instance defined over m variables, the sum over n = `remaining_variables` is equal
+  /// to the initial claim scaled by 2^{n-m}, when m ≤ n.   
+  fn scaled_claims_not_zk<T: SumcheckEngine<E>>(inst: &T, remaining_variables: usize) -> Vec<E::Scalar> {
     let num_instance_variables = inst.size().log_2(); // m
     let num_repetitions = 1 << (remaining_variables - num_instance_variables);
     let scaling = E::Scalar::from(num_repetitions as u64);
