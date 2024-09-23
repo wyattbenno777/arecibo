@@ -49,7 +49,7 @@ use crate::provider::zk_ipa_pc;
 use crate::provider::traits::DlogGroup;
 use core::slice;
 use ff::Field;
-use itertools::{Itertools as _};
+use itertools::{chain, Itertools as _};
 use once_cell::sync::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -61,6 +61,7 @@ use std::fs;
 use tracing::error;
 use ff::PrimeField;
 use crate::traits;
+use std::iter;
 
 unzip_n!(pub 3);
 unzip_n!(pub 5);
@@ -151,6 +152,7 @@ pub struct DataForUntrustedRemote<E: Engine> {
   polys_Mz: Vec<Vec<E::Scalar>>,
   comms_Az_Bz_Cz: Vec<[Commitment<E>; 3]>,
   S_repr: Vec<R1CSShapeSparkRepr<E>>,
+  S_comm: Vec<ZKR1CSShapeSparkCommitment<E>>,
   us: Vec<E::Scalar>, 
   polys_Z: Vec<Vec<E::Scalar>>,
   N_max: usize,
@@ -217,6 +219,7 @@ where
     serialize_field("polys_Mz", &data.polys_Mz);
     serialize_field("comms_Az_Bz_Cz", &data.comms_Az_Bz_Cz);
     serialize_field("S_repr", &data.S_repr);
+    serialize_field("S_comm", &data.S_comm);
     serialize_field("us", &data.us);
     serialize_field("polys_Z", &data.polys_Z);
     serialize_field("N_max", &data.N_max);
@@ -449,20 +452,6 @@ where
     )
     .collect::<Vec<_>>();
 
-    let comms_L_row_col = polys_L_row_col
-    .par_iter()
-    .map(|[L_row, L_col]| {
-      let (comm_L_row, comm_L_col) =
-        rayon::join(|| E::CE::commit(ck, L_row), || E::CE::commit(ck, L_col));
-      [comm_L_row, comm_L_col]
-    })
-    .collect::<Vec<_>>();
-
-    // absorb commitments to L_row and L_col in the transcript
-    for comms in comms_L_row_col.iter() {
-      transcript.absorb(b"e", &comms.as_slice());
-    }
-
     // For each instance, batch Mz = Az + c*Bz + c^2*Cz
     let c = transcript.squeeze(b"c")?;
 
@@ -577,6 +566,7 @@ where
       polys_Mz: polys_Mz.clone(),
       comms_Az_Bz_Cz: comms_Az_Bz_Cz.clone(),
       S_repr: pk.S_repr.clone(),
+      S_comm: pk.S_comm.clone(),
       us: us.clone(),
       polys_Z: polys_Z.clone(),
       N_max: N_max,
@@ -730,9 +720,23 @@ where
     )
     .collect::<Vec<_>>();
 
+    let comms_L_row_col = data.polys_L_row_col
+    .par_iter()
+    .map(|[L_row, L_col]| {
+      let (comm_L_row, comm_L_col) =
+        rayon::join(|| E::CE::commit(&data.ck, L_row), || E::CE::commit(&data.ck, L_col));
+      [comm_L_row, comm_L_col]
+    })
+    .collect::<Vec<_>>();
+
+    // absorb commitments to L_row and L_col in the transcript
+    for comms in comms_L_row_col.iter() {
+      transcript.absorb(b"e", &comms.as_slice());
+    }
+
     // a third sum-check instance to prove the read-only memory claim
     // we now need to prove that L_row and L_col are well-formed
-    let (mem_sc_inst, _comms_mem_oracles, _polys_mem_oracles) = {
+    let (mem_sc_inst, comms_mem_oracles, _polys_mem_oracles) = {
       let gamma = transcript.squeeze(b"g")?;
       let r = transcript.squeeze(b"r")?;
 
@@ -802,13 +806,175 @@ where
     
     // Run batched Sumcheck for the 3 claims for all instances.
     // Note that the polynomials for claims relating to instance i have size Ni.
-    let (_sc, _rand_sc, _claims_outer, _claims_inner, _claims_mem) = Self::prove_helper(
+    let (_sc, rand_sc, claims_outer, claims_inner, claims_mem) = Self::prove_helper(
       data.num_rounds_sc,
       mem_sc_inst,
       outer_sc_inst,
       inner_sc_inst,
       &mut transcript,
     )?;
+
+    let (evals_Az_Bz_Cz_E, evals_L_row_col, evals_mem_oracle, evals_mem_preprocessed) = {
+      let evals_Az_Bz = claims_outer
+        .into_iter()
+        .map(|claims| [claims[0][0], claims[0][1]])
+        .collect::<Vec<_>>();
+
+      let evals_L_row_col = claims_inner
+        .into_iter()
+        .map(|claims| {
+          // [L_row, L_col]
+          [claims[0][0], claims[0][1]]
+        })
+        .collect::<Vec<_>>();
+
+      let (evals_mem_oracle, evals_mem_ts): (Vec<_>, Vec<_>) = claims_mem
+        .into_iter()
+        .map(|claims| {
+          (
+            // [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col]
+            [claims[0][0], claims[0][1], claims[1][0], claims[1][1]],
+            // [ts_row, ts_col]
+            [claims[0][2], claims[1][2]],
+          )
+        })
+        .unzip();
+
+      let (evals_Cz_E, evals_mem_val_row_col): (Vec<_>, Vec<_>) = zip_with!(
+        iter,
+        (data.polys_Az_Bz_Cz, data.polys_E, data.S_repr),
+        |ABCzs, poly_E, s_repr| {
+          let [_, _, Cz] = ABCzs;
+          let log_Ni = s_repr.N.log_2();
+          let (_, rand_sc) = rand_sc.split_at(data.num_rounds_sc - log_Ni);
+          let rand_sc_evals = EqPolynomial::evals_from_points(rand_sc);
+          let e = [
+            Cz,
+            poly_E,
+            &s_repr.val_A,
+            &s_repr.val_B,
+            &s_repr.val_C,
+            &s_repr.row,
+            &s_repr.col,
+          ]
+          .into_iter()
+          .map(|p| {
+            // Manually compute evaluation to avoid recomputing rand_sc_evals
+            zip_with!(par_iter, (p, rand_sc_evals), |p, eq| *p * eq).sum()
+          })
+          .collect::<Vec<E::Scalar>>();
+          ([e[0], e[1]], [e[2], e[3], e[4], e[5], e[6]])
+        }
+      )
+      .unzip();
+
+      let evals_Az_Bz_Cz_E = zip_with!(
+        (evals_Az_Bz.into_iter(), evals_Cz_E.into_iter()),
+        |Az_Bz, Cz_E| {
+          let [Az, Bz] = Az_Bz;
+          let [Cz, E] = Cz_E;
+          [Az, Bz, Cz, E]
+        }
+      )
+      .collect::<Vec<_>>();
+
+      // [val_A, val_B, val_C, row, col, ts_row, ts_col]
+      let evals_mem_preprocessed = zip_with!(
+        (evals_mem_val_row_col.into_iter(), evals_mem_ts),
+        |eval_mem_val_row_col, eval_mem_ts| {
+          let [val_A, val_B, val_C, row, col] = eval_mem_val_row_col;
+          let [ts_row, ts_col] = eval_mem_ts;
+          [val_A, val_B, val_C, row, col, ts_row, ts_col]
+        }
+      )
+      .collect::<Vec<_>>();
+      (
+        evals_Az_Bz_Cz_E,
+        evals_L_row_col,
+        evals_mem_oracle,
+        evals_mem_preprocessed,
+      )
+    };
+
+    let evals_vec = zip_with!(
+      iter,
+      (
+        evals_Az_Bz_Cz_E,
+        evals_L_row_col,
+        evals_mem_oracle,
+        evals_mem_preprocessed
+      ),
+      |Az_Bz_Cz_E, L_row_col, mem_oracles, mem_preprocessed| {
+        chain![Az_Bz_Cz_E, L_row_col, mem_oracles, mem_preprocessed]
+          .cloned()
+          .collect::<Vec<_>>()
+      }
+    )
+    .collect::<Vec<_>>();
+
+    let comms_vec = zip_with!(
+      iter,
+      (
+        data.comms_Az_Bz_Cz,
+        comms_L_row_col,
+        comms_mem_oracles,
+        data.S_comm
+      ),
+      |Az_Bz_Cz, L_row_col, mem_oracles, S_comm| {
+        chain![
+          Az_Bz_Cz,
+          L_row_col,
+          mem_oracles,
+          [
+            &S_comm.comm_val_A,
+            &S_comm.comm_val_B,
+            &S_comm.comm_val_C,
+            &S_comm.comm_row,
+            &S_comm.comm_col,
+            &S_comm.comm_ts_row,
+            &S_comm.comm_ts_col,
+          ]
+        ]
+      }
+    )
+    .flatten()
+    .cloned()
+    .collect::<Vec<_>>();
+
+    for evals in evals_vec.iter() {
+      transcript.absorb(b"e", &evals.as_slice()); // comm_vec is already in the transcript
+    }
+    let evals_vec = evals_vec.into_iter().flatten().collect::<Vec<_>>();
+
+    let untrusted_c = transcript.squeeze(b"untrusted_c")?;
+
+    // Compute number of variables for each polynomial
+    let num_vars_u: Vec<usize> = [
+      Self::repeat_log2(&data.S_repr, 3), // For Az, Bz, Cz (3 repetitions)
+      Self::repeat_log2(&data.S_repr, 1), // For E (1 repetition)
+      Self::repeat_log2(&data.S_repr, 2), // For L_row, L_col (2 repetitions)
+      Self::repeat_log2(&data.S_repr, 4), // For mem_oracles (4 repetitions)
+      Self::repeat_log2(&data.S_repr, 7)  // For preprocessed values (7 repetitions)
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    assert_eq!(num_vars_u.len(), comms_vec.len(), "Number of variables must match number of commitments");
+    assert_eq!(evals_vec.len(), comms_vec.len(), "Number of evaluations must match number of commitments");
+
+    let _u_batch = PolyEvalInstance::<E>::batch_diff_size(&comms_vec, &evals_vec, &num_vars_u, rand_sc, untrusted_c);
+
+    // Perform IPA for batched polynomials
+    /*let eval_arg = ipa_pc::EvaluationEngine::prove(
+      ck,
+      &pk.pk_ee,
+      &mut transcript,
+      &u_batch.c,
+      &w_batch.p,
+      &u_batch.x,
+      &u_batch.e,
+    )?;*/
         
     // Perform IPA for batched witness polynomials
     let _eval_arg_witness = zk_ipa_pc::EvaluationEngine::<E>::prove_not_zk(
@@ -821,7 +987,26 @@ where
         &data.u_batch_witness.e,
     )?;
 
+    let _comms_Az_Bz_Cz: Vec<[CompressedCommitment<E>; 3]> = <Vec<[zk_pedersen::Commitment<E>; 3]> as Clone>::clone(&data.comms_Az_Bz_Cz)
+    .into_iter()
+    .map(|comms| [comms[0].compress(), comms[1].compress(), comms[2].compress()])
+    .collect();
+
+    let _comms_L_row_col: Vec<[CompressedCommitment<E>; 2]> = comms_L_row_col
+        .into_iter()
+        .map(|comms| [comms[0].compress(), comms[1].compress()])
+        .collect();
+
+    let _comms_mem_oracles: Vec<[CompressedCommitment<E>; 4]> = comms_mem_oracles
+        .into_iter()
+        .map(|comms| [comms[0].compress(), comms[1].compress(), comms[2].compress(), comms[3].compress()])
+        .collect();
+
     Ok(())
+  }
+
+  fn repeat_log2(s_repr: &[R1CSShapeSparkRepr<E>], repetitions: usize) -> impl Iterator<Item = usize> + '_ {
+    s_repr.iter().flat_map(move |s| iter::repeat(s.N.log_2()).take(repetitions))
   }
   
   //Prove only the witness claims.

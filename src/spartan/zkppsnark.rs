@@ -62,7 +62,7 @@ pub struct R1CSShapeSparkRepr<E: Engine> {
 }
 
 /// A type that holds a commitment to a sparse polynomial
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct ZKR1CSShapeSparkCommitment<E: Engine> {
   pub(in crate::spartan) N: usize, // size of each vector
