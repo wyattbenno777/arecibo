@@ -9,13 +9,66 @@ use crate::{
     },
     PolyEvalInstance,
   },
-  traits::{circuit::StepCircuit, CurveCycleEquipped, Engine},
-  CommitmentKey, StepCounterType,
+  traits::{
+    circuit::{StepCircuit, TrivialCircuit},
+    snark::RelaxedR1CSSNARKTrait,
+    CurveCycleEquipped, Dual, Engine,
+  },
+  CommitmentKey, CompressedSNARK, PublicParams, RecursiveSNARK, StepCounterType,
 };
+use ff::Field;
 
 use super::AggregatorSNARKData;
 
-fn ivc_aggregate<E1: CurveCycleEquipped>(snarks_data: &[AggregatorSNARKData<'_, E1>]) {}
+fn ivc_aggregate_with<E1, S1, S2>(
+  snarks_data: &[AggregatorSNARKData<'_, E1>],
+) -> Result<CompressedSNARK<E1, S1, S2>, NovaError>
+where
+  E1: CurveCycleEquipped,
+  E1::GE: DlogGroup,
+  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+{
+  let circuits = build_circuits(snarks_data)?;
+  let trivial_circuit_secondary = TrivialCircuit::default();
+
+  let pp_iop = {
+    let (init_circuit_iop, init_circuit_ffa) = &circuits[0];
+    PublicParams::setup(
+      init_circuit_iop,
+      &trivial_circuit_secondary,
+      &*S1::ck_floor(),
+      &*S2::ck_floor(),
+    )?
+  };
+
+  let mut rs_option_iop: Option<RecursiveSNARK<E1>> = None;
+  for (iop_circuit, _ffa_circuit) in circuits.iter() {
+    let mut rs_iop = rs_option_iop.unwrap_or_else(|| {
+      RecursiveSNARK::new(
+        &pp_iop,
+        iop_circuit,
+        &trivial_circuit_secondary,
+        &[<E1 as Engine>::Scalar::ZERO],
+        &[<Dual<E1> as Engine>::Scalar::ZERO],
+      )
+      .unwrap()
+    });
+
+    rs_iop.prove_step(&pp_iop, iop_circuit, &trivial_circuit_secondary)?;
+
+    rs_option_iop = Some(rs_iop)
+  }
+
+  assert!(rs_option_iop.is_some());
+  let rs_iop = rs_option_iop.ok_or(NovaError::UnSat)?;
+
+  let (pk_iop, vk_iop) = CompressedSNARK::<_, S1, S2>::setup(&pp_iop)?;
+  let snark_iop = CompressedSNARK::<_, S1, S2>::prove(&pp_iop, &pk_iop, &rs_iop)?;
+
+  Ok(snark_iop)
+}
 
 #[derive(Clone)]
 struct IOPCircuit<'a, E: Engine> {
@@ -28,24 +81,9 @@ impl<'a, E: Engine> IOPCircuit<'a, E> {
   }
 }
 
-impl<'a, E: Engine> IOPCircuit<'a, E> {
-  fn synthesize<CS: ConstraintSystem<E::Scalar>>(
-    &self,
-    mut cs: CS,
-  ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
-    SpartanVerifyCircuit::synthesize(
-      cs.namespace(|| "verify IOP"),
-      &self.snark_data.vk,
-      &self.snark_data.U,
-      &self.snark_data.snark,
-    )?;
-    Ok(vec![])
-  }
-}
-
 impl<'a, E: Engine> StepCircuit<E::Scalar> for IOPCircuit<'a, E> {
   fn arity(&self) -> usize {
-    0
+    1
   }
   fn get_counter_type(&self) -> StepCounterType {
     StepCounterType::Incremental
@@ -55,6 +93,12 @@ impl<'a, E: Engine> StepCircuit<E::Scalar> for IOPCircuit<'a, E> {
     cs: &mut CS,
     z: &[AllocatedNum<E::Scalar>],
   ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
+    SpartanVerifyCircuit::synthesize(
+      cs.namespace(|| "verify IOP"),
+      &self.snark_data.vk,
+      &self.snark_data.U,
+      &self.snark_data.snark,
+    )?;
     Ok(z.to_vec())
   }
 }
@@ -78,15 +122,22 @@ where
   }
 }
 
-impl<'a, E1> FFACircuit<'a, E1>
+impl<'a, E1> StepCircuit<E1::Base> for FFACircuit<'a, E1>
 where
   E1: CurveCycleEquipped,
   <E1 as Engine>::GE: DlogGroup,
   CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
 {
+  fn arity(&self) -> usize {
+    1
+  }
+  fn get_counter_type(&self) -> StepCounterType {
+    StepCounterType::Incremental
+  }
   fn synthesize<CS: ConstraintSystem<E1::Base>>(
     &self,
-    mut cs: CS,
+    cs: &mut CS,
+    z: &[AllocatedNum<E1::Base>],
   ) -> Result<Vec<AllocatedNum<E1::Base>>, SynthesisError> {
     let _ = EvaluationEngineGadget::<E1>::verify(
       cs.namespace(|| "EE::verify"),
