@@ -9,8 +9,8 @@ use crate::{
     },
     PolyEvalInstance,
   },
-  traits::{CurveCycleEquipped, Engine},
-  CommitmentKey,
+  traits::{circuit::StepCircuit, CurveCycleEquipped, Engine},
+  CommitmentKey, StepCounterType,
 };
 
 use super::AggregatorSNARKData;
@@ -40,6 +40,22 @@ impl<'a, E: Engine> IOPCircuit<'a, E> {
       &self.snark_data.snark,
     )?;
     Ok(vec![])
+  }
+}
+
+impl<'a, E: Engine> StepCircuit<E::Scalar> for IOPCircuit<'a, E> {
+  fn arity(&self) -> usize {
+    0
+  }
+  fn get_counter_type(&self) -> StepCounterType {
+    StepCounterType::Incremental
+  }
+  fn synthesize<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    cs: &mut CS,
+    z: &[AllocatedNum<E::Scalar>],
+  ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
+    Ok(z.to_vec())
   }
 }
 
