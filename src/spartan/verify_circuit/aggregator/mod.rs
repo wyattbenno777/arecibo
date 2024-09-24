@@ -19,6 +19,7 @@ use crate::{
 };
 use bellpepper_core::ConstraintSystem;
 mod ivc;
+
 // #[cfg(test)]
 // mod tests;
 
