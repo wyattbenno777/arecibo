@@ -78,6 +78,7 @@ where
 
     InnerProductArgument::prove(ck.clone(), pk.ck_s.clone(), &u, &w, transcript)
   }
+  
 
   /// A method to verify purported evaluations of a batch of polynomials
   fn verify(

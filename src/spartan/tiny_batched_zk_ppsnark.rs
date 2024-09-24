@@ -61,7 +61,6 @@ use std::fs;
 use tracing::error;
 use ff::PrimeField;
 use crate::traits;
-use std::iter;
 
 unzip_n!(pub 3);
 unzip_n!(pub 5);
@@ -181,6 +180,38 @@ pub struct DataForUntrustedRemote<E: Engine> {
 ))]
 pub struct BatchedRelaxedR1CSSNARK<E: Engine + Serialize> {
   data: DataForUntrustedRemote<E>
+}
+
+/// A succinct proof of knowledge of a witness to a relaxed R1CS instance
+/// The proof is produced using Spartan's combination of the sum-check and
+/// the commitment to a vector viewed as a polynomial commitment
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct ResultsBatchedTinySNARK<E: Engine> where <E as traits::Engine>::GE: DlogGroup {
+  comms_L_row_col: Vec<[zk_pedersen::Commitment<E>; 2]>,
+  // commitments to aid the memory checks
+  // [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col]
+  comms_mem_oracles: Vec<[zk_pedersen::Commitment<E>; 4]>,
+
+  // claims about Az, Bz, and Cz polynomials
+  evals_Az_Bz_Cz_at_tau: Vec<[E::Scalar; 3]>,
+
+  // sum-check
+  sc: SumcheckProof<E>,
+
+  // claims from the end of sum-check
+  evals_Az_Bz_Cz_E: Vec<[E::Scalar; 4]>,
+  evals_L_row_col: Vec<[E::Scalar; 2]>,
+  // [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col]
+  evals_mem_oracle: Vec<[E::Scalar; 4]>,
+  // [val_A, val_B, val_C, row, col, ts_row, ts_col]
+  evals_mem_preprocessed: Vec<[E::Scalar; 7]>,
+
+  // a PCS evaluation argument
+  eval_arg: zk_ipa_pc::EvaluationArgument<E>,
+  eval_arg_witness: zk_ipa_pc::EvaluationArgument<E>,
+
+  data: DataForUntrustedRemote<E>,
 }
 
 #[allow(unused)]
@@ -613,9 +644,10 @@ where
     <<E::CE as CommitmentEngineTrait<E>>::Commitment as CommitmentTrait<E>>::CompressedCommitment: Into<CompressedCommitment<E>>,
     zk_pedersen::CommitmentKey<E>: zk_pedersen::CommitmentKeyExtTrait<E>,
 {
+  
   pub fn prove_unstrusted(
       data: &DataForUntrustedRemote<E>,
-  ) -> Result<(), NovaError>
+  ) -> Result<ResultsBatchedTinySNARK<E>, NovaError>
   where
       E::Scalar: PrimeField,
   {
@@ -736,7 +768,7 @@ where
 
     // a third sum-check instance to prove the read-only memory claim
     // we now need to prove that L_row and L_col are well-formed
-    let (mem_sc_inst, comms_mem_oracles, _polys_mem_oracles) = {
+    let (mem_sc_inst, comms_mem_oracles, polys_mem_oracles) = {
       let gamma = transcript.squeeze(b"g")?;
       let r = transcript.squeeze(b"r")?;
 
@@ -806,7 +838,7 @@ where
     
     // Run batched Sumcheck for the 3 claims for all instances.
     // Note that the polynomials for claims relating to instance i have size Ni.
-    let (_sc, rand_sc, claims_outer, claims_inner, claims_mem) = Self::prove_helper(
+    let (sc, rand_sc, claims_outer, claims_inner, claims_mem) = Self::prove_helper(
       data.num_rounds_sc,
       mem_sc_inst,
       outer_sc_inst,
@@ -941,6 +973,36 @@ where
     .cloned()
     .collect::<Vec<_>>();
 
+    let w_vec = zip_with!(
+      (
+          data.polys_Az_Bz_Cz.iter(),
+          data.polys_E.iter(),
+          data.polys_L_row_col.iter(),
+          polys_mem_oracles.iter(),
+          data.S_repr.iter()
+      ),
+      |Az_Bz_Cz, E, L_row_col, mem_oracles, S_repr| {
+          chain![
+              Az_Bz_Cz.iter().cloned(),
+              std::iter::once((*E).clone()),
+              L_row_col.iter().cloned(),
+              mem_oracles.iter().cloned(),
+              [
+                  S_repr.val_A.clone(),
+                  S_repr.val_B.clone(),
+                  S_repr.val_C.clone(),
+                  S_repr.row.clone(),
+                  S_repr.col.clone(),
+                  S_repr.ts_row.clone(),
+                  S_repr.ts_col.clone(),
+              ].into_iter()
+          ]
+      }
+    )
+    .flatten()
+    .map(|p| PolyEvalWitness::<E> { p })
+    .collect::<Vec<_>>();
+
     for evals in evals_vec.iter() {
       transcript.absorb(b"e", &evals.as_slice()); // comm_vec is already in the transcript
     }
@@ -948,36 +1010,26 @@ where
 
     let untrusted_c = transcript.squeeze(b"untrusted_c")?;
 
-    // Compute number of variables for each polynomial
-    let num_vars_u: Vec<usize> = [
-      Self::repeat_log2(&data.S_repr, 3), // For Az, Bz, Cz (3 repetitions)
-      Self::repeat_log2(&data.S_repr, 1), // For E (1 repetition)
-      Self::repeat_log2(&data.S_repr, 2), // For L_row, L_col (2 repetitions)
-      Self::repeat_log2(&data.S_repr, 4), // For mem_oracles (4 repetitions)
-      Self::repeat_log2(&data.S_repr, 7)  // For preprocessed values (7 repetitions)
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let num_vars_u = w_vec.iter().map(|w| w.p.len().log_2()).collect::<Vec<_>>();
 
-    assert_eq!(num_vars_u.len(), comms_vec.len(), "Number of variables must match number of commitments");
-    assert_eq!(evals_vec.len(), comms_vec.len(), "Number of evaluations must match number of commitments");
+    let u_batch =
+      PolyEvalInstance::<E>::batch_diff_size(&comms_vec, &evals_vec, &num_vars_u, rand_sc, untrusted_c);
+    let w_batch =
+      PolyEvalWitness::<E>::batch_diff_size(&w_vec.iter().by_ref().collect::<Vec<_>>(), untrusted_c);
 
-    let _u_batch = PolyEvalInstance::<E>::batch_diff_size(&comms_vec, &evals_vec, &num_vars_u, rand_sc, untrusted_c);
-
-    // Perform IPA for batched polynomials
-    /*let eval_arg = ipa_pc::EvaluationEngine::prove(
-      ck,
-      &pk.pk_ee,
+    // Perform IPA for batched polynomials.
+    let eval_arg = zk_ipa_pc::EvaluationEngine::<E>::prove_not_zk(
+      &data.ck,
+      &data.pk_ee,
       &mut transcript,
       &u_batch.c,
       &w_batch.p,
       &u_batch.x,
       &u_batch.e,
-    )?;*/
+    )?;
         
     // Perform IPA for batched witness polynomials
-    let _eval_arg_witness = zk_ipa_pc::EvaluationEngine::<E>::prove_not_zk(
+    let eval_arg_witness = zk_ipa_pc::EvaluationEngine::<E>::prove_not_zk(
         &data.ck,
         &data.pk_ee,
         &mut transcript,
@@ -992,23 +1044,31 @@ where
     .map(|comms| [comms[0].compress(), comms[1].compress(), comms[2].compress()])
     .collect();
 
-    let _comms_L_row_col: Vec<[CompressedCommitment<E>; 2]> = comms_L_row_col
+    let _comms_L_row_col: Vec<[CompressedCommitment<E>; 2]> = comms_L_row_col.clone()
         .into_iter()
         .map(|comms| [comms[0].compress(), comms[1].compress()])
         .collect();
 
-    let _comms_mem_oracles: Vec<[CompressedCommitment<E>; 4]> = comms_mem_oracles
+    let _comms_mem_oracles: Vec<[CompressedCommitment<E>; 4]> = comms_mem_oracles.clone()
         .into_iter()
         .map(|comms| [comms[0].compress(), comms[1].compress(), comms[2].compress(), comms[3].compress()])
         .collect();
 
-    Ok(())
+    Ok(ResultsBatchedTinySNARK{
+      comms_L_row_col,
+      comms_mem_oracles,
+      evals_Az_Bz_Cz_at_tau,
+      sc,
+      evals_Az_Bz_Cz_E,
+      evals_L_row_col,
+      evals_mem_oracle,
+      evals_mem_preprocessed,
+      eval_arg,
+      eval_arg_witness,
+      data: data.clone(),
+    })
   }
 
-  fn repeat_log2(s_repr: &[R1CSShapeSparkRepr<E>], repetitions: usize) -> impl Iterator<Item = usize> + '_ {
-    s_repr.iter().flat_map(move |s| iter::repeat(s.N.log_2()).take(repetitions))
-  }
-  
   //Prove only the witness claims.
   #[allow(unused)]
   fn prove_witness<T1>(
