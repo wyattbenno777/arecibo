@@ -19,6 +19,8 @@ use crate::{
 use ff::Field;
 
 use super::AggregatorSNARKData;
+#[cfg(test)]
+mod tests;
 
 fn ivc_aggregate_with<E1, S1, S2>(
   snarks_data: &[AggregatorSNARKData<'_, E1>],
