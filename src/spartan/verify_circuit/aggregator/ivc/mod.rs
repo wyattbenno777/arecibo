@@ -19,14 +19,77 @@ use crate::{
 use ff::Field;
 
 use super::AggregatorSNARKData;
+
 #[cfg(test)]
 mod tests;
+
+pub struct Aggregator;
+
+impl Aggregator {
+  fn build_circuits<'a, E1>(
+    snarks_data: &'a [AggregatorSNARKData<'a, E1>],
+  ) -> Result<Vec<(IOPCircuit<'a, E1>, FFACircuit<'a, E1>)>, NovaError>
+  where
+    E1: CurveCycleEquipped,
+    <E1 as Engine>::GE: DlogGroup,
+    CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+  {
+    snarks_data
+      .iter()
+      .map(|snark_data| {
+        let iop_circuit = IOPCircuit::new(snark_data)?;
+        let ffa_circuit = FFACircuit::new(snark_data)?;
+        Ok((iop_circuit, ffa_circuit))
+      })
+      .collect::<Result<_, NovaError>>()
+  }
+}
+
+pub struct AggregatorPublicParams<E1>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+{
+  pp_iop: PublicParams<E1>,
+  pp_ffa: PublicParams<Dual<E1>>,
+}
+
+pub fn aggregator_public_params<E1, S1, S2>(
+  circuit_iop: &IOPCircuit<E1>,
+  circuit_ffa: &FFACircuit<E1>,
+) -> Result<AggregatorPublicParams<E1>, NovaError>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  E1::GE: DlogGroup,
+  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+{
+  let trivial_circuit_secondary = TrivialCircuit::default();
+  let trivial_circuit_primary = TrivialCircuit::<E1::Scalar>::default();
+  Ok(AggregatorPublicParams {
+    pp_iop: PublicParams::setup(
+      circuit_iop,
+      &trivial_circuit_secondary,
+      &*S1::ck_floor(),
+      &*S2::ck_floor(),
+    )?,
+    pp_ffa: PublicParams::<Dual<E1>>::setup(
+      circuit_ffa,
+      &trivial_circuit_primary,
+      &*S2::ck_floor(),
+      &*S1::ck_floor(),
+    )?,
+  })
+}
 
 pub fn ivc_aggregate_with<E1, S1, S2>(
   snarks_data: &[AggregatorSNARKData<'_, E1>],
 ) -> Result<CompressedSNARK<E1, S1, S2>, NovaError>
 where
   E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
   E1::GE: DlogGroup,
   CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
   S1: RelaxedR1CSSNARKTrait<E1>,
@@ -35,19 +98,29 @@ where
   let circuits = build_circuits(snarks_data)?;
   let num_steps = circuits.len();
   let trivial_circuit_secondary = TrivialCircuit::default();
+  let trivial_circuit_primary = TrivialCircuit::<E1::Scalar>::default();
 
-  let pp_iop = {
+  let (pp_iop, pp_ffa) = {
     let (init_circuit_iop, init_circuit_ffa) = &circuits[0];
-    PublicParams::setup(
-      init_circuit_iop,
-      &trivial_circuit_secondary,
-      &*S1::ck_floor(),
-      &*S2::ck_floor(),
-    )?
+    (
+      PublicParams::setup(
+        init_circuit_iop,
+        &trivial_circuit_secondary,
+        &*S1::ck_floor(),
+        &*S2::ck_floor(),
+      )?,
+      PublicParams::<Dual<E1>>::setup(
+        init_circuit_ffa,
+        &trivial_circuit_primary,
+        &*S2::ck_floor(),
+        &*S1::ck_floor(),
+      )?,
+    )
   };
 
   let mut rs_option_iop: Option<RecursiveSNARK<E1>> = None;
-  for (iop_circuit, _ffa_circuit) in circuits.iter() {
+  let mut rs_option_ffa: Option<RecursiveSNARK<Dual<E1>>> = None;
+  for (iop_circuit, ffa_circuit) in circuits.iter() {
     let mut rs_iop = rs_option_iop.unwrap_or_else(|| {
       RecursiveSNARK::new(
         &pp_iop,
@@ -61,7 +134,22 @@ where
 
     rs_iop.prove_step(&pp_iop, iop_circuit, &trivial_circuit_secondary)?;
 
-    rs_option_iop = Some(rs_iop)
+    rs_option_iop = Some(rs_iop);
+
+    let mut rs_ffa = rs_option_ffa.unwrap_or_else(|| {
+      RecursiveSNARK::new(
+        &pp_ffa,
+        ffa_circuit,
+        &trivial_circuit_primary,
+        &[<Dual<E1> as Engine>::Scalar::ZERO],
+        &[<E1 as Engine>::Scalar::ZERO],
+      )
+      .unwrap()
+    });
+
+    rs_ffa.prove_step(&pp_ffa, ffa_circuit, &trivial_circuit_primary)?;
+
+    rs_option_ffa = Some(rs_ffa);
   }
 
   assert!(rs_option_iop.is_some());
@@ -70,11 +158,24 @@ where
   let (pk_iop, vk_iop) = CompressedSNARK::<_, S1, S2>::setup(&pp_iop)?;
   let snark_iop = CompressedSNARK::<_, S1, S2>::prove(&pp_iop, &pk_iop, &rs_iop)?;
 
+  assert!(rs_option_ffa.is_some());
+  let rs_ffa = rs_option_ffa.ok_or(NovaError::UnSat)?;
+
+  let (pk_ffa, vk_ffa) = CompressedSNARK::<_, S2, S1>::setup(&pp_ffa)?;
+  let snark_ffa = CompressedSNARK::<_, S2, S1>::prove(&pp_ffa, &pk_ffa, &rs_ffa)?;
+
   snark_iop.verify(
     &vk_iop,
     num_steps,
     &[<E1 as Engine>::Scalar::ZERO],
     &[<Dual<E1> as Engine>::Scalar::ZERO],
+  )?;
+
+  snark_ffa.verify(
+    &vk_ffa,
+    num_steps,
+    &[<Dual<E1> as Engine>::Scalar::ZERO],
+    &[<E1 as Engine>::Scalar::ZERO],
   )?;
 
   Ok(snark_iop)
@@ -158,7 +259,7 @@ where
       &self.snark_data.snark.eval_arg,
     )
     .map_err(|_| SynthesisError::AssignmentMissing);
-    Ok(vec![])
+    Ok(z.to_vec())
   }
 }
 
