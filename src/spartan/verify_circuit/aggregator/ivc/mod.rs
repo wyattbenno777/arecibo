@@ -22,7 +22,7 @@ use super::AggregatorSNARKData;
 #[cfg(test)]
 mod tests;
 
-fn ivc_aggregate_with<E1, S1, S2>(
+pub fn ivc_aggregate_with<E1, S1, S2>(
   snarks_data: &[AggregatorSNARKData<'_, E1>],
 ) -> Result<CompressedSNARK<E1, S1, S2>, NovaError>
 where
@@ -33,6 +33,7 @@ where
   S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
 {
   let circuits = build_circuits(snarks_data)?;
+  let num_steps = circuits.len();
   let trivial_circuit_secondary = TrivialCircuit::default();
 
   let pp_iop = {
@@ -68,6 +69,13 @@ where
 
   let (pk_iop, vk_iop) = CompressedSNARK::<_, S1, S2>::setup(&pp_iop)?;
   let snark_iop = CompressedSNARK::<_, S1, S2>::prove(&pp_iop, &pk_iop, &rs_iop)?;
+
+  snark_iop.verify(
+    &vk_iop,
+    num_steps,
+    &[<E1 as Engine>::Scalar::ZERO],
+    &[<Dual<E1> as Engine>::Scalar::ZERO],
+  )?;
 
   Ok(snark_iop)
 }

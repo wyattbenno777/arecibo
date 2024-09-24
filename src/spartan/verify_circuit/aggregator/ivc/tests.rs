@@ -2,10 +2,15 @@ use std::marker::PhantomData;
 
 use crate::{
   provider::{ipa_pc, PallasEngine},
-  spartan::{batched, snark::RelaxedR1CSSNARK},
+  spartan::{
+    batched,
+    snark::RelaxedR1CSSNARK,
+    verify_circuit::{aggregator::AggregatorSNARKData, ipa_prover_poseidon},
+  },
   supernova::{
-    snark::CompressedSNARK, utils::get_selector_vec_from_index, NonUniformCircuit, PublicParams,
-    RecursiveSNARK, StepCircuit, TrivialSecondaryCircuit,
+    snark::{CompressedSNARK, VerifierKey},
+    utils::get_selector_vec_from_index,
+    NonUniformCircuit, PublicParams, RecursiveSNARK, StepCircuit, TrivialSecondaryCircuit,
   },
   traits::{
     snark::{BatchedRelaxedR1CSSNARKTrait, RelaxedR1CSSNARKTrait},
@@ -18,35 +23,57 @@ use ff::Field;
 use ff::PrimeField;
 use itertools::Itertools as _;
 
-type EE<E> = ipa_pc::EvaluationEngine<E>;
-type S1<E> = batched::BatchedRelaxedR1CSSNARK<E, EE<E>>;
-type S2<E> = RelaxedR1CSSNARK<E, EE<E>>;
+use super::ivc_aggregate_with;
+
+type E1 = PallasEngine;
+type E2 = Dual<E1>;
+type EE1 = ipa_pc::EvaluationEngine<E1>;
+type EE2 = ipa_pc::EvaluationEngine<E2>;
+type S1 = ipa_prover_poseidon::batched::BatchedRelaxedR1CSSNARK<E1>;
+type S2 = RelaxedR1CSSNARK<E2, EE2>;
 
 #[test]
-fn test_compression_with_circuit_size_difference() {
-  const NUM_STEPS: usize = 4;
+fn test_ivc_aggregate() {
+  let num_nodes = 2;
+  let snarks_data = sim_nw(num_nodes);
+  let snarks_data: Vec<AggregatorSNARKData<E1>> = snarks_data
+    .iter()
+    .map(|(snark, vk)| {
+      let (snark, U) = snark.primary_snark_and_U();
+      let vk = vk.primary();
+      AggregatorSNARKData::new(snark, vk, U)
+    })
+    .collect();
 
-  // classic SNARK
-  test_compression_with::<PallasEngine, S1<_>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
+  let snark = ivc_aggregate_with::<E1, S1, S2>(&snarks_data).unwrap();
 }
 
-fn test_compression_with<E1, S1, S2, F, C>(num_steps: usize, circuits_factory: F)
+fn sim_nw(num_nodes: usize) -> Vec<(CompressedSNARK<E1, S1, S2>, VerifierKey<E1, S1, S2>)> {
+  const NUM_STEPS: usize = 4;
+  (0..num_nodes)
+    .map(|_| test_compression_with::<_, _>(NUM_STEPS, BigTestCircuit::new))
+    .collect()
+}
+
+fn test_compression_with<F, C>(
+  num_steps: usize,
+  circuits_factory: F,
+) -> (CompressedSNARK<E1, S1, S2>, VerifierKey<E1, S1, S2>)
 where
-  E1: CurveCycleEquipped,
-  S1: BatchedRelaxedR1CSSNARKTrait<E1>,
-  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
-  <E1::Scalar as PrimeField>::Repr: Abomonation,
-  <<Dual<E1> as Engine>::Scalar as PrimeField>::Repr: Abomonation,
   C: NonUniformCircuit<E1, C1 = C, C2 = TrivialSecondaryCircuit<<Dual<E1> as Engine>::Scalar>>
-    + StepCircuit<E1::Scalar>,
+    + StepCircuit<<E1 as Engine>::Scalar>,
   F: Fn(usize) -> Vec<C>,
 {
   let secondary_circuit = TrivialSecondaryCircuit::default();
   let test_circuits = circuits_factory(num_steps);
 
-  let pp = PublicParams::setup(&test_circuits[0], &*S1::ck_floor(), &*S2::ck_floor());
+  let pp = PublicParams::setup(
+    &test_circuits[0],
+    &*<S1 as BatchedRelaxedR1CSSNARKTrait<E1>>::ck_floor(),
+    &*<S2 as RelaxedR1CSSNARKTrait<E2>>::ck_floor(),
+  );
 
-  let z0_primary = vec![E1::Scalar::from(17u64)];
+  let z0_primary = vec![<E1 as Engine>::Scalar::from(17u64)];
   let z0_secondary = vec![<Dual<E1> as Engine>::Scalar::ZERO];
 
   let mut recursive_snark = RecursiveSNARK::new(
@@ -73,9 +100,81 @@ where
 
   let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
 
-  compressed_snark
-    .verify(&pp, &verifier_key, &z0_primary, &z0_secondary)
-    .unwrap();
+  (compressed_snark, verifier_key)
+}
+
+#[derive(Clone)]
+enum BigTestCircuit<E: Engine> {
+  Square(SquareCircuit<E>),
+  BigPower(BigPowerCircuit<E>),
+}
+
+impl<E: Engine> BigTestCircuit<E> {
+  fn new(num_steps: usize) -> Vec<Self> {
+    let mut circuits = Vec::new();
+
+    for idx in 0..num_steps {
+      if idx % 2 == 0 {
+        circuits.push(Self::Square(SquareCircuit { _p: PhantomData }))
+      } else {
+        circuits.push(Self::BigPower(BigPowerCircuit { _p: PhantomData }))
+      }
+    }
+
+    circuits
+  }
+}
+
+impl<E: Engine> StepCircuit<E::Scalar> for BigTestCircuit<E> {
+  fn arity(&self) -> usize {
+    1
+  }
+
+  fn circuit_index(&self) -> usize {
+    match self {
+      Self::Square(c) => c.circuit_index(),
+      Self::BigPower(c) => c.circuit_index(),
+    }
+  }
+
+  fn synthesize<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    cs: &mut CS,
+    pc: Option<&AllocatedNum<E::Scalar>>,
+    z: &[AllocatedNum<E::Scalar>],
+  ) -> Result<
+    (
+      Option<AllocatedNum<E::Scalar>>,
+      Vec<AllocatedNum<E::Scalar>>,
+    ),
+    SynthesisError,
+  > {
+    match self {
+      Self::Square(c) => c.synthesize(cs, pc, z),
+      Self::BigPower(c) => c.synthesize(cs, pc, z),
+    }
+  }
+}
+
+impl<E1: CurveCycleEquipped> NonUniformCircuit<E1> for BigTestCircuit<E1> {
+  type C1 = Self;
+  type C2 = TrivialSecondaryCircuit<<Dual<E1> as Engine>::Scalar>;
+
+  fn num_circuits(&self) -> usize {
+    2
+  }
+
+  fn primary_circuit(&self, circuit_index: usize) -> Self {
+    match circuit_index {
+      0 => Self::Square(SquareCircuit { _p: PhantomData }),
+      1 => Self::BigPower(BigPowerCircuit { _p: PhantomData }),
+      _ => panic!("Invalid circuit index"),
+    }
+  }
+
+  fn secondary_circuit(&self) -> Self::C2 {
+    Default::default()
+  }
 }
 
 #[derive(Clone)]
@@ -164,79 +263,5 @@ impl<E: Engine> StepCircuit<E::Scalar> for BigPowerCircuit<E> {
     );
 
     Ok((Some(next_pc), vec![y]))
-  }
-}
-
-#[derive(Clone)]
-enum BigTestCircuit<E: Engine> {
-  Square(SquareCircuit<E>),
-  BigPower(BigPowerCircuit<E>),
-}
-
-impl<E: Engine> BigTestCircuit<E> {
-  fn new(num_steps: usize) -> Vec<Self> {
-    let mut circuits = Vec::new();
-
-    for idx in 0..num_steps {
-      if idx % 2 == 0 {
-        circuits.push(Self::Square(SquareCircuit { _p: PhantomData }))
-      } else {
-        circuits.push(Self::BigPower(BigPowerCircuit { _p: PhantomData }))
-      }
-    }
-
-    circuits
-  }
-}
-
-impl<E: Engine> StepCircuit<E::Scalar> for BigTestCircuit<E> {
-  fn arity(&self) -> usize {
-    1
-  }
-
-  fn circuit_index(&self) -> usize {
-    match self {
-      Self::Square(c) => c.circuit_index(),
-      Self::BigPower(c) => c.circuit_index(),
-    }
-  }
-
-  fn synthesize<CS: ConstraintSystem<E::Scalar>>(
-    &self,
-    cs: &mut CS,
-    pc: Option<&AllocatedNum<E::Scalar>>,
-    z: &[AllocatedNum<E::Scalar>],
-  ) -> Result<
-    (
-      Option<AllocatedNum<E::Scalar>>,
-      Vec<AllocatedNum<E::Scalar>>,
-    ),
-    SynthesisError,
-  > {
-    match self {
-      Self::Square(c) => c.synthesize(cs, pc, z),
-      Self::BigPower(c) => c.synthesize(cs, pc, z),
-    }
-  }
-}
-
-impl<E1: CurveCycleEquipped> NonUniformCircuit<E1> for BigTestCircuit<E1> {
-  type C1 = Self;
-  type C2 = TrivialSecondaryCircuit<<Dual<E1> as Engine>::Scalar>;
-
-  fn num_circuits(&self) -> usize {
-    2
-  }
-
-  fn primary_circuit(&self, circuit_index: usize) -> Self {
-    match circuit_index {
-      0 => Self::Square(SquareCircuit { _p: PhantomData }),
-      1 => Self::BigPower(BigPowerCircuit { _p: PhantomData }),
-      _ => panic!("Invalid circuit index"),
-    }
-  }
-
-  fn secondary_circuit(&self) -> Self::C2 {
-    Default::default()
   }
 }
