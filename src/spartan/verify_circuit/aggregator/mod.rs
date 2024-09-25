@@ -294,6 +294,7 @@ where
       snark_ffa,
     })
   }
+
   fn verify(
     &self,
     vk: &AggregatedVerifierKey<E1, S1, S2>,
