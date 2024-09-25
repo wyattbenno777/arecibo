@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 
 use crate::{
@@ -54,6 +56,20 @@ where
   pp_ffa: PublicParams<Dual<E1>>,
 }
 
+impl<E1> AggregatorPublicParams<E1>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+{
+  pub fn iop(&self) -> &PublicParams<E1> {
+    &self.pp_iop
+  }
+
+  pub fn ffa(&self) -> &PublicParams<Dual<E1>> {
+    &self.pp_ffa
+  }
+}
+
 pub fn aggregator_public_params<E1, S1, S2>(
   circuit_iop: &IOPCircuit<E1>,
   circuit_ffa: &FFACircuit<E1>,
@@ -66,7 +82,7 @@ where
   S1: RelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
 {
-  let trivial_circuit_secondary = TrivialCircuit::default();
+  let trivial_circuit_secondary = TrivialCircuit::<E1::Base>::default();
   let trivial_circuit_primary = TrivialCircuit::<E1::Scalar>::default();
   Ok(AggregatorPublicParams {
     pp_iop: PublicParams::setup(
@@ -82,6 +98,68 @@ where
       &*S1::ck_floor(),
     )?,
   })
+}
+
+pub struct RecursiveAggregatedSNARK<E1>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+{
+  rs_iop: RecursiveSNARK<E1>,
+  rs_ffa: RecursiveSNARK<Dual<E1>>,
+}
+
+impl<E1> RecursiveAggregatedSNARK<E1>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  E1::GE: DlogGroup,
+  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+{
+  pub fn new(
+    pp: &AggregatorPublicParams<E1>,
+    iop_circuit: &IOPCircuit<E1>,
+    ffa_circuit: &FFACircuit<E1>,
+  ) -> Result<Self, NovaError> {
+    let rs_iop = RecursiveSNARK::new(
+      pp.iop(),
+      iop_circuit,
+      &TrivialCircuit::default(),
+      &[<E1 as Engine>::Scalar::ZERO],
+      &[<Dual<E1> as Engine>::Scalar::ZERO],
+    )?;
+
+    let rs_ffa = RecursiveSNARK::new(
+      pp.ffa(),
+      ffa_circuit,
+      &TrivialCircuit::default(),
+      &[<Dual<E1> as Engine>::Scalar::ZERO],
+      &[<E1 as Engine>::Scalar::ZERO],
+    )?;
+
+    Ok(Self { rs_iop, rs_ffa })
+  }
+}
+
+pub struct AggregatedSNARK<E1, S1, S2> {
+  _p: PhantomData<(E1, S1, S2)>,
+}
+
+impl<E1, S1, S2> AggregatedSNARK<E1, S1, S2>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  E1::GE: DlogGroup,
+  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+{
+  fn prove(
+    pp: &AggregatorPublicParams<E1>,
+    init: Option<RecursiveAggregatedSNARK<E1>>,
+    steps: Vec<(IOPCircuit<E1>, FFACircuit<E1>)>,
+  ) {
+  }
 }
 
 pub fn ivc_aggregate_with<E1, S1, S2>(
