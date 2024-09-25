@@ -17,7 +17,8 @@ use crate::{
     snark::RelaxedR1CSSNARKTrait,
     CurveCycleEquipped, Dual, Engine,
   },
-  CommitmentKey, CompressedSNARK, PublicParams, RecursiveSNARK, StepCounterType,
+  CommitmentKey, CompressedSNARK, ProverKey, PublicParams, RecursiveSNARK, StepCounterType,
+  VerifierKey,
 };
 use ff::Field;
 
@@ -158,15 +159,204 @@ where
       &[<Dual<E1> as Engine>::Scalar::ZERO],
     );
 
-    self.rs_iop.verify(
-      pp.iop(),
+    self.rs_ffa.verify(
+      pp.ffa(),
       num_steps,
-      &[<E1 as Engine>::Scalar::ZERO],
       &[<Dual<E1> as Engine>::Scalar::ZERO],
+      &[<E1 as Engine>::Scalar::ZERO],
     );
 
     Ok(())
   }
+
+  pub fn iop(&self) -> &RecursiveSNARK<E1> {
+    &self.rs_iop
+  }
+
+  pub fn ffa(&self) -> &RecursiveSNARK<Dual<E1>> {
+    &self.rs_ffa
+  }
+}
+
+pub struct AggregatedProverKey<E1, S1, S2>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+{
+  pk_iop: ProverKey<E1, S1, S2>,
+  pk_ffa: ProverKey<Dual<E1>, S2, S1>,
+}
+
+impl<E1, S1, S2> AggregatedProverKey<E1, S1, S2>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+{
+  fn new(pk_iop: ProverKey<E1, S1, S2>, pk_ffa: ProverKey<Dual<E1>, S2, S1>) -> Self {
+    Self { pk_iop, pk_ffa }
+  }
+
+  fn iop(&self) -> &ProverKey<E1, S1, S2> {
+    &self.pk_iop
+  }
+
+  fn ffa(&self) -> &ProverKey<Dual<E1>, S2, S1> {
+    &self.pk_ffa
+  }
+}
+
+pub struct AggregatedVerifierKey<E1, S1, S2>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+{
+  vk_iop: VerifierKey<E1, S1, S2>,
+  vk_ffa: VerifierKey<Dual<E1>, S2, S1>,
+}
+
+impl<E1, S1, S2> AggregatedVerifierKey<E1, S1, S2>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+{
+  fn new(vk_iop: VerifierKey<E1, S1, S2>, vk_ffa: VerifierKey<Dual<E1>, S2, S1>) -> Self {
+    Self { vk_iop, vk_ffa }
+  }
+
+  fn iop(&self) -> &VerifierKey<E1, S1, S2> {
+    &self.vk_iop
+  }
+
+  fn ffa(&self) -> &VerifierKey<Dual<E1>, S2, S1> {
+    &self.vk_ffa
+  }
+}
+
+pub struct CompressedAggregatedSNARK<E1, S1, S2>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+  E1::GE: DlogGroup,
+  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+{
+  snark_iop: CompressedSNARK<E1, S1, S2>,
+  snark_ffa: CompressedSNARK<Dual<E1>, S2, S1>,
+}
+
+impl<E1, S1, S2> CompressedAggregatedSNARK<E1, S1, S2>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+  E1::GE: DlogGroup,
+  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+{
+  fn setup(
+    pp: &AggregatorPublicParams<E1>,
+  ) -> Result<
+    (
+      AggregatedProverKey<E1, S1, S2>,
+      AggregatedVerifierKey<E1, S1, S2>,
+    ),
+    NovaError,
+  > {
+    let (pk_iop, vk_iop) = CompressedSNARK::<_, S1, S2>::setup(pp.iop())?;
+    let (pk_ffa, vk_ffa) = CompressedSNARK::<_, S2, S1>::setup(pp.ffa())?;
+
+    let pk = AggregatedProverKey::new(pk_iop, pk_ffa);
+    let vk = AggregatedVerifierKey::new(vk_iop, vk_ffa);
+
+    Ok((pk, vk))
+  }
+
+  fn prove(
+    pp: &AggregatorPublicParams<E1>,
+    pk: &AggregatedProverKey<E1, S1, S2>,
+    vk: &AggregatedVerifierKey<E1, S1, S2>,
+    rs: &RecursiveAggregatedSNARK<E1>,
+  ) -> Result<Self, NovaError> {
+    let snark_iop = CompressedSNARK::<_, S1, S2>::prove(pp.iop(), pk.iop(), rs.iop())?;
+    let snark_ffa = CompressedSNARK::<_, S2, S1>::prove(pp.ffa(), pk.ffa(), rs.ffa())?;
+
+    Ok(Self {
+      snark_iop,
+      snark_ffa,
+    })
+  }
+  fn verify(
+    &self,
+    vk: &AggregatedVerifierKey<E1, S1, S2>,
+    num_steps: usize,
+  ) -> Result<(), NovaError> {
+    self.snark_iop.verify(
+      vk.iop(),
+      num_steps,
+      &[<E1 as Engine>::Scalar::ZERO],
+      &[<Dual<E1> as Engine>::Scalar::ZERO],
+    )?;
+    self.snark_ffa.verify(
+      vk.ffa(),
+      num_steps,
+      &[<Dual<E1> as Engine>::Scalar::ZERO],
+      &[<E1 as Engine>::Scalar::ZERO],
+    )?;
+
+    Ok(())
+  }
+}
+
+pub fn ivc_aggregate_with2<E1, S1, S2>(
+  snarks_data: &[AggregatorSNARKData<'_, E1>],
+) -> Result<CompressedAggregatedSNARK<E1, S1, S2>, NovaError>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  E1::GE: DlogGroup,
+  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+{
+  let circuits = build_circuits(snarks_data)?;
+  let num_steps = circuits.len();
+  let (init_circuit_iop, init_circuit_ffa) = &circuits[0];
+
+  let pp = AggregatorPublicParams::setup(
+    init_circuit_iop,
+    init_circuit_ffa,
+    &*S1::ck_floor(),
+    &*S2::ck_floor(),
+  )?;
+
+  let mut rs_option: Option<RecursiveAggregatedSNARK<E1>> = None;
+
+  for (iop_circuit, ffa_circuit) in circuits.iter() {
+    let mut rs = rs_option
+      .unwrap_or_else(|| RecursiveAggregatedSNARK::new(&pp, iop_circuit, ffa_circuit).unwrap());
+
+    rs.prove_step(&pp, iop_circuit, ffa_circuit)?;
+    rs_option = Some(rs)
+  }
+
+  debug_assert!(rs_option.is_some());
+  let rs_iop = rs_option.ok_or(NovaError::UnSat)?;
+  rs_iop.verify(&pp, num_steps)?;
+
+  let (pk, vk) = CompressedAggregatedSNARK::<E1, S1, S2>::setup(&pp)?;
+  let snark = CompressedAggregatedSNARK::<E1, S1, S2>::prove(&pp, &pk, &vk, &rs_iop)?;
+
+  snark.verify(&vk, num_steps)?;
+  Ok((snark))
 }
 
 pub struct AggregatedSNARK<E1, S1, S2> {
@@ -298,77 +488,6 @@ where
   )?;
 
   Ok(snark_iop)
-}
-
-pub fn ivc_aggregate_with2<E1, S1, S2>(
-  snarks_data: &[AggregatorSNARKData<'_, E1>],
-) -> Result<(), NovaError>
-// -> Result<CompressedSNARK<E1, S1, S2>, NovaError>
-where
-  E1: CurveCycleEquipped,
-  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
-  E1::GE: DlogGroup,
-  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
-  S1: RelaxedR1CSSNARKTrait<E1>,
-  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
-{
-  let circuits = build_circuits(snarks_data)?;
-  let num_steps = circuits.len();
-  let (init_circuit_iop, init_circuit_ffa) = &circuits[0];
-
-  let pp = AggregatorPublicParams::setup(
-    init_circuit_iop,
-    init_circuit_ffa,
-    &*S1::ck_floor(),
-    &*S2::ck_floor(),
-  )?;
-
-  let mut rs_option: Option<RecursiveAggregatedSNARK<E1>> = None;
-
-  for (iop_circuit, ffa_circuit) in circuits.iter() {
-    let mut rs = rs_option
-      .unwrap_or_else(|| RecursiveAggregatedSNARK::new(&pp, iop_circuit, ffa_circuit).unwrap());
-
-    rs.prove_step(&pp, iop_circuit, ffa_circuit)?;
-    rs_option = Some(rs)
-  }
-
-  debug_assert!(rs_option.is_some());
-  let rs_iop = rs_option.ok_or(NovaError::UnSat)?;
-  rs_iop.verify(&pp, num_steps)?;
-
-  // let (pk_iop, vk_iop) = CompressedSNARK::<_, S1, S2>::setup(&pp_iop)?;
-  // let snark_iop = CompressedSNARK::<_, S1, S2>::prove(&pp_iop, &pk_iop, &rs_iop)?;
-
-  // assert!(rs_option_ffa.is_some());
-  // let rs_ffa = rs_option_ffa.ok_or(NovaError::UnSat)?;
-
-  // rs_ffa.verify(
-  //   &pp_ffa,
-  //   num_steps,
-  //   &[<Dual<E1> as Engine>::Scalar::ZERO],
-  //   &[<E1 as Engine>::Scalar::ZERO],
-  // )?;
-
-  // let (pk_ffa, vk_ffa) = CompressedSNARK::<_, S2, S1>::setup(&pp_ffa)?;
-  // let snark_ffa = CompressedSNARK::<_, S2, S1>::prove(&pp_ffa, &pk_ffa, &rs_ffa)?;
-
-  // snark_iop.verify(
-  //   &vk_iop,
-  //   num_steps,
-  //   &[<E1 as Engine>::Scalar::ZERO],
-  //   &[<Dual<E1> as Engine>::Scalar::ZERO],
-  // )?;
-
-  // snark_ffa.verify(
-  //   &vk_ffa,
-  //   num_steps,
-  //   &[<Dual<E1> as Engine>::Scalar::ZERO],
-  //   &[<E1 as Engine>::Scalar::ZERO],
-  // )?;
-
-  // Ok(snark_iop)
-  Ok(())
 }
 
 #[derive(Clone)]
