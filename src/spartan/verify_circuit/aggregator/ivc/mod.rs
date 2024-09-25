@@ -139,6 +139,21 @@ where
 
     Ok(Self { rs_iop, rs_ffa })
   }
+
+  pub fn prove_step(
+    &mut self,
+    pp: &AggregatorPublicParams<E1>,
+    iop_circuit: &IOPCircuit<E1>,
+    ffa_circuit: &FFACircuit<E1>,
+  ) {
+    self
+      .rs_iop
+      .prove_step(pp.iop(), iop_circuit, &TrivialCircuit::default());
+
+    self
+      .rs_ffa
+      .prove_step(pp.ffa(), ffa_circuit, &TrivialCircuit::default());
+  }
 }
 
 pub struct AggregatedSNARK<E1, S1, S2> {
@@ -210,7 +225,7 @@ where
       .unwrap()
     });
 
-    rs_iop.prove_step(&pp_iop, iop_circuit, &trivial_circuit_secondary)?;
+    rs_iop.prove_step(&pp_iop, iop_circuit, &TrivialCircuit::default())?;
 
     rs_option_iop = Some(rs_iop);
 
@@ -225,7 +240,7 @@ where
       .unwrap()
     });
 
-    rs_ffa.prove_step(&pp_ffa, ffa_circuit, &trivial_circuit_primary)?;
+    rs_ffa.prove_step(&pp_ffa, ffa_circuit, &TrivialCircuit::default())?;
 
     rs_option_ffa = Some(rs_ffa);
   }
