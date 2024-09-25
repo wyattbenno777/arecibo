@@ -345,53 +345,6 @@ where
   }
 }
 
-pub fn ivc_aggregate_with<E1, S1, S2>(
-  snarks_data: &[AggregatorSNARKData<'_, E1>],
-) -> Result<CompressedAggregatedSNARK<E1, S1, S2>, NovaError>
-where
-  E1: CurveCycleEquipped,
-  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
-  E1::GE: DlogGroup,
-  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
-  S1: RelaxedR1CSSNARKTrait<E1>,
-  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
-  S1::ProverKey: Clone + Debug,
-  S2::ProverKey: Clone + Debug,
-  S2::VerifierKey: Serialize + Debug + Clone,
-  S1::VerifierKey: Serialize + Debug + Clone,
-{
-  let circuits = build_circuits(snarks_data)?;
-  let num_steps = circuits.len();
-  let (init_circuit_iop, init_circuit_ffa) = &circuits[0];
-
-  let pp = AggregatorPublicParams::setup(
-    init_circuit_iop,
-    init_circuit_ffa,
-    &*S1::ck_floor(),
-    &*S2::ck_floor(),
-  )?;
-
-  let mut rs_option: Option<RecursiveAggregatedSNARK<E1>> = None;
-
-  for (iop_circuit, ffa_circuit) in circuits.iter() {
-    let mut rs = rs_option
-      .unwrap_or_else(|| RecursiveAggregatedSNARK::new(&pp, iop_circuit, ffa_circuit).unwrap());
-
-    rs.prove_step(&pp, iop_circuit, ffa_circuit)?;
-    rs_option = Some(rs)
-  }
-
-  debug_assert!(rs_option.is_some());
-  let rs_iop = rs_option.ok_or(NovaError::UnSat)?;
-  rs_iop.verify(&pp, num_steps)?;
-
-  let (pk, vk) = CompressedAggregatedSNARK::<E1, S1, S2>::setup(&pp)?;
-  let snark = CompressedAggregatedSNARK::<E1, S1, S2>::prove(&pp, &pk, &vk, &rs_iop)?;
-
-  snark.verify(&vk, num_steps)?;
-  Ok((snark))
-}
-
 #[derive(Clone)]
 struct IOPCircuit<'a, E: Engine> {
   snark_data: &'a AggregatorSNARKData<'a, E>,
@@ -472,24 +425,6 @@ where
     .map_err(|_| SynthesisError::AssignmentMissing);
     Ok(z.to_vec())
   }
-}
-
-fn build_circuits<'a, E1>(
-  snarks_data: &'a [AggregatorSNARKData<'a, E1>],
-) -> Result<Vec<(IOPCircuit<'a, E1>, FFACircuit<'a, E1>)>, NovaError>
-where
-  E1: CurveCycleEquipped,
-  <E1 as Engine>::GE: DlogGroup,
-  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
-{
-  snarks_data
-    .iter()
-    .map(|snark_data| {
-      let iop_circuit = IOPCircuit::new(snark_data)?;
-      let ffa_circuit = FFACircuit::new(snark_data)?;
-      Ok((iop_circuit, ffa_circuit))
-    })
-    .collect::<Result<_, NovaError>>()
 }
 
 /// Data structure that holds the required data needed for proof aggregation
