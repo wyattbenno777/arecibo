@@ -57,7 +57,6 @@ impl<E: Engine> ZKSumcheckProof<E> where E::CE: ZKCommitmentEngineTrait<E>, E::G
 
     // n = maxᵢ{nᵢ}
     let num_rounds_max = *num_rounds.iter().max().unwrap();
-
     // Random linear combination of claims,
     // where each claim is scaled by 2^{n-nᵢ} to account for the padding.
     //

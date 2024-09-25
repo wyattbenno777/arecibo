@@ -201,7 +201,7 @@ pub struct ResultsBatchedTinySNARK<E: Engine> where <E as traits::Engine>::GE: D
   sc: SumcheckProof<E>,
 
   // claims from the end of sum-check
-  evals_Az_Bz_Cz_E: Vec<[E::Scalar; 4]>,
+  evals_Az_Bz_Cz: Vec<[E::Scalar; 3]>,
   evals_L_row_col: Vec<[E::Scalar; 2]>,
   // [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col]
   evals_mem_oracle: Vec<[E::Scalar; 4]>,
@@ -621,8 +621,6 @@ where
     )?;*/
 
     //serialize_data_for_remote(&data_for_remote);
-
-    println!("done tiny prover");
     
     Ok(Self {
       data: data_for_remote
@@ -645,15 +643,15 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
 {
 
   #[allow(unused)]
-  fn verify_full(
+  pub fn verify_full(
     &self,
     vk: &<Self as BatchedRelaxedR1CSSNARKTrait<E>>::VerifierKey,
-    results: ResultsBatchedTinySNARK<E>,
+    //results: ResultsBatchedTinySNARK<E>,
     U: &[RelaxedR1CSInstance<E>]) -> Result<(), NovaError> {
 
     // First lets do all of the steps to verify the TinyProver portion.
     let num_instances = U.len();
-    let num_claims_per_instance = 10;
+    let num_claims_per_instance = 1;
 
     let mut transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
 
@@ -698,12 +696,18 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
           })
           .collect(),
     };
-
+    
     let claims_compressed: Vec<CompressedCommitment<E>> = self.data.claims_witness
       .iter()
       .flatten()
-      .map(|c| E::CE::commit(&vk.sumcheck_gens.ck_1, c).compress())
+      .map(|c| E::CE::commit(&vk.sumcheck_gens.ck_4, c).compress())
       .collect();
+
+    println!("Number of instances: {}", num_instances);
+    println!("Number of claims per instance: {}", num_claims_per_instance);
+    println!("Length of claims_compressed: {}", claims_compressed.len());
+    println!("Length of s_powers: {}", s_powers.len());
+    println!("Number of rounds: {:?}", self.data.Nis.iter().map(|&n| n.log_2()).collect::<Vec<_>>());
 
     // Verify the ZKSumcheckProof
     let (comm_final, rand_sc) = zk_sumcheck_proof.verify_batch(
@@ -715,7 +719,6 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
         &vk.sumcheck_gens.ck_4,
         &mut transcript,
     )?;
-
 
     Ok(())
   }
@@ -921,7 +924,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
       &mut transcript,
     )?;
 
-    let (evals_Az_Bz_Cz_E, evals_L_row_col, evals_mem_oracle, evals_mem_preprocessed) = {
+    let (evals_Az_Bz_Cz, evals_L_row_col, evals_mem_oracle, evals_mem_preprocessed) = {
       let evals_Az_Bz = claims_outer
         .into_iter()
         .map(|claims| [claims[0][0], claims[0][1]])
@@ -947,40 +950,38 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
         })
         .unzip();
 
-      let (evals_Cz_E, evals_mem_val_row_col): (Vec<_>, Vec<_>) = zip_with!(
-        iter,
-        (data.polys_Az_Bz_Cz, data.polys_E, data.S_repr),
-        |ABCzs, poly_E, s_repr| {
-          let [_, _, Cz] = ABCzs;
-          let log_Ni = s_repr.N.log_2();
-          let (_, rand_sc) = rand_sc.split_at(data.num_rounds_sc - log_Ni);
-          let rand_sc_evals = EqPolynomial::evals_from_points(rand_sc);
-          let e = [
-            Cz,
-            poly_E,
-            &s_repr.val_A,
-            &s_repr.val_B,
-            &s_repr.val_C,
-            &s_repr.row,
-            &s_repr.col,
-          ]
-          .into_iter()
-          .map(|p| {
-            // Manually compute evaluation to avoid recomputing rand_sc_evals
-            zip_with!(par_iter, (p, rand_sc_evals), |p, eq| *p * eq).sum()
-          })
-          .collect::<Vec<E::Scalar>>();
-          ([e[0], e[1]], [e[2], e[3], e[4], e[5], e[6]])
-        }
+      let (evals_Cz, evals_mem_val_row_col): (Vec<_>, Vec<_>) = zip_with!(
+          iter,
+          (data.polys_Az_Bz_Cz, data.S_repr),
+          |ABCzs, s_repr| {
+            let [_, _, Cz] = ABCzs;
+            let log_Ni = s_repr.N.log_2();
+            let (_, rand_sc) = rand_sc.split_at(data.num_rounds_sc - log_Ni);
+            let rand_sc_evals = EqPolynomial::evals_from_points(rand_sc);
+            let e = [
+              Cz,
+              &s_repr.val_A,
+              &s_repr.val_B,
+              &s_repr.val_C,
+              &s_repr.row,
+              &s_repr.col,
+            ]
+            .into_iter()
+            .map(|p| {
+              // Manually compute evaluation to avoid recomputing rand_sc_evals
+              zip_with!(par_iter, (p, rand_sc_evals), |p, eq| *p * eq).sum()
+            })
+            .collect::<Vec<E::Scalar>>();
+            (e[0], [e[1], e[2], e[3], e[4], e[5]])
+          }
       )
       .unzip();
 
-      let evals_Az_Bz_Cz_E = zip_with!(
-        (evals_Az_Bz.into_iter(), evals_Cz_E.into_iter()),
-        |Az_Bz, Cz_E| {
+      let evals_Az_Bz_Cz = zip_with!(
+        (evals_Az_Bz.into_iter(), evals_Cz.into_iter()),
+        |Az_Bz, Cz| {
           let [Az, Bz] = Az_Bz;
-          let [Cz, E] = Cz_E;
-          [Az, Bz, Cz, E]
+          [Az, Bz, Cz]
         }
       )
       .collect::<Vec<_>>();
@@ -996,7 +997,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
       )
       .collect::<Vec<_>>();
       (
-        evals_Az_Bz_Cz_E,
+        evals_Az_Bz_Cz,
         evals_L_row_col,
         evals_mem_oracle,
         evals_mem_preprocessed,
@@ -1006,7 +1007,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
     let evals_vec = zip_with!(
       iter,
       (
-        evals_Az_Bz_Cz_E,
+        evals_Az_Bz_Cz,
         evals_L_row_col,
         evals_mem_oracle,
         evals_mem_preprocessed
@@ -1018,6 +1019,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
       }
     )
     .collect::<Vec<_>>();
+    
 
     let comms_vec = zip_with!(
       iter,
@@ -1052,20 +1054,13 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
     let w_vec = zip_with!(
       (
           data.polys_Az_Bz_Cz.iter(),
-          data.polys_E.iter(),
           data.polys_L_row_col.iter(),
           polys_mem_oracles.iter(),
           data.S_repr.iter()
       ),
-      |Az_Bz_Cz, E, L_row_col, mem_oracles, S_repr| {
-        println!("w_vec Az_Bz_Cz length: {}", Az_Bz_Cz.len());
-        println!("w_vec E length: 1");
-        println!("w_vec L_row_col length: {}", L_row_col.len());
-        println!("w_vec mem_oracles length: {}", mem_oracles.len());
-        println!("w_vec S_repr components: 7");
+      |Az_Bz_Cz, L_row_col, mem_oracles, S_repr| {
           chain![
               Az_Bz_Cz.iter().cloned(),
-              std::iter::once((*E).clone()),
               L_row_col.iter().cloned(),
               mem_oracles.iter().cloned(),
               [
@@ -1083,6 +1078,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
     .flatten()
     .map(|p| PolyEvalWitness::<E> { p })
     .collect::<Vec<_>>();
+    
 
     for evals in evals_vec.iter() {
       transcript.absorb(b"e", &evals.as_slice()); // comm_vec is already in the transcript
@@ -1092,32 +1088,6 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
     let untrusted_c = transcript.squeeze(b"untrusted_c")?;
 
     let num_vars_u = w_vec.iter().map(|w| w.p.len().log_2()).collect::<Vec<_>>();
-    println!("num_vars_u contents: {:?}", num_vars_u);
-
-    /*// After constructing comms_vec
-    println!("comms_vec breakdown:");
-    println!("  data.comms_Az_Bz_Cz: {}", data.comms_Az_Bz_Cz.len());
-    println!("  comms_L_row_col: {}", comms_L_row_col.len());
-    println!("  comms_mem_oracles: {}", comms_mem_oracles.len());
-    println!("  data.S_comm: {}", data.S_comm.len());
-    println!("Total comms_vec length: {}", comms_vec.len());
-
-    // After constructing evals_vec
-    println!("evals_vec breakdown:");
-    println!("  evals_Az_Bz_Cz_E: {}", evals_Az_Bz_Cz_E.len());
-    println!("  evals_L_row_col: {}", evals_L_row_col.len());
-    println!("  evals_mem_oracle: {}", evals_mem_oracle.len());
-    println!("  evals_mem_preprocessed: {}", evals_mem_preprocessed.len());
-    println!("Total evals_vec length: {}", evals_vec.len());
-
-    // After constructing w_vec
-    println!("w_vec length: {}", w_vec.len());*/
-
-    // Just before calling batch_diff_size
-    println!("Final lengths:");
-    println!("  comms_vec: {}", comms_vec.len());
-    println!("  evals_vec: {}", evals_vec.len());
-    println!("  num_vars_u: {}", num_vars_u.len());
 
     let u_batch =
       PolyEvalInstance::<E>::batch_diff_size(&comms_vec, &evals_vec, &num_vars_u, rand_sc, untrusted_c);
@@ -1166,7 +1136,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
       comms_mem_oracles,
       evals_Az_Bz_Cz_at_tau,
       sc,
-      evals_Az_Bz_Cz_E,
+      evals_Az_Bz_Cz,
       evals_L_row_col,
       evals_mem_oracle,
       evals_mem_preprocessed,
@@ -1357,7 +1327,6 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
   {
     // sanity checks
     let num_instances = mem.len();
-    println!("failed here 1");
     assert_eq!(outer.len(), num_instances);
     assert_eq!(inner.len(), num_instances);
 
