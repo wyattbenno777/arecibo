@@ -1,240 +1,362 @@
-//! Contains the data structures needed to aggregate Spartan proofs
-use std::sync::Arc;
+use std::marker::PhantomData;
 
-use bellpepper_core::{num::AllocatedNum, SynthesisError};
-use serde::{Deserialize, Serialize};
+use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 
-use super::{gadgets::nonnative::ipa::EvaluationEngineGadget, ipa_prover_poseidon::batched};
-use crate::bellpepper::r1cs::{NovaShape, NovaWitness};
-use crate::bellpepper::solver::SatisfyingAssignment;
-use crate::r1cs::{CommitmentKeyHint, R1CSShape, RelaxedR1CSWitness};
 use crate::{
-  bellpepper::shape_cs::ShapeCS,
   errors::NovaError,
   provider::{pedersen::CommitmentKeyExtTrait, traits::DlogGroup},
-  r1cs::RelaxedR1CSInstance,
-  spartan::{verify_circuit::circuit::batched::SpartanVerifyCircuit, PolyEvalInstance},
-  traits::{snark::RelaxedR1CSSNARKTrait, CurveCycleEquipped, Dual, Engine},
-  CommitmentKey,
+  r1cs::{CommitmentKeyHint, RelaxedR1CSInstance},
+  spartan::{
+    verify_circuit::{
+      circuit::batched::SpartanVerifyCircuit, gadgets::nonnative::ipa::EvaluationEngineGadget,
+    },
+    PolyEvalInstance,
+  },
+  traits::{
+    circuit::{StepCircuit, TrivialCircuit},
+    snark::RelaxedR1CSSNARKTrait,
+    CurveCycleEquipped, Dual, Engine,
+  },
+  CommitmentKey, CompressedSNARK, ProverKey, PublicParams, RecursiveSNARK, StepCounterType,
+  VerifierKey,
 };
-use bellpepper_core::ConstraintSystem;
-mod ivc;
+use ff::Field;
 
-// #[cfg(test)]
-// mod tests;
+use super::ipa_prover_poseidon::batched;
 
-/// Necessary public values needed for both proving and verifying
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(bound = "")]
-pub struct PublicParams<E1>
-where
-  E1: CurveCycleEquipped,
-  E1::GE: DlogGroup,
-  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
-{
-  r1cs_shape_primary: R1CSShape<E1>,
-  ck_primary: Arc<CommitmentKey<E1>>,
-  r1cs_shape_secondary: R1CSShape<Dual<E1>>,
-  ck_secondary: Arc<CommitmentKey<Dual<E1>>>,
-}
+#[cfg(test)]
+mod tests;
 
-impl<E1> PublicParams<E1>
-where
-  E1: CurveCycleEquipped,
-  E1::GE: DlogGroup,
-  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
-{
-  ///  Set up builder to create `PublicParams` for a pair of circuits (one for primary curve and one for secondary curve)
-  pub fn setup(
-    snarks_data: &[AggregatorSNARKData<'_, E1>],
-    ck_hint1: &CommitmentKeyHint<E1>,
-    ck_hint2: &CommitmentKeyHint<Dual<E1>>,
-  ) -> Result<Self, NovaError> {
-    // Build IOP circuit and FFA circuits
-    let circuits = build_circuits(snarks_data)?;
+pub struct Aggregator;
 
-    // Constraint System for each scalar operations and base filed operations
-    let mut cs_primary: ShapeCS<E1> = ShapeCS::new();
-    let mut cs_secondary: ShapeCS<Dual<E1>> = ShapeCS::new();
-
-    // Run through all circuits to build one big R1CS
-    for (i, (iop_circuit, ffa_circuit)) in circuits.iter().enumerate() {
-      let _ = iop_circuit.synthesize(cs_primary.namespace(|| format!("IOP {i}")));
-      let _ = ffa_circuit.synthesize(cs_secondary.namespace(|| format!("FFA {i}")));
-    }
-
-    // Get primary R1CS shape and commitment key
-    let (r1cs_shape_primary, ck_primary) = cs_primary.r1cs_shape_and_key(ck_hint1);
-    let ck_primary = Arc::new(ck_primary);
-
-    // Get secondary R1CS shape and commitment key
-    let (r1cs_shape_secondary, ck_secondary) = cs_secondary.r1cs_shape_and_key(ck_hint2);
-    let ck_secondary = Arc::new(ck_secondary);
-
-    Ok(PublicParams {
-      r1cs_shape_primary,
-      ck_primary,
-      r1cs_shape_secondary,
-      ck_secondary,
-    })
+impl Aggregator {
+  fn build_circuits<'a, E1>(
+    snarks_data: &'a [AggregatorSNARKData<'a, E1>],
+  ) -> Result<Vec<(IOPCircuit<'a, E1>, FFACircuit<'a, E1>)>, NovaError>
+  where
+    E1: CurveCycleEquipped,
+    <E1 as Engine>::GE: DlogGroup,
+    CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+  {
+    snarks_data
+      .iter()
+      .map(|snark_data| {
+        let iop_circuit = IOPCircuit::new(snark_data)?;
+        let ffa_circuit = FFACircuit::new(snark_data)?;
+        Ok((iop_circuit, ffa_circuit))
+      })
+      .collect::<Result<_, NovaError>>()
   }
 }
 
-/// Resulting SNARK after aggregating child SNARKS
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(bound = "")]
-pub struct AggregatedSNARK<E1, S1, S2>
+pub struct AggregatorPublicParams<E1>
 where
   E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+{
+  pp_iop: PublicParams<E1>,
+  pp_ffa: PublicParams<Dual<E1>>,
+}
+
+impl<E1> AggregatorPublicParams<E1>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+{
+  pub fn setup(
+    circuit_iop: &IOPCircuit<E1>,
+    circuit_ffa: &FFACircuit<E1>,
+    ck_hint1: &CommitmentKeyHint<E1>,
+    ck_hint2: &CommitmentKeyHint<Dual<E1>>,
+  ) -> Result<AggregatorPublicParams<E1>, NovaError>
+  where
+    E1::GE: DlogGroup,
+    CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+  {
+    let trivial_circuit_secondary = TrivialCircuit::<E1::Base>::default();
+    let trivial_circuit_primary = TrivialCircuit::<E1::Scalar>::default();
+    Ok(AggregatorPublicParams {
+      pp_iop: PublicParams::setup(circuit_iop, &trivial_circuit_secondary, ck_hint1, ck_hint2)?,
+      pp_ffa: PublicParams::<Dual<E1>>::setup(
+        circuit_ffa,
+        &trivial_circuit_primary,
+        ck_hint2,
+        ck_hint1,
+      )?,
+    })
+  }
+  pub fn iop(&self) -> &PublicParams<E1> {
+    &self.pp_iop
+  }
+
+  pub fn ffa(&self) -> &PublicParams<Dual<E1>> {
+    &self.pp_ffa
+  }
+}
+
+pub struct RecursiveAggregatedSNARK<E1>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+{
+  rs_iop: RecursiveSNARK<E1>,
+  rs_ffa: RecursiveSNARK<Dual<E1>>,
+}
+
+impl<E1> RecursiveAggregatedSNARK<E1>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  E1::GE: DlogGroup,
+  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+{
+  pub fn new(
+    pp: &AggregatorPublicParams<E1>,
+    iop_circuit: &IOPCircuit<E1>,
+    ffa_circuit: &FFACircuit<E1>,
+  ) -> Result<Self, NovaError> {
+    let rs_iop = RecursiveSNARK::new(
+      pp.iop(),
+      iop_circuit,
+      &TrivialCircuit::default(),
+      &[<E1 as Engine>::Scalar::ZERO],
+      &[<Dual<E1> as Engine>::Scalar::ZERO],
+    )?;
+
+    let rs_ffa = RecursiveSNARK::new(
+      pp.ffa(),
+      ffa_circuit,
+      &TrivialCircuit::default(),
+      &[<Dual<E1> as Engine>::Scalar::ZERO],
+      &[<E1 as Engine>::Scalar::ZERO],
+    )?;
+
+    Ok(Self { rs_iop, rs_ffa })
+  }
+
+  pub fn prove_step(
+    &mut self,
+    pp: &AggregatorPublicParams<E1>,
+    iop_circuit: &IOPCircuit<E1>,
+    ffa_circuit: &FFACircuit<E1>,
+  ) -> Result<(), NovaError> {
+    self
+      .rs_iop
+      .prove_step(pp.iop(), iop_circuit, &TrivialCircuit::default())?;
+
+    self
+      .rs_ffa
+      .prove_step(pp.ffa(), ffa_circuit, &TrivialCircuit::default())?;
+
+    Ok(())
+  }
+
+  pub fn verify(&self, pp: &AggregatorPublicParams<E1>, num_steps: usize) -> Result<(), NovaError> {
+    self.rs_iop.verify(
+      pp.iop(),
+      num_steps,
+      &[<E1 as Engine>::Scalar::ZERO],
+      &[<Dual<E1> as Engine>::Scalar::ZERO],
+    );
+
+    self.rs_ffa.verify(
+      pp.ffa(),
+      num_steps,
+      &[<Dual<E1> as Engine>::Scalar::ZERO],
+      &[<E1 as Engine>::Scalar::ZERO],
+    );
+
+    Ok(())
+  }
+
+  pub fn iop(&self) -> &RecursiveSNARK<E1> {
+    &self.rs_iop
+  }
+
+  pub fn ffa(&self) -> &RecursiveSNARK<Dual<E1>> {
+    &self.rs_ffa
+  }
+}
+
+pub struct AggregatedProverKey<E1, S1, S2>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
   S1: RelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
 {
-  snark_primary: S1,
-  U_primary: RelaxedR1CSInstance<E1>,
-  snark_secondary: S2,
-  U_secondary: RelaxedR1CSInstance<Dual<E1>>,
+  pk_iop: ProverKey<E1, S1, S2>,
+  pk_ffa: ProverKey<Dual<E1>, S2, S1>,
 }
 
-impl<E1, S1, S2> AggregatedSNARK<E1, S1, S2>
+impl<E1, S1, S2> AggregatedProverKey<E1, S1, S2>
 where
   E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+{
+  fn new(pk_iop: ProverKey<E1, S1, S2>, pk_ffa: ProverKey<Dual<E1>, S2, S1>) -> Self {
+    Self { pk_iop, pk_ffa }
+  }
+
+  fn iop(&self) -> &ProverKey<E1, S1, S2> {
+    &self.pk_iop
+  }
+
+  fn ffa(&self) -> &ProverKey<Dual<E1>, S2, S1> {
+    &self.pk_ffa
+  }
+}
+
+pub struct AggregatedVerifierKey<E1, S1, S2>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+{
+  vk_iop: VerifierKey<E1, S1, S2>,
+  vk_ffa: VerifierKey<Dual<E1>, S2, S1>,
+}
+
+impl<E1, S1, S2> AggregatedVerifierKey<E1, S1, S2>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+{
+  fn new(vk_iop: VerifierKey<E1, S1, S2>, vk_ffa: VerifierKey<Dual<E1>, S2, S1>) -> Self {
+    Self { vk_iop, vk_ffa }
+  }
+
+  fn iop(&self) -> &VerifierKey<E1, S1, S2> {
+    &self.vk_iop
+  }
+
+  fn ffa(&self) -> &VerifierKey<Dual<E1>, S2, S1> {
+    &self.vk_ffa
+  }
+}
+
+pub struct CompressedAggregatedSNARK<E1, S1, S2>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
   S1: RelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
   E1::GE: DlogGroup,
   CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
 {
-  /// Creates prover and verifier keys for `AggregatedSNARK`
-  pub fn setup(
-    pp: &PublicParams<E1>,
-  ) -> Result<(ProverKey<E1, S1, S2>, VerifierKey<E1, S1, S2>), NovaError> {
-    // Setup prover & verifier key for curve cycle.
-    let (pk_primary, vk_primary) = S1::setup(pp.ck_primary.clone(), &pp.r1cs_shape_primary)?;
-    let (pk_secondary, vk_secondary) =
-      S2::setup(pp.ck_secondary.clone(), &pp.r1cs_shape_secondary)?;
+  snark_iop: CompressedSNARK<E1, S1, S2>,
+  snark_ffa: CompressedSNARK<Dual<E1>, S2, S1>,
+}
 
-    let pk = ProverKey {
-      pk_primary,
-      pk_secondary,
-    };
+impl<E1, S1, S2> CompressedAggregatedSNARK<E1, S1, S2>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+  E1::GE: DlogGroup,
+  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+{
+  fn setup(
+    pp: &AggregatorPublicParams<E1>,
+  ) -> Result<
+    (
+      AggregatedProverKey<E1, S1, S2>,
+      AggregatedVerifierKey<E1, S1, S2>,
+    ),
+    NovaError,
+  > {
+    let (pk_iop, vk_iop) = CompressedSNARK::<_, S1, S2>::setup(pp.iop())?;
+    let (pk_ffa, vk_ffa) = CompressedSNARK::<_, S2, S1>::setup(pp.ffa())?;
 
-    let vk = VerifierKey {
-      vk_primary,
-      vk_secondary,
-    };
+    let pk = AggregatedProverKey::new(pk_iop, pk_ffa);
+    let vk = AggregatedVerifierKey::new(vk_iop, vk_ffa);
 
     Ok((pk, vk))
   }
 
-  /// Create a new `AggregatedSNARK`
-  pub fn prove(
-    pp: &PublicParams<E1>,
-    pk: &ProverKey<E1, S1, S2>,
-    snarks_data: &[AggregatorSNARKData<'_, E1>],
+  fn prove(
+    pp: &AggregatorPublicParams<E1>,
+    pk: &AggregatedProverKey<E1, S1, S2>,
+    vk: &AggregatedVerifierKey<E1, S1, S2>,
+    rs: &RecursiveAggregatedSNARK<E1>,
   ) -> Result<Self, NovaError> {
-    let circuits = build_circuits(snarks_data)?;
-    let mut cs_primary = SatisfyingAssignment::<E1>::new();
-    let mut cs_secondary = SatisfyingAssignment::<Dual<E1>>::new();
-
-    for (i, (iop_circuit, ffa_circuit)) in circuits.iter().enumerate() {
-      let _ = iop_circuit.synthesize(cs_primary.namespace(|| format!("IOP {i}")));
-      let _ = ffa_circuit.synthesize(cs_secondary.namespace(|| format!("FFA {i}")));
-    }
-
-    // Get instance and witness for primary curve
-    let (U_primary, W_primary) =
-      cs_primary.r1cs_instance_and_witness(&pp.r1cs_shape_primary, &pp.ck_primary)?;
-    let U_primary =
-      RelaxedR1CSInstance::from_r1cs_instance(&*pp.ck_primary, &pp.r1cs_shape_primary, U_primary);
-    let W_primary = RelaxedR1CSWitness::from_r1cs_witness(&pp.r1cs_shape_primary, W_primary);
-
-    // get final primary snark
-    let snark_primary = S1::prove(
-      &pp.ck_primary,
-      &pk.pk_primary,
-      &pp.r1cs_shape_primary,
-      &U_primary,
-      &W_primary,
-    )?;
-
-    // Get instance and witness for secondary curve
-    let (U_secondary, W_secondary) =
-      cs_secondary.r1cs_instance_and_witness(&pp.r1cs_shape_secondary, &pp.ck_secondary)?;
-    let U_secondary = RelaxedR1CSInstance::from_r1cs_instance(
-      &*pp.ck_secondary,
-      &pp.r1cs_shape_secondary,
-      U_secondary,
-    );
-    let W_secondary = RelaxedR1CSWitness::from_r1cs_witness(&pp.r1cs_shape_secondary, W_secondary);
-
-    // get final secondary snark
-    let snark_secondary = S2::prove(
-      &pp.ck_secondary,
-      &pk.pk_secondary,
-      &pp.r1cs_shape_secondary,
-      &U_secondary,
-      &W_secondary,
-    )?;
+    let snark_iop = CompressedSNARK::<_, S1, S2>::prove(pp.iop(), pk.iop(), rs.iop())?;
+    let snark_ffa = CompressedSNARK::<_, S2, S1>::prove(pp.ffa(), pk.ffa(), rs.ffa())?;
 
     Ok(Self {
-      snark_primary,
-      U_primary,
-      snark_secondary,
-      U_secondary,
+      snark_iop,
+      snark_ffa,
     })
   }
+  fn verify(
+    &self,
+    vk: &AggregatedVerifierKey<E1, S1, S2>,
+    num_steps: usize,
+  ) -> Result<(), NovaError> {
+    self.snark_iop.verify(
+      vk.iop(),
+      num_steps,
+      &[<E1 as Engine>::Scalar::ZERO],
+      &[<Dual<E1> as Engine>::Scalar::ZERO],
+    )?;
+    self.snark_ffa.verify(
+      vk.ffa(),
+      num_steps,
+      &[<Dual<E1> as Engine>::Scalar::ZERO],
+      &[<E1 as Engine>::Scalar::ZERO],
+    )?;
 
-  /// Verify the AggregatedSNARK
-  pub fn verify(&self, vk: &VerifierKey<E1, S1, S2>) -> Result<(), NovaError> {
-    let _ = self.snark_primary.verify(&vk.vk_primary, &self.U_primary);
-    self
-      .snark_secondary
-      .verify(&vk.vk_secondary, &self.U_secondary)
+    Ok(())
   }
 }
 
-/// Prover Key for Aggregation proving system
-
-#[derive(Clone, Debug)]
-pub struct ProverKey<E1, S1, S2>
+pub fn ivc_aggregate_with<E1, S1, S2>(
+  snarks_data: &[AggregatorSNARKData<'_, E1>],
+) -> Result<CompressedAggregatedSNARK<E1, S1, S2>, NovaError>
 where
   E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  E1::GE: DlogGroup,
+  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
   S1: RelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
 {
-  pk_primary: S1::ProverKey,
-  pk_secondary: S2::ProverKey,
-}
+  let circuits = build_circuits(snarks_data)?;
+  let num_steps = circuits.len();
+  let (init_circuit_iop, init_circuit_ffa) = &circuits[0];
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(bound = "")]
+  let pp = AggregatorPublicParams::setup(
+    init_circuit_iop,
+    init_circuit_ffa,
+    &*S1::ck_floor(),
+    &*S2::ck_floor(),
+  )?;
 
-/// Verifier Key for Aggregation proving system
-pub struct VerifierKey<E1, S1, S2>
-where
-  E1: CurveCycleEquipped,
-  S1: RelaxedR1CSSNARKTrait<E1>,
-  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
-{
-  vk_primary: S1::VerifierKey,
-  vk_secondary: S2::VerifierKey,
-}
+  let mut rs_option: Option<RecursiveAggregatedSNARK<E1>> = None;
 
-/// Data structure that holds the required data needed for proof aggregation
-pub struct AggregatorSNARKData<'a, E: Engine> {
-  snark: batched::BatchedRelaxedR1CSSNARK<E>,
-  vk: &'a batched::VerifierKey<E>,
-  U: Vec<RelaxedR1CSInstance<E>>,
-}
+  for (iop_circuit, ffa_circuit) in circuits.iter() {
+    let mut rs = rs_option
+      .unwrap_or_else(|| RecursiveAggregatedSNARK::new(&pp, iop_circuit, ffa_circuit).unwrap());
 
-impl<'a, E: Engine> AggregatorSNARKData<'a, E> {
-  /// Create a new instance of `AggregatorSNARKData`
-  pub fn new(
-    snark: batched::BatchedRelaxedR1CSSNARK<E>,
-    vk: &'a batched::VerifierKey<E>,
-    U: Vec<RelaxedR1CSInstance<E>>,
-  ) -> Self {
-    Self { snark, vk, U }
+    rs.prove_step(&pp, iop_circuit, ffa_circuit)?;
+    rs_option = Some(rs)
   }
+
+  debug_assert!(rs_option.is_some());
+  let rs_iop = rs_option.ok_or(NovaError::UnSat)?;
+  rs_iop.verify(&pp, num_steps)?;
+
+  let (pk, vk) = CompressedAggregatedSNARK::<E1, S1, S2>::setup(&pp)?;
+  let snark = CompressedAggregatedSNARK::<E1, S1, S2>::prove(&pp, &pk, &vk, &rs_iop)?;
+
+  snark.verify(&vk, num_steps)?;
+  Ok((snark))
 }
 
 #[derive(Clone)]
@@ -248,10 +370,17 @@ impl<'a, E: Engine> IOPCircuit<'a, E> {
   }
 }
 
-impl<'a, E: Engine> IOPCircuit<'a, E> {
+impl<'a, E: Engine> StepCircuit<E::Scalar> for IOPCircuit<'a, E> {
+  fn arity(&self) -> usize {
+    1
+  }
+  fn get_counter_type(&self) -> StepCounterType {
+    StepCounterType::Incremental
+  }
   fn synthesize<CS: ConstraintSystem<E::Scalar>>(
     &self,
-    mut cs: CS,
+    cs: &mut CS,
+    z: &[AllocatedNum<E::Scalar>],
   ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
     SpartanVerifyCircuit::synthesize(
       cs.namespace(|| "verify IOP"),
@@ -259,7 +388,7 @@ impl<'a, E: Engine> IOPCircuit<'a, E> {
       &self.snark_data.U,
       &self.snark_data.snark,
     )?;
-    Ok(vec![])
+    Ok(z.to_vec())
   }
 }
 
@@ -282,15 +411,22 @@ where
   }
 }
 
-impl<'a, E1> FFACircuit<'a, E1>
+impl<'a, E1> StepCircuit<E1::Base> for FFACircuit<'a, E1>
 where
   E1: CurveCycleEquipped,
   <E1 as Engine>::GE: DlogGroup,
   CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
 {
+  fn arity(&self) -> usize {
+    1
+  }
+  fn get_counter_type(&self) -> StepCounterType {
+    StepCounterType::Incremental
+  }
   fn synthesize<CS: ConstraintSystem<E1::Base>>(
     &self,
-    mut cs: CS,
+    cs: &mut CS,
+    z: &[AllocatedNum<E1::Base>],
   ) -> Result<Vec<AllocatedNum<E1::Base>>, SynthesisError> {
     let _ = EvaluationEngineGadget::<E1>::verify(
       cs.namespace(|| "EE::verify"),
@@ -301,7 +437,7 @@ where
       &self.snark_data.snark.eval_arg,
     )
     .map_err(|_| SynthesisError::AssignmentMissing);
-    Ok(vec![])
+    Ok(z.to_vec())
   }
 }
 
@@ -321,4 +457,22 @@ where
       Ok((iop_circuit, ffa_circuit))
     })
     .collect::<Result<_, NovaError>>()
+}
+
+/// Data structure that holds the required data needed for proof aggregation
+pub struct AggregatorSNARKData<'a, E: Engine> {
+  snark: batched::BatchedRelaxedR1CSSNARK<E>,
+  vk: &'a batched::VerifierKey<E>,
+  U: Vec<RelaxedR1CSInstance<E>>,
+}
+
+impl<'a, E: Engine> AggregatorSNARKData<'a, E> {
+  /// Create a new instance of `AggregatorSNARKData`
+  pub fn new(
+    snark: batched::BatchedRelaxedR1CSSNARK<E>,
+    vk: &'a batched::VerifierKey<E>,
+    U: Vec<RelaxedR1CSInstance<E>>,
+  ) -> Self {
+    Self { snark, vk, U }
+  }
 }
