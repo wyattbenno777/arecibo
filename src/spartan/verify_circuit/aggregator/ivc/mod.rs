@@ -5,6 +5,7 @@ use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use crate::{
   errors::NovaError,
   provider::{pedersen::CommitmentKeyExtTrait, traits::DlogGroup},
+  r1cs::CommitmentKeyHint,
   spartan::{
     verify_circuit::{
       circuit::batched::SpartanVerifyCircuit, gadgets::nonnative::ipa::EvaluationEngineGadget,
@@ -61,6 +62,28 @@ where
   E1: CurveCycleEquipped,
   Dual<E1>: CurveCycleEquipped<Secondary = E1>,
 {
+  pub fn setup(
+    circuit_iop: &IOPCircuit<E1>,
+    circuit_ffa: &FFACircuit<E1>,
+    ck_hint1: &CommitmentKeyHint<E1>,
+    ck_hint2: &CommitmentKeyHint<Dual<E1>>,
+  ) -> Result<AggregatorPublicParams<E1>, NovaError>
+  where
+    E1::GE: DlogGroup,
+    CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+  {
+    let trivial_circuit_secondary = TrivialCircuit::<E1::Base>::default();
+    let trivial_circuit_primary = TrivialCircuit::<E1::Scalar>::default();
+    Ok(AggregatorPublicParams {
+      pp_iop: PublicParams::setup(circuit_iop, &trivial_circuit_secondary, ck_hint1, ck_hint2)?,
+      pp_ffa: PublicParams::<Dual<E1>>::setup(
+        circuit_ffa,
+        &trivial_circuit_primary,
+        ck_hint2,
+        ck_hint1,
+      )?,
+    })
+  }
   pub fn iop(&self) -> &PublicParams<E1> {
     &self.pp_iop
   }
@@ -68,36 +91,6 @@ where
   pub fn ffa(&self) -> &PublicParams<Dual<E1>> {
     &self.pp_ffa
   }
-}
-
-pub fn aggregator_public_params<E1, S1, S2>(
-  circuit_iop: &IOPCircuit<E1>,
-  circuit_ffa: &FFACircuit<E1>,
-) -> Result<AggregatorPublicParams<E1>, NovaError>
-where
-  E1: CurveCycleEquipped,
-  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
-  E1::GE: DlogGroup,
-  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
-  S1: RelaxedR1CSSNARKTrait<E1>,
-  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
-{
-  let trivial_circuit_secondary = TrivialCircuit::<E1::Base>::default();
-  let trivial_circuit_primary = TrivialCircuit::<E1::Scalar>::default();
-  Ok(AggregatorPublicParams {
-    pp_iop: PublicParams::setup(
-      circuit_iop,
-      &trivial_circuit_secondary,
-      &*S1::ck_floor(),
-      &*S2::ck_floor(),
-    )?,
-    pp_ffa: PublicParams::<Dual<E1>>::setup(
-      circuit_ffa,
-      &trivial_circuit_primary,
-      &*S2::ck_floor(),
-      &*S1::ck_floor(),
-    )?,
-  })
 }
 
 pub struct RecursiveAggregatedSNARK<E1>
@@ -145,14 +138,34 @@ where
     pp: &AggregatorPublicParams<E1>,
     iop_circuit: &IOPCircuit<E1>,
     ffa_circuit: &FFACircuit<E1>,
-  ) {
+  ) -> Result<(), NovaError> {
     self
       .rs_iop
-      .prove_step(pp.iop(), iop_circuit, &TrivialCircuit::default());
+      .prove_step(pp.iop(), iop_circuit, &TrivialCircuit::default())?;
 
     self
       .rs_ffa
-      .prove_step(pp.ffa(), ffa_circuit, &TrivialCircuit::default());
+      .prove_step(pp.ffa(), ffa_circuit, &TrivialCircuit::default())?;
+
+    Ok(())
+  }
+
+  pub fn verify(&self, pp: &AggregatorPublicParams<E1>, num_steps: usize) -> Result<(), NovaError> {
+    self.rs_iop.verify(
+      pp.iop(),
+      num_steps,
+      &[<E1 as Engine>::Scalar::ZERO],
+      &[<Dual<E1> as Engine>::Scalar::ZERO],
+    );
+
+    self.rs_iop.verify(
+      pp.iop(),
+      num_steps,
+      &[<E1 as Engine>::Scalar::ZERO],
+      &[<Dual<E1> as Engine>::Scalar::ZERO],
+    );
+
+    Ok(())
   }
 }
 
@@ -247,12 +260,25 @@ where
 
   assert!(rs_option_iop.is_some());
   let rs_iop = rs_option_iop.ok_or(NovaError::UnSat)?;
+  rs_iop.verify(
+    &pp_iop,
+    num_steps,
+    &[<E1 as Engine>::Scalar::ZERO],
+    &[<Dual<E1> as Engine>::Scalar::ZERO],
+  )?;
 
   let (pk_iop, vk_iop) = CompressedSNARK::<_, S1, S2>::setup(&pp_iop)?;
   let snark_iop = CompressedSNARK::<_, S1, S2>::prove(&pp_iop, &pk_iop, &rs_iop)?;
 
   assert!(rs_option_ffa.is_some());
   let rs_ffa = rs_option_ffa.ok_or(NovaError::UnSat)?;
+
+  rs_ffa.verify(
+    &pp_ffa,
+    num_steps,
+    &[<Dual<E1> as Engine>::Scalar::ZERO],
+    &[<E1 as Engine>::Scalar::ZERO],
+  )?;
 
   let (pk_ffa, vk_ffa) = CompressedSNARK::<_, S2, S1>::setup(&pp_ffa)?;
   let snark_ffa = CompressedSNARK::<_, S2, S1>::prove(&pp_ffa, &pk_ffa, &rs_ffa)?;
@@ -272,6 +298,77 @@ where
   )?;
 
   Ok(snark_iop)
+}
+
+pub fn ivc_aggregate_with2<E1, S1, S2>(
+  snarks_data: &[AggregatorSNARKData<'_, E1>],
+) -> Result<(), NovaError>
+// -> Result<CompressedSNARK<E1, S1, S2>, NovaError>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  E1::GE: DlogGroup,
+  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+{
+  let circuits = build_circuits(snarks_data)?;
+  let num_steps = circuits.len();
+  let (init_circuit_iop, init_circuit_ffa) = &circuits[0];
+
+  let pp = AggregatorPublicParams::setup(
+    init_circuit_iop,
+    init_circuit_ffa,
+    &*S1::ck_floor(),
+    &*S2::ck_floor(),
+  )?;
+
+  let mut rs_option: Option<RecursiveAggregatedSNARK<E1>> = None;
+
+  for (iop_circuit, ffa_circuit) in circuits.iter() {
+    let mut rs = rs_option
+      .unwrap_or_else(|| RecursiveAggregatedSNARK::new(&pp, iop_circuit, ffa_circuit).unwrap());
+
+    rs.prove_step(&pp, iop_circuit, ffa_circuit)?;
+    rs_option = Some(rs)
+  }
+
+  debug_assert!(rs_option.is_some());
+  let rs_iop = rs_option.ok_or(NovaError::UnSat)?;
+  rs_iop.verify(&pp, num_steps)?;
+
+  // let (pk_iop, vk_iop) = CompressedSNARK::<_, S1, S2>::setup(&pp_iop)?;
+  // let snark_iop = CompressedSNARK::<_, S1, S2>::prove(&pp_iop, &pk_iop, &rs_iop)?;
+
+  // assert!(rs_option_ffa.is_some());
+  // let rs_ffa = rs_option_ffa.ok_or(NovaError::UnSat)?;
+
+  // rs_ffa.verify(
+  //   &pp_ffa,
+  //   num_steps,
+  //   &[<Dual<E1> as Engine>::Scalar::ZERO],
+  //   &[<E1 as Engine>::Scalar::ZERO],
+  // )?;
+
+  // let (pk_ffa, vk_ffa) = CompressedSNARK::<_, S2, S1>::setup(&pp_ffa)?;
+  // let snark_ffa = CompressedSNARK::<_, S2, S1>::prove(&pp_ffa, &pk_ffa, &rs_ffa)?;
+
+  // snark_iop.verify(
+  //   &vk_iop,
+  //   num_steps,
+  //   &[<E1 as Engine>::Scalar::ZERO],
+  //   &[<Dual<E1> as Engine>::Scalar::ZERO],
+  // )?;
+
+  // snark_ffa.verify(
+  //   &vk_ffa,
+  //   num_steps,
+  //   &[<Dual<E1> as Engine>::Scalar::ZERO],
+  //   &[<E1 as Engine>::Scalar::ZERO],
+  // )?;
+
+  // Ok(snark_iop)
+  Ok(())
 }
 
 #[derive(Clone)]

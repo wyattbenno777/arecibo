@@ -23,7 +23,7 @@ use ff::Field;
 use ff::PrimeField;
 use itertools::Itertools as _;
 
-use super::ivc_aggregate_with;
+use super::{ivc_aggregate_with, ivc_aggregate_with2};
 
 type E1 = PallasEngine;
 type E2 = Dual<E1>;
@@ -46,6 +46,22 @@ fn test_ivc_aggregate() {
     .collect();
 
   let snark = ivc_aggregate_with::<E1, S1, S2>(&snarks_data).unwrap();
+}
+
+#[test]
+fn test_ivc_aggregate2() {
+  let num_nodes = 2;
+  let snarks_data = sim_nw(num_nodes);
+  let snarks_data: Vec<AggregatorSNARKData<E1>> = snarks_data
+    .iter()
+    .map(|(snark, vk)| {
+      let (snark, U) = snark.primary_snark_and_U();
+      let vk = vk.primary();
+      AggregatorSNARKData::new(snark, vk, U)
+    })
+    .collect();
+
+  let snark = ivc_aggregate_with2::<E1, S1, S2>(&snarks_data).unwrap();
 }
 
 fn sim_nw(num_nodes: usize) -> Vec<(CompressedSNARK<E1, S1, S2>, VerifierKey<E1, S1, S2>)> {
