@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 
+use super::ipa_prover_poseidon::batched;
 use crate::{
   errors::NovaError,
   provider::{pedersen::CommitmentKeyExtTrait, traits::DlogGroup},
@@ -21,8 +22,8 @@ use crate::{
   VerifierKey,
 };
 use ff::Field;
-
-use super::ipa_prover_poseidon::batched;
+use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 
 #[cfg(test)]
 mod tests;
@@ -49,6 +50,9 @@ impl Aggregator {
   }
 }
 
+/// A type that holds public parameters of Aggregator
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct AggregatorPublicParams<E1>
 where
   E1: CurveCycleEquipped,
@@ -94,6 +98,9 @@ where
   }
 }
 
+/// A SNARK that proves the correct execution of an incremental aggregation computation
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct RecursiveAggregatedSNARK<E1>
 where
   E1: CurveCycleEquipped,
@@ -178,12 +185,16 @@ where
   }
 }
 
+/// A type that holds the prover key for `CompressedAggregatedSNARK`
+#[derive(Clone, Debug)]
 pub struct AggregatedProverKey<E1, S1, S2>
 where
   E1: CurveCycleEquipped,
   Dual<E1>: CurveCycleEquipped<Secondary = E1>,
   S1: RelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+  S1::ProverKey: Clone + Debug,
+  S2::ProverKey: Clone + Debug,
 {
   pk_iop: ProverKey<E1, S1, S2>,
   pk_ffa: ProverKey<Dual<E1>, S2, S1>,
@@ -195,6 +206,8 @@ where
   Dual<E1>: CurveCycleEquipped<Secondary = E1>,
   S1: RelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+  S1::ProverKey: Clone + Debug,
+  S2::ProverKey: Clone + Debug,
 {
   fn new(pk_iop: ProverKey<E1, S1, S2>, pk_ffa: ProverKey<Dual<E1>, S2, S1>) -> Self {
     Self { pk_iop, pk_ffa }
@@ -209,12 +222,17 @@ where
   }
 }
 
+/// A type that holds the verifier key for `CompressedAggregatedSNARK`
+#[derive(Debug, Clone, Serialize)]
+#[serde(bound = "")]
 pub struct AggregatedVerifierKey<E1, S1, S2>
 where
   E1: CurveCycleEquipped,
   Dual<E1>: CurveCycleEquipped<Secondary = E1>,
   S1: RelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+  S2::VerifierKey: Serialize + Debug + Clone,
+  S1::VerifierKey: Serialize + Debug + Clone,
 {
   vk_iop: VerifierKey<E1, S1, S2>,
   vk_ffa: VerifierKey<Dual<E1>, S2, S1>,
@@ -226,6 +244,8 @@ where
   Dual<E1>: CurveCycleEquipped<Secondary = E1>,
   S1: RelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+  S2::VerifierKey: Serialize + Debug + Clone,
+  S1::VerifierKey: Serialize + Debug + Clone,
 {
   fn new(vk_iop: VerifierKey<E1, S1, S2>, vk_ffa: VerifierKey<Dual<E1>, S2, S1>) -> Self {
     Self { vk_iop, vk_ffa }
@@ -248,6 +268,10 @@ where
   S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
   E1::GE: DlogGroup,
   CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+  S1::ProverKey: Clone + Debug,
+  S2::ProverKey: Clone + Debug,
+  S2::VerifierKey: Serialize + Debug + Clone,
+  S1::VerifierKey: Serialize + Debug + Clone,
 {
   snark_iop: CompressedSNARK<E1, S1, S2>,
   snark_ffa: CompressedSNARK<Dual<E1>, S2, S1>,
@@ -261,6 +285,10 @@ where
   S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
   E1::GE: DlogGroup,
   CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+  S1::ProverKey: Clone + Debug,
+  S2::ProverKey: Clone + Debug,
+  S2::VerifierKey: Serialize + Debug + Clone,
+  S1::VerifierKey: Serialize + Debug + Clone,
 {
   fn setup(
     pp: &AggregatorPublicParams<E1>,
@@ -327,6 +355,10 @@ where
   CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
   S1: RelaxedR1CSSNARKTrait<E1>,
   S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+  S1::ProverKey: Clone + Debug,
+  S2::ProverKey: Clone + Debug,
+  S2::VerifierKey: Serialize + Debug + Clone,
+  S1::VerifierKey: Serialize + Debug + Clone,
 {
   let circuits = build_circuits(snarks_data)?;
   let num_steps = circuits.len();

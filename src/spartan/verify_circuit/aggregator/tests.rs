@@ -29,7 +29,8 @@ type E1 = PallasEngine;
 type E2 = Dual<E1>;
 type EE1 = ipa_pc::EvaluationEngine<E1>;
 type EE2 = ipa_pc::EvaluationEngine<E2>;
-type S1 = ipa_prover_poseidon::batched::BatchedRelaxedR1CSSNARK<E1>;
+type AS1 = ipa_prover_poseidon::batched::BatchedRelaxedR1CSSNARK<E1>;
+type S1 = RelaxedR1CSSNARK<E1, EE1>;
 type S2 = RelaxedR1CSSNARK<E2, EE2>;
 
 #[test]
@@ -48,7 +49,7 @@ fn test_ivc_aggregate() {
   let snark = ivc_aggregate_with::<E1, S1, S2>(&snarks_data).unwrap();
 }
 
-fn sim_nw(num_nodes: usize) -> Vec<(CompressedSNARK<E1, S1, S2>, VerifierKey<E1, S1, S2>)> {
+fn sim_nw(num_nodes: usize) -> Vec<(CompressedSNARK<E1, AS1, S2>, VerifierKey<E1, AS1, S2>)> {
   const NUM_STEPS: usize = 4;
   (0..num_nodes)
     .map(|_| test_compression_with::<_, _>(NUM_STEPS, BigTestCircuit::new))
@@ -58,7 +59,7 @@ fn sim_nw(num_nodes: usize) -> Vec<(CompressedSNARK<E1, S1, S2>, VerifierKey<E1,
 fn test_compression_with<F, C>(
   num_steps: usize,
   circuits_factory: F,
-) -> (CompressedSNARK<E1, S1, S2>, VerifierKey<E1, S1, S2>)
+) -> (CompressedSNARK<E1, AS1, S2>, VerifierKey<E1, AS1, S2>)
 where
   C: NonUniformCircuit<E1, C1 = C, C2 = TrivialSecondaryCircuit<<Dual<E1> as Engine>::Scalar>>
     + StepCircuit<<E1 as Engine>::Scalar>,
@@ -69,7 +70,7 @@ where
 
   let pp = PublicParams::setup(
     &test_circuits[0],
-    &*<S1 as BatchedRelaxedR1CSSNARKTrait<E1>>::ck_floor(),
+    &*<AS1 as BatchedRelaxedR1CSSNARKTrait<E1>>::ck_floor(),
     &*<S2 as RelaxedR1CSSNARKTrait<E2>>::ck_floor(),
   );
 
@@ -96,7 +97,7 @@ where
       .unwrap();
   }
 
-  let (prover_key, verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
+  let (prover_key, verifier_key) = CompressedSNARK::<_, AS1, S2>::setup(&pp).unwrap();
 
   let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
 

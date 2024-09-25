@@ -23,13 +23,13 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 /// Provides an implementation of the prover key
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProverKey<E: Engine> {
   ck_s: CommitmentKey<E>,
 }
 
 /// Provides an implementation of the verifier key
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct VerifierKey<E: Engine> {
   pub(crate) ck_v: Arc<CommitmentKey<E>>,
