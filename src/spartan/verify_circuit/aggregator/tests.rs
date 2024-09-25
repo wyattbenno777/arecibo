@@ -31,7 +31,7 @@ use ff::PrimeField;
 use itertools::Itertools as _;
 use serde::Serialize;
 
-use super::CompressedAggregatedSNARK;
+use super::{CompressedAggregatedSNARK, FFACircuit, IOPCircuit};
 
 type E1 = PallasEngine;
 type E2 = Dual<E1>;
@@ -40,6 +40,52 @@ type EE2 = ipa_pc::EvaluationEngine<E2>;
 type AS1 = ipa_prover_poseidon::batched::BatchedRelaxedR1CSSNARK<E1>;
 type S1 = RelaxedR1CSSNARK<E1, EE1>;
 type S2 = RelaxedR1CSSNARK<E2, EE2>;
+
+#[test]
+fn test_aggregate_stop_start() {
+  let num_nodes = 2;
+  let snarks_data = sim_nw(num_nodes);
+  let snarks_data: Vec<AggregatorSNARKData<E1>> = snarks_data
+    .iter()
+    .map(|(snark, vk)| {
+      let (snark, U) = snark.primary_snark_and_U();
+      let vk = vk.primary();
+      AggregatorSNARKData::new(snark, vk, U)
+    })
+    .collect();
+
+  let circuits = Aggregator::build_circuits(&snarks_data).unwrap();
+
+  let (init_circuit_iop, init_circuit_ffa) = &circuits[0];
+
+  let pp = AggregatorPublicParams::setup(
+    init_circuit_iop,
+    init_circuit_ffa,
+    &*S1::ck_floor(),
+    &*S2::ck_floor(),
+  )
+  .unwrap();
+
+  let mut rs_option: Option<RecursiveAggregatedSNARK<E1>> = None;
+
+  let (rs, snark) = ivc_aggregate_stop_start::<E1, S1, S2>(&pp, &circuits, rs_option).unwrap();
+
+  // ROUND 2
+  let snarks_data = sim_nw(num_nodes);
+  let snarks_data: Vec<AggregatorSNARKData<E1>> = snarks_data
+    .iter()
+    .map(|(snark, vk)| {
+      let (snark, U) = snark.primary_snark_and_U();
+      let vk = vk.primary();
+      AggregatorSNARKData::new(snark, vk, U)
+    })
+    .collect();
+
+  let circuits = Aggregator::build_circuits(&snarks_data).unwrap();
+  let mut rs_option = Some(rs);
+
+  let (rs, snark) = ivc_aggregate_stop_start::<E1, S1, S2>(&pp, &circuits, rs_option).unwrap();
+}
 
 #[test]
 fn test_ivc_aggregate() {
@@ -55,6 +101,49 @@ fn test_ivc_aggregate() {
     .collect();
 
   let snark = ivc_aggregate_with::<E1, S1, S2>(&snarks_data).unwrap();
+}
+
+pub fn ivc_aggregate_stop_start<E1, S1, S2>(
+  pp: &AggregatorPublicParams<E1>,
+  circuits: &[(IOPCircuit<E1>, FFACircuit<E1>)],
+  mut rs_option: Option<RecursiveAggregatedSNARK<E1>>,
+) -> Result<
+  (
+    RecursiveAggregatedSNARK<E1>,
+    CompressedAggregatedSNARK<E1, S1, S2>,
+  ),
+  NovaError,
+>
+where
+  E1: CurveCycleEquipped,
+  Dual<E1>: CurveCycleEquipped<Secondary = E1>,
+  E1::GE: DlogGroup,
+  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+  S1: RelaxedR1CSSNARKTrait<E1>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
+  S1::ProverKey: Clone + Debug,
+  S2::ProverKey: Clone + Debug,
+  S2::VerifierKey: Serialize + Debug + Clone,
+  S1::VerifierKey: Serialize + Debug + Clone,
+{
+  for (iop_circuit, ffa_circuit) in circuits.iter() {
+    let mut rs = rs_option
+      .unwrap_or_else(|| RecursiveAggregatedSNARK::new(&pp, iop_circuit, ffa_circuit).unwrap());
+
+    rs.prove_step(&pp, iop_circuit, ffa_circuit)?;
+    rs_option = Some(rs)
+  }
+
+  debug_assert!(rs_option.is_some());
+  let rs = rs_option.ok_or(NovaError::UnSat)?;
+  let num_steps = rs.num_steps();
+  rs.verify(&pp, num_steps)?;
+
+  let (pk, vk) = CompressedAggregatedSNARK::<E1, S1, S2>::setup(&pp)?;
+  let snark = CompressedAggregatedSNARK::<E1, S1, S2>::prove(&pp, &pk, &vk, &rs)?;
+
+  snark.verify(&vk, num_steps)?;
+  Ok((rs, snark))
 }
 
 pub fn ivc_aggregate_with<E1, S1, S2>(

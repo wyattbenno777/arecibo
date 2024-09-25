@@ -183,6 +183,10 @@ where
   pub fn ffa(&self) -> &RecursiveSNARK<Dual<E1>> {
     &self.rs_ffa
   }
+
+  pub fn num_steps(&self) -> usize {
+    self.rs_iop.num_steps()
+  }
 }
 
 /// A type that holds the prover key for `CompressedAggregatedSNARK`
