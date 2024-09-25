@@ -61,6 +61,7 @@ use std::fs;
 use tracing::error;
 use ff::PrimeField;
 use crate::traits;
+use crate::spartan::nizk::DotProductProof;
 
 unzip_n!(pub 3);
 unzip_n!(pub 5);
@@ -179,7 +180,7 @@ pub struct DataForUntrustedRemote<E: Engine> {
   deserialize = "E: Deserialize<'de>"
 ))]
 pub struct BatchedRelaxedR1CSSNARK<E: Engine + Serialize> {
-  data: DataForUntrustedRemote<E>
+  pub data: DataForUntrustedRemote<E>
 }
 
 /// A succinct proof of knowledge of a witness to a relaxed R1CS instance
@@ -210,8 +211,6 @@ pub struct ResultsBatchedTinySNARK<E: Engine> where <E as traits::Engine>::GE: D
   // a PCS evaluation argument
   eval_arg: zk_ipa_pc::EvaluationArgument<E>,
   eval_arg_witness: zk_ipa_pc::EvaluationArgument<E>,
-
-  data: DataForUntrustedRemote<E>,
 }
 
 #[allow(unused)]
@@ -630,6 +629,7 @@ where
     })
   }
 
+  // TODO: trait prevent modifying for untrusted data.
   fn verify(&self, _vk: &Self::VerifierKey, _U: &[RelaxedR1CSInstance<E>]) -> Result<(), NovaError> {
     Ok(())
   }
@@ -637,13 +637,88 @@ where
 }
 
 impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<E> 
-where
-    E::CE: ZKCommitmentEngineTrait<E>,
+  where
+    E: Engine<CE = zk_pedersen::CommitmentEngine<E>> + Serialize + for<'de> Deserialize<'de>,
     E::GE: DlogGroup<ScalarExt = E::Scalar>,
+    E::CE: ZKCommitmentEngineTrait<E>,
     E::CE: CommitmentEngineTrait<E, Commitment = zk_pedersen::Commitment<E>, CommitmentKey = zk_pedersen::CommitmentKey<E>>,
-    <<E::CE as CommitmentEngineTrait<E>>::Commitment as CommitmentTrait<E>>::CompressedCommitment: Into<CompressedCommitment<E>>,
-    zk_pedersen::CommitmentKey<E>: zk_pedersen::CommitmentKeyExtTrait<E>,
 {
+
+  #[allow(unused)]
+  fn verify_full(
+    &self,
+    vk: &<Self as BatchedRelaxedR1CSSNARKTrait<E>>::VerifierKey,
+    results: ResultsBatchedTinySNARK<E>,
+    U: &[RelaxedR1CSInstance<E>]) -> Result<(), NovaError> {
+
+    // First lets do all of the steps to verify the TinyProver portion.
+    let num_instances = U.len();
+    let num_claims_per_instance = 10;
+
+    let mut transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
+
+    transcript.absorb(b"vk", &vk.digest());
+    if num_instances > 1 {
+      let num_instances_field = E::Scalar::from(num_instances as u64);
+      transcript.absorb(b"n", &num_instances_field);
+    }
+    transcript.absorb(b"U", &U);
+
+    // Verify commitments to Az, Bz, Cz
+    for comms in self.data.comms_Az_Bz_Cz.iter() {
+      transcript.absorb(b"c", &comms.as_slice());
+    }
+
+    // Generate tau and verify claimed evaluations
+    let tau = transcript.squeeze(b"t")?;
+    let tau_coords = PowPolynomial::new(&tau, self.data.N_max.log_2()).coordinates();
+
+    let c = transcript.squeeze(b"c")?;
+
+    // Verify witness sumcheck proof
+    let s = transcript.squeeze(b"r")?;
+    let s_powers = powers(&s, num_instances * num_claims_per_instance);
+
+    // Create ZKSumcheckProof instance
+    let zk_sumcheck_proof = ZKSumcheckProof {
+      comm_polys: self.data.sumcheck_comm_polys.clone(),
+      comm_evals: self.data.sumcheck_comm_evals.clone(),
+      proofs: self.data.sumcheck_deltas.iter().zip(self.data.sumcheck_betas.iter())
+          .zip(self.data.sumcheck_zs.iter())
+          .zip(self.data.sumcheck_z_deltas.iter())
+          .zip(self.data.sumcheck_z_betas.iter())
+          .map(|((((delta, beta), z), z_delta), z_beta)| {
+              DotProductProof::<E> {
+                  delta: delta.clone(),
+                  beta: beta.clone(),
+                  z: z.clone(),
+                  z_delta: *z_delta,
+                  z_beta: *z_beta,
+              }
+          })
+          .collect(),
+    };
+
+    let claims_compressed: Vec<CompressedCommitment<E>> = self.data.claims_witness
+      .iter()
+      .flatten()
+      .map(|c| E::CE::commit(&vk.sumcheck_gens.ck_1, c).compress())
+      .collect();
+
+    // Verify the ZKSumcheckProof
+    let (comm_final, rand_sc) = zk_sumcheck_proof.verify_batch(
+        &claims_compressed,
+        &self.data.Nis.iter().map(|&n| n.log_2()).collect::<Vec<_>>(),
+        &s_powers,
+        3, // degree bound, adjust if needed
+        &vk.sumcheck_gens.ck_1,
+        &vk.sumcheck_gens.ck_4,
+        &mut transcript,
+    )?;
+
+
+    Ok(())
+  }
   
   pub fn prove_unstrusted(
       data: &DataForUntrustedRemote<E>,
@@ -972,6 +1047,7 @@ where
     .flatten()
     .cloned()
     .collect::<Vec<_>>();
+    
 
     let w_vec = zip_with!(
       (
@@ -982,6 +1058,11 @@ where
           data.S_repr.iter()
       ),
       |Az_Bz_Cz, E, L_row_col, mem_oracles, S_repr| {
+        println!("w_vec Az_Bz_Cz length: {}", Az_Bz_Cz.len());
+        println!("w_vec E length: 1");
+        println!("w_vec L_row_col length: {}", L_row_col.len());
+        println!("w_vec mem_oracles length: {}", mem_oracles.len());
+        println!("w_vec S_repr components: 7");
           chain![
               Az_Bz_Cz.iter().cloned(),
               std::iter::once((*E).clone()),
@@ -1011,6 +1092,32 @@ where
     let untrusted_c = transcript.squeeze(b"untrusted_c")?;
 
     let num_vars_u = w_vec.iter().map(|w| w.p.len().log_2()).collect::<Vec<_>>();
+    println!("num_vars_u contents: {:?}", num_vars_u);
+
+    /*// After constructing comms_vec
+    println!("comms_vec breakdown:");
+    println!("  data.comms_Az_Bz_Cz: {}", data.comms_Az_Bz_Cz.len());
+    println!("  comms_L_row_col: {}", comms_L_row_col.len());
+    println!("  comms_mem_oracles: {}", comms_mem_oracles.len());
+    println!("  data.S_comm: {}", data.S_comm.len());
+    println!("Total comms_vec length: {}", comms_vec.len());
+
+    // After constructing evals_vec
+    println!("evals_vec breakdown:");
+    println!("  evals_Az_Bz_Cz_E: {}", evals_Az_Bz_Cz_E.len());
+    println!("  evals_L_row_col: {}", evals_L_row_col.len());
+    println!("  evals_mem_oracle: {}", evals_mem_oracle.len());
+    println!("  evals_mem_preprocessed: {}", evals_mem_preprocessed.len());
+    println!("Total evals_vec length: {}", evals_vec.len());
+
+    // After constructing w_vec
+    println!("w_vec length: {}", w_vec.len());*/
+
+    // Just before calling batch_diff_size
+    println!("Final lengths:");
+    println!("  comms_vec: {}", comms_vec.len());
+    println!("  evals_vec: {}", evals_vec.len());
+    println!("  num_vars_u: {}", num_vars_u.len());
 
     let u_batch =
       PolyEvalInstance::<E>::batch_diff_size(&comms_vec, &evals_vec, &num_vars_u, rand_sc, untrusted_c);
@@ -1065,7 +1172,6 @@ where
       evals_mem_preprocessed,
       eval_arg,
       eval_arg_witness,
-      data: data.clone(),
     })
   }
 
@@ -1251,6 +1357,7 @@ where
   {
     // sanity checks
     let num_instances = mem.len();
+    println!("failed here 1");
     assert_eq!(outer.len(), num_instances);
     assert_eq!(inner.len(), num_instances);
 

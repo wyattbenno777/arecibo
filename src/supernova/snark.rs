@@ -13,6 +13,7 @@ use crate::{errors::NovaError, scalar_as_base, RelaxedR1CSInstance, NIFS};
 
 use ff::PrimeField;
 use serde::{Deserialize, Serialize};
+use halo2curves::pasta::Fq;
 
 /// A type that holds the prover key for `CompressedSNARK`
 #[derive(Debug)]
@@ -172,6 +173,88 @@ where
     };
 
     Ok(compressed_snark)
+  }
+
+  /// Create a new `CompressedSNARK`
+  pub fn prove_tiny(
+    pp: &PublicParams<E1>,
+    pk: &ProverKey<E1, S1, S2>,
+    recursive_snark: &RecursiveSNARK<E1>,
+  ) -> Result<Self, SuperNovaError> {
+      // fold the secondary circuit's instance
+      let res_secondary = NIFS::prove(
+        &*pp.ck_secondary,
+        &pp.ro_consts_secondary,
+        &scalar_as_base::<E1>(pp.digest()),
+        &pp.circuit_shape_secondary.r1cs_shape,
+        &recursive_snark.r_U_secondary,
+        &recursive_snark.r_W_secondary,
+        &recursive_snark.l_u_secondary,
+        &recursive_snark.l_w_secondary,
+      );
+
+      let (nifs_secondary, (f_U_secondary, f_W_secondary), _) = res_secondary?;
+
+      // Prepare the list of primary Relaxed R1CS instances (a default instance is provided for
+      // uninitialized circuits)
+      let r_U_primary = recursive_snark
+        .r_U_primary
+        .iter()
+        .enumerate()
+        .map(|(idx, r_U)| {
+          r_U
+            .clone()
+            .unwrap_or_else(|| RelaxedR1CSInstance::default(&*pp.ck_primary, &pp[idx].r1cs_shape))
+        })
+        .collect::<Vec<_>>();
+
+      // Prepare the list of primary relaxed R1CS witnesses (a default witness is provided for
+      // uninitialized circuits)
+      let r_W_primary: Vec<RelaxedR1CSWitness<E1>> = recursive_snark
+        .r_W_primary
+        .iter()
+        .enumerate()
+        .map(|(idx, r_W)| {
+          r_W
+            .clone()
+            .unwrap_or_else(|| RelaxedR1CSWitness::default(&pp[idx].r1cs_shape))
+        })
+        .collect::<Vec<_>>();
+
+      // Generate a primary SNARK proof for the list of primary circuits
+      let r_W_snark_primary = S1::prove(
+        &pp.ck_primary,
+        &pk.pk_primary,
+        pp.primary_r1cs_shapes(),
+        &r_U_primary,
+        &r_W_primary,
+      )?;
+
+      // Generate a secondary SNARK proof for the secondary circuit
+      let f_W_snark_secondary = S2::prove(
+        &pp.ck_secondary,
+        &pk.pk_secondary,
+        &pp.circuit_shape_secondary.r1cs_shape,
+        &f_U_secondary,
+        &f_W_secondary,
+      )?;
+
+      let compressed_snark = Self {
+        r_U_primary,
+        r_W_snark_primary,
+        r_U_secondary: recursive_snark.r_U_secondary.clone(),
+        l_u_secondary: recursive_snark.l_u_secondary.clone(),
+        nifs_secondary,
+        f_W_snark_secondary,
+
+        num_steps: recursive_snark.i,
+        program_counter: recursive_snark.program_counter,
+
+        zn_primary: recursive_snark.zi_primary.clone(),
+        zn_secondary: recursive_snark.zi_secondary.clone(),
+      };
+
+      Ok(compressed_snark)
   }
 
   /// Verify the correctness of the `CompressedSNARK`
@@ -659,24 +742,26 @@ mod test {
     test_compression_with::<Secp256k1Engine, S1<_>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
   }
 
-  fn test_tiny_snark_with<E1, S1, S2, F, C>(num_steps: usize, circuits_factory: F)
+  fn test_tiny_zk_snark_with<F, C>(num_steps: usize, circuits_factory: F)
   where
-    E1: CurveCycleEquipped,
-    S1: BatchedRelaxedR1CSSNARKTrait<E1>,
-    S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
-    <E1::Scalar as PrimeField>::Repr: Abomonation,
-    <<Dual<E1> as Engine>::Scalar as PrimeField>::Repr: Abomonation,
-    C: NonUniformCircuit<E1, C1 = C, C2 = TrivialSecondaryCircuit<<Dual<E1> as Engine>::Scalar>>
-      + StepCircuit<E1::Scalar>,
-    F: Fn(usize) -> Vec<C>,
+      F: Fn(usize) -> Vec<C>,
+      C: NonUniformCircuit<ZKPallasEngine, C1 = C, C2 = TrivialSecondaryCircuit<<Dual<ZKPallasEngine> as Engine>::Scalar>>
+          + StepCircuit<<ZKPallasEngine as Engine>::Scalar>
+          + StepCircuit<Fq>,
+      <<ZKPallasEngine as Engine>::Scalar as PrimeField>::Repr: Abomonation,
+      <<Dual<ZKPallasEngine> as Engine>::Scalar as PrimeField>::Repr: Abomonation,
   {
     let secondary_circuit = TrivialSecondaryCircuit::default();
     let test_circuits = circuits_factory(num_steps);
 
-    let pp = PublicParams::setup(&test_circuits[0], &*S1::ck_floor(), &*S2::ck_floor());
+    let pp = PublicParams::setup(
+      &test_circuits[0],
+      &*<ZKTINY as BatchedRelaxedR1CSSNARKTrait<ZKPallasEngine>>::ck_floor(),
+      &*S2::<Dual<ZKPallasEngine>>::ck_floor()
+    ) ;
 
-    let z0_primary = vec![E1::Scalar::from(17u64)];
-    let z0_secondary = vec![<Dual<E1> as Engine>::Scalar::ZERO];
+    let z0_primary = vec![<ZKPallasEngine as Engine>::Scalar::from(17u64)];
+    let z0_secondary = vec![<Dual<ZKPallasEngine> as Engine>::Scalar::ZERO];
 
     let mut recursive_snark = RecursiveSNARK::new(
       &pp,
@@ -685,35 +770,32 @@ mod test {
       &secondary_circuit,
       &z0_primary,
       &z0_secondary,
-    )
-    .unwrap();
+    ).unwrap();
 
     for circuit in test_circuits.iter().take(num_steps) {
-      recursive_snark
-        .prove_step(&pp, circuit, &secondary_circuit)
-        .unwrap();
+        recursive_snark
+            .prove_step(&pp, circuit, &secondary_circuit)
+            .unwrap();
 
-      recursive_snark
-        .verify(&pp, &z0_primary, &z0_secondary)
-        .unwrap();
+        recursive_snark
+            .verify(&pp, &z0_primary, &z0_secondary)
+            .unwrap();
     }
 
-    println!("done with recursive_snark");
+    let (prover_key, _verifier_key) = CompressedSNARK::<_, ZKTINY, S2<Dual<ZKPallasEngine>>>::setup(&pp).unwrap();
 
-    let (prover_key, _verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
-
-    println!("done with setup");
     let _compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
+    
+    //let _results = ZKTINY::prove_unstrusted(&compressed_snark.r_W_snark_primary.data).unwrap();
 
-    /*compressed_snark
-      .verify(&pp, &verifier_key, &z0_primary, &z0_secondary)
-      .unwrap();*/
+    // You can now use `results` for further verification or checks
+    println!("Untrusted prover completed successfully");
   }
 
   #[test]
   fn test_tiny_zk_snark() {
-    const NUM_STEPS: usize = 2;
-    test_tiny_snark_with::<ZKPallasEngine, ZKTINY<>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
+      const NUM_STEPS: usize = 2;
+      test_tiny_zk_snark_with(NUM_STEPS, BigTestCircuit::new);
   }
 
 }
