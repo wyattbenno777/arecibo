@@ -203,6 +203,10 @@ impl CurveCycleEquipped for PallasEngine {
   type Secondary = VestaEngine;
 }
 
+impl CurveCycleEquipped for VestaEngine {
+  type Secondary = PallasEngine;
+}
+
 /// An implementation of the Nova `Engine` trait with Pallas curve and Pedersen commitment scheme
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ZKPallasEngine;

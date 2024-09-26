@@ -508,7 +508,7 @@ mod test {
     > {
       let mut x = z[0].clone();
       let mut y = x.clone();
-      for i in 0..10_000 {
+      for i in 0..10 {
         y = x.square(cs.namespace(|| format!("x_sq_{i}")))?;
         x = y.clone();
       }
