@@ -42,7 +42,7 @@ type S2 = RelaxedR1CSSNARK<E2, EE2>;
 fn test_aggregate_stop_start() {
   let num_nodes = 2;
   let snarks_data = sim_nw(num_nodes);
-  let snarks_data: Vec<AggregatorSNARKData<E1>> = snarks_data
+  let snarks_data: Vec<AggregatorSNARKData<'_, E1>> = snarks_data
     .iter()
     .map(|(snark, vk)| {
       let (snark, U) = snark.primary_snark_and_U();
@@ -63,13 +63,13 @@ fn test_aggregate_stop_start() {
   )
   .unwrap();
 
-  let mut rs_option: Option<RecursiveAggregatedSNARK<E1>> = None;
+  let rs_option: Option<RecursiveAggregatedSNARK<E1>> = None;
 
-  let (rs, snark) = ivc_aggregate_stop_start::<E1, S1, S2>(&pp, &circuits, rs_option).unwrap();
+  let (rs, _snark) = ivc_aggregate_stop_start::<E1, S1, S2>(&pp, &circuits, rs_option).unwrap();
 
   // ROUND 2
   let snarks_data = sim_nw(num_nodes);
-  let snarks_data: Vec<AggregatorSNARKData<E1>> = snarks_data
+  let snarks_data: Vec<AggregatorSNARKData<'_, E1>> = snarks_data
     .iter()
     .map(|(snark, vk)| {
       let (snark, U) = snark.primary_snark_and_U();
@@ -79,16 +79,16 @@ fn test_aggregate_stop_start() {
     .collect();
 
   let circuits = Aggregator::build_circuits(&snarks_data).unwrap();
-  let mut rs_option = Some(rs);
+  let rs_option = Some(rs);
 
-  let (rs, snark) = ivc_aggregate_stop_start::<E1, S1, S2>(&pp, &circuits, rs_option).unwrap();
+  let (_rs, _snark) = ivc_aggregate_stop_start::<E1, S1, S2>(&pp, &circuits, rs_option).unwrap();
 }
 
 #[test]
 fn test_ivc_aggregate() {
   let num_nodes = 3;
   let snarks_data = sim_nw(num_nodes);
-  let snarks_data: Vec<AggregatorSNARKData<E1>> = snarks_data
+  let snarks_data: Vec<AggregatorSNARKData<'_, E1>> = snarks_data
     .iter()
     .map(|(snark, vk)| {
       let (snark, U) = snark.primary_snark_and_U();
@@ -97,7 +97,7 @@ fn test_ivc_aggregate() {
     })
     .collect();
 
-  let snark = ivc_aggregate_with::<E1, S1, S2>(&snarks_data).unwrap();
+  let _snark = ivc_aggregate_with::<E1, S1, S2>(&snarks_data).unwrap();
 }
 
 pub fn ivc_aggregate_stop_start<E1, S1, S2>(
@@ -137,7 +137,7 @@ where
   rs.verify(&pp, num_steps)?;
 
   let (pk, vk) = CompressedAggregatedSNARK::<E1, S1, S2>::setup(&pp)?;
-  let snark = CompressedAggregatedSNARK::<E1, S1, S2>::prove(&pp, &pk, &vk, &rs)?;
+  let snark = CompressedAggregatedSNARK::<E1, S1, S2>::prove(&pp, &pk, &rs)?;
 
   snark.verify(&vk, num_steps)?;
   Ok((rs, snark))
@@ -184,10 +184,10 @@ where
   rs_iop.verify(&pp, num_steps)?;
 
   let (pk, vk) = CompressedAggregatedSNARK::<E1, S1, S2>::setup(&pp)?;
-  let snark = CompressedAggregatedSNARK::<E1, S1, S2>::prove(&pp, &pk, &vk, &rs_iop)?;
+  let snark = CompressedAggregatedSNARK::<E1, S1, S2>::prove(&pp, &pk, &rs_iop)?;
 
   snark.verify(&vk, num_steps)?;
-  Ok((snark))
+  Ok(snark)
 }
 
 fn sim_nw(num_nodes: usize) -> Vec<(CompressedSNARK<E1, AS1, S2>, VerifierKey<E1, AS1, S2>)> {
