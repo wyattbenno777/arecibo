@@ -28,28 +28,23 @@ use std::fmt::Debug;
 #[cfg(test)]
 mod tests;
 
-/// Contains utils for aggregator
-pub struct Aggregator;
-
-impl Aggregator {
-  /// Build circuits from proofs as input
-  pub fn build_circuits<'a, E1>(
-    snarks_data: &'a [AggregatorSNARKData<'a, E1>],
-  ) -> Result<Vec<(IOPCircuit<'a, E1>, FFACircuit<'a, E1>)>, NovaError>
-  where
-    E1: CurveCycleEquipped,
-    <E1 as Engine>::GE: DlogGroup,
-    CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
-  {
-    snarks_data
-      .iter()
-      .map(|snark_data| {
-        let iop_circuit = IOPCircuit::new(snark_data)?;
-        let ffa_circuit = FFACircuit::new(snark_data)?;
-        Ok((iop_circuit, ffa_circuit))
-      })
-      .collect::<Result<_, NovaError>>()
-  }
+/// Build circuits from proofs as input
+pub fn build_circuits<'a, E1>(
+  snarks_data: &'a [AggregatorSNARKData<'a, E1>],
+) -> Result<Vec<(IOPCircuit<'a, E1>, FFACircuit<'a, E1>)>, NovaError>
+where
+  E1: CurveCycleEquipped,
+  <E1 as Engine>::GE: DlogGroup,
+  CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
+{
+  snarks_data
+    .iter()
+    .map(|snark_data| {
+      let iop_circuit = IOPCircuit::new(snark_data)?;
+      let ffa_circuit = FFACircuit::new(snark_data)?;
+      Ok((iop_circuit, ffa_circuit))
+    })
+    .collect::<Result<_, NovaError>>()
 }
 
 /// A type that holds public parameters of Aggregator
