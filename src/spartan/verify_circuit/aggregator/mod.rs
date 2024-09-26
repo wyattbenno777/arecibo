@@ -440,6 +440,7 @@ where
 }
 
 /// Data structure that holds the required data needed for proof aggregation
+#[derive(Debug, Clone)]
 pub struct AggregatorSNARKData<'a, E: Engine> {
   snark: batched::BatchedRelaxedR1CSSNARK<E>,
   vk: &'a batched::VerifierKey<E>,

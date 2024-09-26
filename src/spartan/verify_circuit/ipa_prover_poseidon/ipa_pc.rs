@@ -36,7 +36,7 @@ pub struct ProverKey<E: Engine> {
 }
 
 /// Provides an implementation of the verifier key
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(bound = "")]
 pub struct VerifierKey<E: Engine> {
   pub ck_v: Arc<CommitmentKey<E>>,

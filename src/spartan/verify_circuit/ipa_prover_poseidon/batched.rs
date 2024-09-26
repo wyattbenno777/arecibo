@@ -73,7 +73,7 @@ pub struct ProverKey<E: Engine> {
 }
 
 /// A type that represents the verifier's key
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(bound = "")]
 pub struct VerifierKey<E: Engine> {
   pub(crate) vk_ee: ipa_pc::VerifierKey<E>,
