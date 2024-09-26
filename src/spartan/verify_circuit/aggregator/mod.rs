@@ -29,7 +29,7 @@ use std::fmt::Debug;
 mod tests;
 
 /// Build circuits from proofs as input
-pub fn build_circuits<'a, E1>(
+pub fn build_verify_circuits<'a, E1>(
   snarks_data: &'a [AggregatorSNARKData<'a, E1>],
 ) -> Result<Vec<(IOPCircuit<'a, E1>, FFACircuit<'a, E1>)>, NovaError>
 where

@@ -7,7 +7,8 @@ use crate::{
     snark::RelaxedR1CSSNARK,
     verify_circuit::{
       aggregator::{
-        build_circuits, AggregatorPublicParams, AggregatorSNARKData, RecursiveAggregatedSNARK,
+        build_verify_circuits, AggregatorPublicParams, AggregatorSNARKData,
+        RecursiveAggregatedSNARK,
       },
       ipa_prover_poseidon,
     },
@@ -51,7 +52,7 @@ fn test_aggregate_stop_start() {
     })
     .collect();
 
-  let circuits = build_circuits(&snarks_data).unwrap();
+  let circuits = build_verify_circuits(&snarks_data).unwrap();
 
   let (init_circuit_iop, init_circuit_ffa) = &circuits[0];
 
@@ -78,7 +79,7 @@ fn test_aggregate_stop_start() {
     })
     .collect();
 
-  let circuits = build_circuits(&snarks_data).unwrap();
+  let circuits = build_verify_circuits(&snarks_data).unwrap();
   let rs_option = Some(rs);
 
   let (_rs, _snark) = ivc_aggregate_stop_start::<E1, S1, S2>(&pp, &circuits, rs_option).unwrap();
@@ -158,7 +159,7 @@ where
   S2::VerifierKey: Serialize + Debug + Clone,
   S1::VerifierKey: Serialize + Debug + Clone,
 {
-  let circuits = build_circuits(snarks_data)?;
+  let circuits = build_verify_circuits(snarks_data)?;
   let num_steps = circuits.len();
   let (init_circuit_iop, init_circuit_ffa) = &circuits[0];
 
