@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+//! Contains the implementation of the aggregator for the Spartan SNARK
 
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 
@@ -28,10 +28,12 @@ use std::fmt::Debug;
 #[cfg(test)]
 mod tests;
 
+/// Contains utils for aggregator
 pub struct Aggregator;
 
 impl Aggregator {
-  fn build_circuits<'a, E1>(
+  /// Build circuits from proofs as input
+  pub fn build_circuits<'a, E1>(
     snarks_data: &'a [AggregatorSNARKData<'a, E1>],
   ) -> Result<Vec<(IOPCircuit<'a, E1>, FFACircuit<'a, E1>)>, NovaError>
   where
@@ -67,9 +69,10 @@ where
   E1: CurveCycleEquipped,
   Dual<E1>: CurveCycleEquipped<Secondary = E1>,
 {
+  /// Set up builder to create AggregatorPublicParams
   pub fn setup(
-    circuit_iop: &IOPCircuit<E1>,
-    circuit_ffa: &FFACircuit<E1>,
+    circuit_iop: &IOPCircuit<'_, E1>,
+    circuit_ffa: &FFACircuit<'_, E1>,
     ck_hint1: &CommitmentKeyHint<E1>,
     ck_hint2: &CommitmentKeyHint<Dual<E1>>,
   ) -> Result<AggregatorPublicParams<E1>, NovaError>
@@ -89,11 +92,11 @@ where
       )?,
     })
   }
-  pub fn iop(&self) -> &PublicParams<E1> {
+  fn iop(&self) -> &PublicParams<E1> {
     &self.pp_iop
   }
 
-  pub fn ffa(&self) -> &PublicParams<Dual<E1>> {
+  fn ffa(&self) -> &PublicParams<Dual<E1>> {
     &self.pp_ffa
   }
 }
@@ -117,10 +120,11 @@ where
   E1::GE: DlogGroup,
   CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
 {
+  /// Create new instance of recursive SNARK
   pub fn new(
     pp: &AggregatorPublicParams<E1>,
-    iop_circuit: &IOPCircuit<E1>,
-    ffa_circuit: &FFACircuit<E1>,
+    iop_circuit: &IOPCircuit<'_, E1>,
+    ffa_circuit: &FFACircuit<'_, E1>,
   ) -> Result<Self, NovaError> {
     let rs_iop = RecursiveSNARK::new(
       pp.iop(),
@@ -141,11 +145,13 @@ where
     Ok(Self { rs_iop, rs_ffa })
   }
 
+  /// Create a new RecursiveSNARK (or updates the provided RecursiveSNARK) by executing a step of the incremental computation
+
   pub fn prove_step(
     &mut self,
     pp: &AggregatorPublicParams<E1>,
-    iop_circuit: &IOPCircuit<E1>,
-    ffa_circuit: &FFACircuit<E1>,
+    iop_circuit: &IOPCircuit<'_, E1>,
+    ffa_circuit: &FFACircuit<'_, E1>,
   ) -> Result<(), NovaError> {
     self
       .rs_iop
@@ -158,32 +164,34 @@ where
     Ok(())
   }
 
+  /// Verify the correctness of the RecursiveSNARK
   pub fn verify(&self, pp: &AggregatorPublicParams<E1>, num_steps: usize) -> Result<(), NovaError> {
-    self.rs_iop.verify(
+    let _ = self.rs_iop.verify(
       pp.iop(),
       num_steps,
       &[<E1 as Engine>::Scalar::ZERO],
       &[<Dual<E1> as Engine>::Scalar::ZERO],
-    );
+    )?;
 
-    self.rs_ffa.verify(
+    let _ = self.rs_ffa.verify(
       pp.ffa(),
       num_steps,
       &[<Dual<E1> as Engine>::Scalar::ZERO],
       &[<E1 as Engine>::Scalar::ZERO],
-    );
+    )?;
 
     Ok(())
   }
 
-  pub fn iop(&self) -> &RecursiveSNARK<E1> {
+  fn iop(&self) -> &RecursiveSNARK<E1> {
     &self.rs_iop
   }
 
-  pub fn ffa(&self) -> &RecursiveSNARK<Dual<E1>> {
+  fn ffa(&self) -> &RecursiveSNARK<Dual<E1>> {
     &self.rs_ffa
   }
 
+  /// The number of steps that have been executed so far
   pub fn num_steps(&self) -> usize {
     self.rs_iop.num_steps()
   }
@@ -264,6 +272,7 @@ where
   }
 }
 
+/// Final SNARK after aggregation
 pub struct CompressedAggregatedSNARK<E1, S1, S2>
 where
   E1: CurveCycleEquipped,
@@ -294,7 +303,8 @@ where
   S2::VerifierKey: Serialize + Debug + Clone,
   S1::VerifierKey: Serialize + Debug + Clone,
 {
-  fn setup(
+  /// Creates prover and verifier keys for CompressedSNARK
+  pub fn setup(
     pp: &AggregatorPublicParams<E1>,
   ) -> Result<
     (
@@ -312,10 +322,10 @@ where
     Ok((pk, vk))
   }
 
-  fn prove(
+  /// Create a new CompressedSNARK
+  pub fn prove(
     pp: &AggregatorPublicParams<E1>,
     pk: &AggregatedProverKey<E1, S1, S2>,
-    vk: &AggregatedVerifierKey<E1, S1, S2>,
     rs: &RecursiveAggregatedSNARK<E1>,
   ) -> Result<Self, NovaError> {
     let snark_iop = CompressedSNARK::<_, S1, S2>::prove(pp.iop(), pk.iop(), rs.iop())?;
@@ -327,7 +337,8 @@ where
     })
   }
 
-  fn verify(
+  /// Verify the correctness of the CompressedSNARK
+  pub fn verify(
     &self,
     vk: &AggregatedVerifierKey<E1, S1, S2>,
     num_steps: usize,
@@ -349,13 +360,14 @@ where
   }
 }
 
+/// Verify circuit for IOP portions
 #[derive(Clone)]
-struct IOPCircuit<'a, E: Engine> {
+pub struct IOPCircuit<'a, E: Engine> {
   snark_data: &'a AggregatorSNARKData<'a, E>,
 }
 
 impl<'a, E: Engine> IOPCircuit<'a, E> {
-  pub fn new(snark_data: &'a AggregatorSNARKData<'a, E>) -> Result<Self, NovaError> {
+  fn new(snark_data: &'a AggregatorSNARKData<'a, E>) -> Result<Self, NovaError> {
     Ok(Self { snark_data })
   }
 }
@@ -374,7 +386,7 @@ impl<'a, E: Engine> StepCircuit<E::Scalar> for IOPCircuit<'a, E> {
   ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
     SpartanVerifyCircuit::synthesize(
       cs.namespace(|| "verify IOP"),
-      &self.snark_data.vk,
+      self.snark_data.vk,
       &self.snark_data.U,
       &self.snark_data.snark,
     )?;
@@ -382,8 +394,9 @@ impl<'a, E: Engine> StepCircuit<E::Scalar> for IOPCircuit<'a, E> {
   }
 }
 
+/// Circuit for proving the foreign field arithmetic portion of the verify circuit
 #[derive(Clone)]
-struct FFACircuit<'a, E1: Engine> {
+pub struct FFACircuit<'a, E1: Engine> {
   snark_data: &'a AggregatorSNARKData<'a, E1>,
   arg: PolyEvalInstance<E1>,
 }
@@ -393,10 +406,10 @@ where
   E1::GE: DlogGroup,
   CommitmentKey<E1>: CommitmentKeyExtTrait<E1>,
 {
-  pub fn new(snark_data: &'a AggregatorSNARKData<'a, E1>) -> Result<Self, NovaError> {
+  fn new(snark_data: &'a AggregatorSNARKData<'a, E1>) -> Result<Self, NovaError> {
     let arg = snark_data
       .snark
-      .verify_execution_trace(&snark_data.vk, &snark_data.U)?;
+      .verify_execution_trace(snark_data.vk, &snark_data.U)?;
     Ok(Self { snark_data, arg })
   }
 }

@@ -4,7 +4,6 @@ use crate::{
   errors::NovaError,
   provider::{ipa_pc, pedersen::CommitmentKeyExtTrait, traits::DlogGroup, PallasEngine},
   spartan::{
-    batched,
     snark::RelaxedR1CSSNARK,
     verify_circuit::{
       aggregator::{
@@ -15,7 +14,6 @@ use crate::{
   },
   supernova::{
     snark::{CompressedSNARK, VerifierKey},
-    utils::get_selector_vec_from_index,
     NonUniformCircuit, PublicParams, RecursiveSNARK, StepCircuit, TrivialSecondaryCircuit,
   },
   traits::{
@@ -24,11 +22,10 @@ use crate::{
   },
   CommitmentKey,
 };
-use abomonation::Abomonation;
+
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::Field;
-use ff::PrimeField;
-use itertools::Itertools as _;
+
 use serde::Serialize;
 
 use super::{CompressedAggregatedSNARK, FFACircuit, IOPCircuit};
@@ -105,7 +102,7 @@ fn test_ivc_aggregate() {
 
 pub fn ivc_aggregate_stop_start<E1, S1, S2>(
   pp: &AggregatorPublicParams<E1>,
-  circuits: &[(IOPCircuit<E1>, FFACircuit<E1>)],
+  circuits: &[(IOPCircuit<'_, E1>, FFACircuit<'_, E1>)],
   mut rs_option: Option<RecursiveAggregatedSNARK<E1>>,
 ) -> Result<
   (

@@ -1,4 +1,4 @@
-//! Implement the sumcheck verify algorithm in a constraint system (r1cs).
+//! Implement the verify algorithm in a constraint system (r1cs).
 
 pub mod aggregator;
 mod circuit;
