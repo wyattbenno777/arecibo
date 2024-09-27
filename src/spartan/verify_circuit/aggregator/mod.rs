@@ -268,6 +268,8 @@ where
 }
 
 /// Final SNARK after aggregation
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct CompressedAggregatedSNARK<E1, S1, S2>
 where
   E1: CurveCycleEquipped,
