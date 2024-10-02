@@ -55,14 +55,14 @@ pub trait EvaluationEngineTrait<E: Engine>: Clone + Send + Sync {
   ) -> Result<Self::EvaluationArgument, NovaError>;
 
   // /// A method to verify the purported evaluation of a multilinear polynomials
-  // fn verify(
-  //   vk: &Self::VerifierKey,
-  //   transcript: &mut E::TE,
-  //   comm: &<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment,
-  //   point: &[E::Scalar],
-  //   eval: &E::Scalar,
-  //   arg: &Self::EvaluationArgument,
-  // ) -> Result<(), NovaError>;
+   fn verify_not_zk(
+     vk: &Self::VerifierKey,
+     transcript: &mut E::TE,
+     comm: &<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment,
+     point: &[E::Scalar],
+     eval: &E::Scalar,
+     arg: &Self::EvaluationArgument,
+   ) -> Result<(), NovaError>;
 
 
   /// A method to prove evaluations of a batch of polynomials

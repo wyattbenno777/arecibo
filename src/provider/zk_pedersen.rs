@@ -379,12 +379,13 @@ where
   /// Scales the commitment key using the provided scalar
   fn scale(&mut self, r: &E::Scalar);
 
-  /* /// Reinterprets commitments as commitment keys
+  /// Reinterprets commitments as commitment keys
   fn reinterpret_commitments_as_ck(
     c: &[<<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment as CommitmentTrait<E>>::CompressedCommitment],
+    original_ck: &Self,
   ) -> Result<Self, NovaError>
   where
-    Self: Sized;*/
+      Self: Sized;
 }
 
 impl<E> CommitmentKeyExtTrait<E> for CommitmentKey<E>
@@ -427,16 +428,26 @@ where
     let ck_scaled: Vec<E::GE> = self.ck.par_iter().map(|g| *g * r).collect();
     E::GE::batch_normalize(&ck_scaled, &mut self.ck);
   }
-
   
-  /* /// reinterprets a vector of commitments as a set of generators
-  fn reinterpret_commitments_as_ck(c: &[CompressedCommitment<E>]) -> Result<Self, NovaError> {
+  /// reinterprets a vector of commitments as a set of generators
+  fn reinterpret_commitments_as_ck(
+    c: &[CompressedCommitment<E>],
+    original_ck: &CommitmentKey<E>
+  ) -> Result<Self, NovaError> {
     let d = c
       .par_iter()
       .map(|c| Commitment::<E>::decompress(c).map(|c| c.comm))
       .collect::<Result<Vec<E::GE>, NovaError>>()?;
     let mut ck = vec![<E::GE as PrimeCurve>::Affine::identity(); d.len()];
     E::GE::batch_normalize(&d, &mut ck);
-    Ok(Self { ck })
-  }*/
+
+    let h = original_ck.h;
+    
+    // Create a new CommitmentKey using the normalized points and the original blinding factor
+    let new_ck = Self {
+        ck,
+        h,
+    };
+    Ok(new_ck)
+  }
 }

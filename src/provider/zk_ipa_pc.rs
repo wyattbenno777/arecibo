@@ -20,6 +20,8 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::sync::Arc;
+use crate::provider::util::field::batch_invert;
+use crate::errors::PCSError;
 
 /// Provides an implementation of the prover key
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -79,8 +81,8 @@ where
   fn setup(
     ck: Arc<<<E as Engine>::CE as CommitmentEngineTrait<E>>::CommitmentKey>,
   ) -> (Self::ProverKey, Self::VerifierKey) {
-    // let ck_c = E::CE::setup(b"ipa", 1);
-    let ck_c = E::CE::setup_with_blinding(b"ipa", 1, &E::CE::get_blinding_gen(&ck));
+    let ck_c = E::CE::setup(b"ipa", 1);
+    //let ck_c = E::CE::setup_with_blinding(b"ipa", 1, &E::CE::get_blinding_gen(&ck));
 
     let pk = ProverKey { ck_s: ck_c.clone() };
     let vk = VerifierKey {
@@ -112,6 +114,7 @@ where
     point: &[E::Scalar],
     eval: &E::Scalar,
   ) -> Result<Self::EvaluationArgument, NovaError> {
+
     let u = InnerProductInstanceNotZK::new(comm, &EqPolynomial::evals_from_points(point), eval);
     let w = InnerProductWitnessNotZK::new(poly);
 
@@ -123,6 +126,22 @@ where
         ipa,
         eval_commitments: vec![CommitmentTrait::compress(comm)], // Use the input commitment
     })
+  }
+
+  fn verify_not_zk(
+    vk: &Self::VerifierKey,
+    transcript: &mut E::TE,
+    comm: &Commitment<E>,
+    point: &[E::Scalar],
+    eval: &E::Scalar,
+    arg: &Self::EvaluationArgument,
+  ) -> Result<(), NovaError> {
+    let u = InnerProductInstanceNotZK::new(comm, &EqPolynomial::evals_from_points(point), eval);
+
+
+    arg.ipa.verify_not_zk(&vk.ck_v, vk.ck_s.clone(), 1 << point.len(), &u, transcript)?;
+
+    Ok(())
   }
 
   fn prove_batch(
@@ -633,7 +652,7 @@ where
     }
 
     // absorb the instance in the transcript
-    transcript.absorb(b"U", U);
+    //transcript.absorb(b"U", U);
 
     // sample a random base for committing to the inner product
     let r = transcript.squeeze(b"r")?;
@@ -679,9 +698,6 @@ where
       )
       .compress();
 
-      transcript.absorb(b"L", &L);
-      transcript.absorb(b"R", &R);
-
       let r = transcript.squeeze(b"r")?;
       let r_inverse = r.invert().unwrap();
 
@@ -722,15 +738,118 @@ where
       ck = ck_folded;
     }
 
+    let z_1 = a_vec[0];
+    let z_2 = b_vec[0];
+
+    println!("Prover z_1: {:?}", z_1);
+    println!("Prover z_2: {:?}", z_2);
+
+
     Ok(Self {
       P_L_vec: L_vec.clone(),
       P_R_vec: R_vec.clone(),
       delta: R_vec[0].clone(),
       beta: L_vec[0].clone(),
-      z_1: a_vec[0],
-      z_2: a_vec[0],
+      z_1,
+      z_2,
       _p: Default::default(),
     })
+  }
+
+  fn verify_not_zk(
+    &self,
+    ck: &CommitmentKey<E>,
+    mut ck_c: CommitmentKey<E>,
+    n: usize,
+    U: &InnerProductInstanceNotZK<E>,
+    transcript: &mut E::TE,
+  ) -> Result<(), NovaError> {
+
+    let (ck, _) = ck.clone().split_at(U.b_vec.len());
+
+    transcript.dom_sep(Self::protocol_name());
+    if U.b_vec.len() != n
+        || n != (1 << self.P_L_vec.len())
+        || self.P_L_vec.len() != self.P_R_vec.len()
+        || self.P_L_vec.len() >= 32
+    {
+        return Err(NovaError::InvalidInputLength);
+    }
+
+    // Sample a random base for committing to the inner product
+    let r = transcript.squeeze(b"r")?;
+    ck_c.scale(&r);
+
+    let P = U.comm_a_vec + CE::<E>::commit(&ck_c, &[U.c]);
+
+    // Compute a vector of public coins
+    let r = (0..self.P_L_vec.len())
+        .map(|_i| transcript.squeeze(b"r"))
+        .collect::<Result<Vec<E::Scalar>, NovaError>>()?;
+
+    // Precompute scalars
+    let r_square: Vec<E::Scalar> = r.par_iter().map(|r_i| *r_i * *r_i).collect();
+
+    let r_inverse = batch_invert(r.clone())?;
+    
+    let r_inverse_square: Vec<E::Scalar> = r_inverse.par_iter().map(|r_i| *r_i * *r_i).collect();
+
+    // Compute the vector with the tensor structure
+    let s = {
+      let mut s = vec![E::Scalar::ZERO; n];
+      s[0] = {
+        let mut v = E::Scalar::ONE;
+        for r_inverse_i in r_inverse {
+          v *= r_inverse_i;
+        }
+        v
+      };
+      for i in 1..n {
+        let pos_in_r = (31 - (i as u32).leading_zeros()) as usize;
+        s[i] = s[i - (1 << pos_in_r)] * r_square[(self.P_L_vec.len() - 1) - pos_in_r];
+      }
+      s
+    };
+
+    let ck_hat = {
+        let c = CE::<E>::commit(&ck, &s).compress();
+        CommitmentKey::<E>::reinterpret_commitments_as_ck(&[c], &ck)?
+    };
+
+    let b_hat = inner_product(&U.b_vec, &s);
+
+    let P_hat = {
+        let ck_folded = {
+            let ck_L = CommitmentKey::<E>::reinterpret_commitments_as_ck(&self.P_L_vec, &ck)?;
+            let ck_R = CommitmentKey::<E>::reinterpret_commitments_as_ck(&self.P_R_vec, &ck)?;
+            let ck_P = CommitmentKey::<E>::reinterpret_commitments_as_ck(&[P.compress()], &ck)?;
+            ck_L.combine(&ck_R).combine(&ck_P)
+        };
+
+        CE::<E>::commit(
+          &ck_folded,
+          &r_square
+            .iter()
+            .chain(r_inverse_square.iter())
+            .chain(iter::once(&E::Scalar::ONE))
+            .copied()
+            .collect::<Vec<E::Scalar>>(),
+        )
+    };
+
+    println!("Verifier z_1: {:?}", self.z_1);
+    println!("Verifier z_2: {:?}", self.z_2);
+
+
+    let right_hand_side = CE::<E>::commit(&ck_hat.combine(&ck_c), &[self.z_1, self.z_1 * b_hat]);
+
+    if P_hat == right_hand_side {
+        println!("Verification succeeded");
+        Ok(())
+    } else {
+        println!("Verification failed");
+        Err(NovaError::PCSError(PCSError::InvalidPCS))
+    }
   }
 
   /// prover inner product argument

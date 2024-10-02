@@ -13,7 +13,7 @@ use crate::{
       eq::EqPolynomial,
       power::PowPolynomial,
       univariate::{CompressedUniPoly, UniPoly},
-      multilinear::{MultilinearPolynomial},
+      //multilinear::{MultilinearPolynomial},
     },
     zksumcheck::{
       engine::{
@@ -25,7 +25,7 @@ use crate::{
     sumcheck::{
       engine::{
         SumcheckEngine,
-        OuterSumcheckInstance, InnerSumcheckInstance, MemorySumcheckInstance
+        //OuterSumcheckInstance, InnerSumcheckInstance, MemorySumcheckInstance
       },
       SumcheckProof
     },
@@ -49,7 +49,8 @@ use crate::provider::zk_ipa_pc;
 use crate::provider::traits::DlogGroup;
 use core::slice;
 use ff::Field;
-use itertools::{chain, Itertools as _};
+//use itertools::{chain, Itertools as _};
+use itertools::{Itertools as _};
 use once_cell::sync::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -190,7 +191,7 @@ pub struct BatchedRelaxedR1CSSNARK<E: Engine + Serialize> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct ResultsBatchedTinySNARK<E: Engine> where <E as traits::Engine>::GE: DlogGroup {
-  comms_L_row_col: Vec<[zk_pedersen::Commitment<E>; 2]>,
+  /*comms_L_row_col: Vec<[zk_pedersen::Commitment<E>; 2]>,
   // commitments to aid the memory checks
   // [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col]
   comms_mem_oracles: Vec<[zk_pedersen::Commitment<E>; 4]>,
@@ -210,7 +211,7 @@ pub struct ResultsBatchedTinySNARK<E: Engine> where <E as traits::Engine>::GE: D
   evals_mem_preprocessed: Vec<[E::Scalar; 7]>,
 
   // a PCS evaluation argument
-  eval_arg: zk_ipa_pc::EvaluationArgument<E>,
+  eval_arg: zk_ipa_pc::EvaluationArgument<E>,*/
   eval_arg_witness: zk_ipa_pc::EvaluationArgument<E>,
 }
 
@@ -348,7 +349,7 @@ where
     assert!(Nis.iter().all(|&Ni| Ni.is_power_of_two()));
     let N_max = *Nis.iter().max().unwrap();
 
-    //let num_instances = U.len();
+    let num_instances = U.len();
 
     // Pad [(Wᵢ,Eᵢ)] to the next power of 2 (not to Ni)
     let W = zip_with!(par_iter, (W, S), |w, s| w.pad(s)).collect::<Vec<RelaxedR1CSWitness<E>>>();
@@ -358,11 +359,11 @@ where
 
     // Initialize transcript with vk || [Uᵢ]
     let mut transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
-    //transcript.absorb(b"vk", &pk.vk_digest);
-    /*if num_instances > 1 {
+    transcript.absorb(b"vk", &pk.vk_digest);
+    if num_instances > 1 {
       let num_instances_field = E::Scalar::from(num_instances as u64);
       transcript.absorb(b"n", &num_instances_field);
-    }*/
+    }
 
     // Append public inputs to Wᵢ: Zᵢ = [Wᵢ, uᵢ, Xᵢ]
     let polys_Z = zip_with!(par_iter, (W, U, Nis), |W, U, Ni| {
@@ -396,9 +397,9 @@ where
       [comm_Az, comm_Bz, comm_Cz]
     })
     .collect::<Vec<_>>();
-    /*comms_Az_Bz_Cz
+    comms_Az_Bz_Cz
       .iter()
-      .for_each(|comms| transcript.absorb(b"c", &comms.as_slice()));*/
+      .for_each(|comms| transcript.absorb(b"c", &comms.as_slice()));
 
     // Compute eq(tau) for each instance in log2(Ni) variables
     let tau = transcript.squeeze(b"t")?;
@@ -510,8 +511,6 @@ where
       &mut transcript,
     )?;
 
-    println!("Number of proofs in ZKSumcheckProof: {}", sumcheck_result.proofs.len());
-
     //need to start ipa proof here for witness.
     let evals_W = claims_witness.clone()
     .into_iter()
@@ -568,9 +567,9 @@ where
     .collect::<Vec<_>>();
 
     // Absorb each commitment individually
-    /*for comm in &blinded_witness_comms {
+    for comm in &blinded_witness_comms {
         transcript.absorb(b"c", comm);
-    }*/
+    }
 
     // Prepare u_batch for blinded witness polynomials
     let c_witness = transcript.squeeze(b"c_witness")?;
@@ -652,7 +651,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
   pub fn verify_full(
     &self,
     vk: &<Self as BatchedRelaxedR1CSSNARKTrait<E>>::VerifierKey,
-    //results: ResultsBatchedTinySNARK<E>,
+    results: ResultsBatchedTinySNARK<E>,
     U: &[RelaxedR1CSInstance<E>]) -> Result<(), NovaError> {
 
     // First lets do all of the steps to verify the TinyProver portion.
@@ -660,28 +659,25 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
     let num_claims_per_instance = 1;
 
     let mut transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
+    transcript.absorb(b"vk", &vk.digest());
 
-    //transcript.absorb(b"vk", &vk.digest());
     if num_instances > 1 {
-      let _num_instances_field = E::Scalar::from(num_instances as u64);
-      //transcript.absorb(b"n", &num_instances_field);
+      let num_instances_field = E::Scalar::from(num_instances as u64);
+      transcript.absorb(b"n", &num_instances_field);
     }
-    //transcript.absorb(b"U", &U);
 
     // Verify commitments to Az, Bz, Cz
     for comms in self.data.comms_Az_Bz_Cz.iter() {
-      //transcript.absorb(b"c", &comms.as_slice());
+      transcript.absorb(b"c", &comms.as_slice());
     }
 
     // Generate tau and verify claimed evaluations
     let tau = transcript.squeeze(b"t")?;
-    let tau_coords = PowPolynomial::new(&tau, self.data.N_max.log_2()).coordinates();
 
     let c = transcript.squeeze(b"c")?;
 
     // Verify witness sumcheck proof
-    //let s = transcript.squeeze(b"r")?;
-    //let s_powers = powers(&s, num_instances * num_claims_per_instance);
+    let s = transcript.squeeze(b"r")?;
 
     // Create ZKSumcheckProof instance
     let zk_sumcheck_proof = ZKSumcheckProof {
@@ -704,9 +700,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
           .collect(),
     };
 
-    for (i, proof) in zk_sumcheck_proof.proofs.iter().enumerate() {
-      println!("Verifying proof for round {}", i);
-      
+    for (i, proof) in zk_sumcheck_proof.proofs.iter().enumerate() {      
       // Reconstruct the challenge for this round
       let _r_i = transcript.squeeze(b"challenge_nextround")?;
       
@@ -719,47 +713,71 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
       let Cy = &self.data.sumcheck_comm_evals[i];
       let a_vec = &self.data.a_vec[i];
   
-      let mut cat_transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
+      let mut _cat_transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
   
       proof.verify(
           &vk.sumcheck_gens.ck_1,
           &vk.sumcheck_gens.ck_4,
-          &mut cat_transcript,
+          &mut transcript,
           a_vec,
           Cx,
           Cy,
       )?;
     }
-    
-    let claims_compressed: Vec<CompressedCommitment<E>> = self.data.claims_witness
-      .iter()
-      .flatten()
-      .map(|c| E::CE::commit(&vk.sumcheck_gens.ck_4, c).compress())
-      .collect();
 
+    for comm in &self.data.blinded_witness_comms {
+      transcript.absorb(b"c", comm);
+    }
 
-    // Verify the ZKSumcheckProof
-    /*let (comm_final, rand_sc) = zk_sumcheck_proof.verify_batch(
-        &claims_compressed,
-        &self.data.Nis.iter().map(|&n| n.log_2()).collect::<Vec<_>>(),
-        &s_powers,
-        3, // degree bound, adjust if needed
-        &vk.sumcheck_gens.ck_1,
-        &vk.sumcheck_gens.ck_4,
-        &mut transcript,
-    )?;*/
+    let c_witness = transcript.squeeze(b"c_witness")?;
+
+    let mut untrusted_transcript = E::TE::new(b"UntrustedProver");
+
+    zk_ipa_pc::EvaluationEngine::verify_not_zk(
+      &vk.vk_ee,
+      &mut untrusted_transcript,
+      &self.data.u_batch_witness.c,
+      &self.data.u_batch_witness.x,
+      &self.data.u_batch_witness.e,
+      &results.eval_arg_witness
+    )?;
 
     Ok(())
   }
   
   pub fn prove_unstrusted(
+      vk: &<Self as BatchedRelaxedR1CSSNARKTrait<E>>::VerifierKey,
       data: &DataForUntrustedRemote<E>,
   ) -> Result<ResultsBatchedTinySNARK<E>, NovaError>
   where
       E::Scalar: PrimeField,
   {
     let mut transcript = E::TE::new(b"UntrustedProver");
-    transcript.absorb(b"vk", &data.vk_digest);
+
+    // Perform IPA for batched witness polynomials
+    let eval_arg_witness = zk_ipa_pc::EvaluationEngine::<E>::prove_not_zk(
+      &data.ck,
+      &data.pk_ee,
+      &mut transcript,
+      &data.u_batch_witness.c,
+      &data.w_batch_witness.p,
+      &data.u_batch_witness.x,
+      &data.u_batch_witness.e,
+    )?;
+
+
+    let mut transcript2 = E::TE::new(b"UntrustedProver");
+
+    zk_ipa_pc::EvaluationEngine::verify_not_zk(
+      &vk.vk_ee,
+      &mut transcript2,
+      &data.u_batch_witness.c,
+      &data.u_batch_witness.x,
+      &data.u_batch_witness.e,
+      &eval_arg_witness,
+    )?;
+    
+    /*transcript.absorb(b"vk", &data.vk_digest);
 
     // Evaluate and commit to [Az(tau), Bz(tau), Cz(tau)]
     let evals_Az_Bz_Cz_at_tau = zip_with!(
@@ -1132,20 +1150,10 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
       &w_batch.p,
       &u_batch.x,
       &u_batch.e,
-    )?;
+    )?;*/
         
-    // Perform IPA for batched witness polynomials
-    let eval_arg_witness = zk_ipa_pc::EvaluationEngine::<E>::prove_not_zk(
-        &data.ck,
-        &data.pk_ee,
-        &mut transcript,
-        &data.u_batch_witness.c,
-        &data.w_batch_witness.p,
-        &data.u_batch_witness.x,
-        &data.u_batch_witness.e,
-    )?;
 
-    let _comms_Az_Bz_Cz: Vec<[CompressedCommitment<E>; 3]> = <Vec<[zk_pedersen::Commitment<E>; 3]> as Clone>::clone(&data.comms_Az_Bz_Cz)
+    /*let _comms_Az_Bz_Cz: Vec<[CompressedCommitment<E>; 3]> = <Vec<[zk_pedersen::Commitment<E>; 3]> as Clone>::clone(&data.comms_Az_Bz_Cz)
     .into_iter()
     .map(|comms| [comms[0].compress(), comms[1].compress(), comms[2].compress()])
     .collect();
@@ -1158,18 +1166,18 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
     let _comms_mem_oracles: Vec<[CompressedCommitment<E>; 4]> = comms_mem_oracles.clone()
         .into_iter()
         .map(|comms| [comms[0].compress(), comms[1].compress(), comms[2].compress(), comms[3].compress()])
-        .collect();
+        .collect();*/
 
     Ok(ResultsBatchedTinySNARK{
-      comms_L_row_col,
-      comms_mem_oracles,
-      evals_Az_Bz_Cz_at_tau,
-      sc,
-      evals_Az_Bz_Cz,
-      evals_L_row_col,
-      evals_mem_oracle,
-      evals_mem_preprocessed,
-      eval_arg,
+      //comms_L_row_col,
+      //comms_mem_oracles,
+      //evals_Az_Bz_Cz_at_tau,
+      //sc,
+      //evals_Az_Bz_Cz,
+      //evals_L_row_col,
+      //evals_mem_oracle,
+      //evals_mem_preprocessed,
+      //eval_arg,
       eval_arg_witness,
     })
   }
@@ -1314,12 +1322,12 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
         a
       };
 
-      let mut cat_transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
+      let mut _cat_transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
 
       let (proof, comm_poly_fin, comm_sc_eval) = DotProductProof::prove(
           &pk.sumcheck_gens.ck_1,
           &pk.sumcheck_gens.ck_4,
-          &mut cat_transcript,
+          transcript,
           &padded_coeffs,
           &blinds_poly[i],
           &a,
@@ -1383,6 +1391,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
   /// The SNARK prover/verifier will need to rescale the evaluation by the first Lagrange polynomial
   ///   u'' = L_0(r_{0},...,r_{n-m-1}) * u'
   /// in order batch all evaluations with a single PCS call.
+  #[allow(unused)]
   fn prove_helper<T1, T2, T3>(
     num_rounds: usize,
     mut mem: Vec<T1>,
@@ -1563,6 +1572,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
     }
   }
 
+  #[allow(unused)]
   fn get_evals_not_zk<T: SumcheckEngine<E>>(inst: &T, remaining_variables: usize) -> Vec<Vec<E::Scalar>> {
     let num_instance_variables = inst.size().log_2(); // m
     if num_instance_variables < remaining_variables {
@@ -1588,6 +1598,7 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
     }
   }
 
+  #[allow(unused)]
   fn bind_not_zk<T: SumcheckEngine<E>>(inst: &mut T, remaining_variables: usize, r: &E::Scalar) {
     let num_instance_variables = inst.size().log_2(); // m
     if remaining_variables <= num_instance_variables {
@@ -1608,8 +1619,9 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
       .collect()
   }
 
-    /// Given an instance defined over m variables, the sum over n = `remaining_variables` is equal
+  /// Given an instance defined over m variables, the sum over n = `remaining_variables` is equal
   /// to the initial claim scaled by 2^{n-m}, when m ≤ n.   
+  #[allow(unused)]
   fn scaled_claims_not_zk<T: SumcheckEngine<E>>(inst: &T, remaining_variables: usize) -> Vec<E::Scalar> {
     let num_instance_variables = inst.size().log_2(); // m
     let num_repetitions = 1 << (remaining_variables - num_instance_variables);
