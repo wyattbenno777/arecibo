@@ -844,10 +844,8 @@ where
     let right_hand_side = CE::<E>::commit(&ck_hat.combine(&ck_c), &[self.z_1, self.z_1 * b_hat]);
 
     if P_hat == right_hand_side {
-        println!("Verification succeeded");
         Ok(())
     } else {
-        println!("Verification failed");
         Err(NovaError::PCSError(PCSError::InvalidPCS))
     }
   }
@@ -1170,15 +1168,61 @@ where
 }
 
 #[cfg(test)]
-mod test {
-  // use crate::provider::ipa_pc::EvaluationEngine;
-  // use crate::provider::util::test_utils::prove_verify_from_num_vars;
-  // use crate::provider::GrumpkinEngine;
+mod tests {
+    use super::*;
+    use crate::provider::ZKPallasEngine;
+    use rand::Rng;
+    use crate::traits::Engine;
+    use crate::provider::zk_ipa_pc;
 
-  // #[test]
-  // fn test_multiple_polynomial_size() {
-  //   for num_vars in [4, 5, 6] {
-  //     prove_verify_from_num_vars::<_, EvaluationEngine<GrumpkinEngine>>(num_vars);
-  //   }
-  // }
+    type E = ZKPallasEngine;
+
+    fn random_scalar<R: Rng>(rng: &mut R) -> <E as Engine>::Scalar {
+        <E as Engine>::Scalar::random(rng)
+    }
+
+    #[test]
+    fn test_zk_ipa_prove_verify() {
+        let mut rng = rand::thread_rng();
+        let n = 8; // Vector length, must be a power of 2
+
+        // Set up the commitment keys
+        let ck = <E as Engine>::CE::setup(b"ck", n);
+        let ck_c = <E as Engine>::CE::setup(b"ck_c", 1);
+
+        // Generate random vectors a and b
+        let a: Vec<<E as Engine>::Scalar> = (0..n).map(|_| random_scalar(&mut rng)).collect();
+        let b: Vec<<E as Engine>::Scalar> = (0..n).map(|_| random_scalar(&mut rng)).collect();
+
+        // Compute the inner product
+        let c = inner_product(&a, &b);
+
+        // Create a commitment to vector a
+        let comm_a = CE::<E>::commit(&ck, &a);
+
+        // Create the instance and witness
+        let instance: zk_ipa_pc::InnerProductInstanceNotZK<E> = InnerProductInstanceNotZK::new(&comm_a, &b, &c);
+        let witness = InnerProductWitnessNotZK::new(&a);
+
+        // Create a new transcript
+        let mut transcript = <<E as Engine>::TE>::new(b"IPA Test");
+
+        // Generate the proof
+        let proof = InnerProductArgument::prove_not_zk(
+            ck.clone(),
+            ck_c.clone(),
+            &instance,
+            &witness,
+            &mut transcript,
+        )
+        .expect("Proof generation should succeed");
+
+        // Reset the transcript for verification
+        let mut transcript = <<E as Engine>::TE>::new(b"IPA Test");
+
+        // Verify the proof
+        let result = proof.verify_not_zk(&ck, ck_c, n, &instance, &mut transcript);
+
+        assert!(result.is_ok(), "Verification should succeed");
+    }
 }

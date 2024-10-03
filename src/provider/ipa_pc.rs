@@ -377,15 +377,61 @@ where
 }
 
 #[cfg(test)]
-mod test {
-  use crate::provider::ipa_pc::EvaluationEngine;
-  use crate::provider::util::test_utils::prove_verify_from_num_vars;
-  use crate::provider::GrumpkinEngine;
+mod tests {
+    use super::*;
+    use crate::provider::PallasEngine;
+    use rand::Rng;
+    use crate::traits::Engine;
+    use crate::provider::ipa_pc;
 
-  #[test]
-  fn test_multiple_polynomial_size() {
-    for num_vars in [4, 5, 6] {
-      prove_verify_from_num_vars::<_, EvaluationEngine<GrumpkinEngine>>(num_vars);
+    type E = PallasEngine;
+
+    fn random_scalar<R: Rng>(rng: &mut R) -> <E as Engine>::Scalar {
+        <E as Engine>::Scalar::random(rng)
     }
-  }
+
+    #[test]
+    fn test_ipa_prove_verify() {
+        let mut rng = rand::thread_rng();
+        let n = 8; // Vector length, must be a power of 2
+
+        // Set up the commitment keys
+        let ck = <E as Engine>::CE::setup(b"ck", n);
+        let ck_c = <E as Engine>::CE::setup(b"ck_c", 1);
+
+        // Generate random vectors a and b
+        let a: Vec<<E as Engine>::Scalar> = (0..n).map(|_| random_scalar(&mut rng)).collect();
+        let b: Vec<<E as Engine>::Scalar> = (0..n).map(|_| random_scalar(&mut rng)).collect();
+
+        // Compute the inner product
+        let c = inner_product(&a, &b);
+
+        // Create a commitment to vector a
+        let comm_a = CE::<E>::commit(&ck, &a);
+
+        // Create the instance and witness
+        let instance: ipa_pc::InnerProductInstance<E> = InnerProductInstance::new(&comm_a, &b, &c);
+        let witness = InnerProductWitness::new(&a);
+
+        // Create a new transcript
+        let mut transcript = <<E as Engine>::TE>::new(b"IPA Test");
+
+        // Generate the proof
+        let proof = InnerProductArgument::prove(
+            ck.clone(),
+            ck_c.clone(),
+            &instance,
+            &witness,
+            &mut transcript,
+        )
+        .expect("Proof generation should succeed");
+
+        // Reset the transcript for verification
+        let mut transcript = <<E as Engine>::TE>::new(b"IPA Test");
+
+        // Verify the proof
+        let result = proof.verify(&ck, ck_c, n, &instance, &mut transcript);
+
+        assert!(result.is_ok(), "Verification should succeed");
+    }
 }

@@ -41,6 +41,7 @@ impl<E: Engine> ZKSumcheckProof<E> where E::CE: ZKCommitmentEngineTrait<E>, E::G
     }
   }
 
+  #[allow(unused)]
   pub fn verify_batch(
     &self,
     claims: &[CompressedCommitment<E>],
