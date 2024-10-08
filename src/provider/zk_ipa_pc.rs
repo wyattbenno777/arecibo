@@ -107,18 +107,18 @@ where
 
   fn prove_not_zk(
     ck: &CommitmentKey<E>,
-    pk: &CommitmentKey<E>,
+    pk: &Self::ProverKey,
     transcript: &mut E::TE,
     comm: &Commitment<E>,
     poly: &[E::Scalar],
     point: &[E::Scalar],
     eval: &E::Scalar,
   ) -> Result<Self::EvaluationArgument, NovaError> {
+    let u: InnerProductInstanceNotZK<E> = InnerProductInstanceNotZK::new(comm, &EqPolynomial::evals_from_points(point), eval);
+    let w: InnerProductWitnessNotZK<E>  = InnerProductWitnessNotZK::new(poly);
 
-    let u = InnerProductInstanceNotZK::new(comm, &EqPolynomial::evals_from_points(point), eval);
-    let w = InnerProductWitnessNotZK::new(poly);
 
-    let ipa = InnerProductArgument::prove_not_zk(ck.clone(), pk.clone(), &u, &w, transcript)?;
+    let ipa = InnerProductArgument::prove_not_zk(ck.clone(), pk.ck_s.clone(), &u, &w, transcript)?;
 
     // Wrap the InnerProductArgument in an EvaluationArgument
     Ok(EvaluationArgument {
@@ -136,8 +136,7 @@ where
     eval: &E::Scalar,
     arg: &Self::EvaluationArgument,
   ) -> Result<(), NovaError> {
-    let u = InnerProductInstanceNotZK::new(comm, &EqPolynomial::evals_from_points(point), eval);
-
+    let u: InnerProductInstanceNotZK<E> = InnerProductInstanceNotZK::new(comm, &EqPolynomial::evals_from_points(point), eval);
 
     arg.ipa.verify_not_zk(&vk.ck_v, vk.ck_s.clone(), 1 << point.len(), &u, transcript)?;
 
@@ -255,13 +254,13 @@ where
   }
 }
 
-fn inner_product<T: Field + Send + Sync>(a: &[T], b: &[T]) -> T {
+pub fn inner_product<T: Field + Send + Sync>(a: &[T], b: &[T]) -> T {
   zip_with!(par_iter, (a, b), |x, y| *x * y).sum()
 }
 
 /// An inner product instance consists of a commitment to a vector `a` and another vector `b`
 /// and the claim that c = <a, b>.
-struct InnerProductInstanceNotZK<E: Engine> {
+pub struct InnerProductInstanceNotZK<E: Engine> {
   comm_a_vec: Commitment<E>,
   b_vec: Vec<E::Scalar>,
   c: E::Scalar,
@@ -272,7 +271,7 @@ where
   E: Engine,
   E::GE: DlogGroup,
 {
-  fn new(comm_a_vec: &Commitment<E>, b_vec: &[E::Scalar], c: &E::Scalar) -> Self {
+  pub fn new(comm_a_vec: &Commitment<E>, b_vec: &[E::Scalar], c: &E::Scalar) -> Self {
     Self {
       comm_a_vec: *comm_a_vec,
       b_vec: b_vec.to_vec(),
@@ -370,12 +369,12 @@ impl<E: Engine> InnerProductWitness<E> {
   }
 }
 
-struct InnerProductWitnessNotZK<E: Engine> {
+pub struct InnerProductWitnessNotZK<E: Engine> {
   a_vec: Vec<E::Scalar>,
 }
 
 impl<E: Engine> InnerProductWitnessNotZK<E> {
-  fn new(a_vec: &[E::Scalar]) -> Self {
+  pub fn new(a_vec: &[E::Scalar]) -> Self {
     Self {
       a_vec: a_vec.to_vec(),
     }
@@ -652,7 +651,7 @@ where
     }
 
     // absorb the instance in the transcript
-    //transcript.absorb(b"U", U);
+    transcript.absorb(b"U", U);
 
     // sample a random base for committing to the inner product
     let r = transcript.squeeze(b"r")?;
@@ -698,6 +697,9 @@ where
       )
       .compress();
 
+      transcript.absorb(b"L", &L);
+      transcript.absorb(b"R", &R);
+
       let r = transcript.squeeze(b"r")?;
       let r_inverse = r.invert().unwrap();
 
@@ -714,6 +716,7 @@ where
       )
       .collect::<Vec<E::Scalar>>();
 
+      //let ck_folded = CommitmentKeyExtTrait::fold(&ck_L, &ck_R, &r_inverse, &r);
       let ck_folded = CommitmentKeyExtTrait::fold(&ck, &ck_L, &ck_R, &r_inverse, &r);
 
       Ok((L, R, a_vec_folded, b_vec_folded, ck_folded))
@@ -741,10 +744,6 @@ where
     let z_1 = a_vec[0];
     let z_2 = b_vec[0];
 
-    println!("Prover z_1: {:?}", z_1);
-    println!("Prover z_2: {:?}", z_2);
-
-
     Ok(Self {
       P_L_vec: L_vec.clone(),
       P_R_vec: R_vec.clone(),
@@ -764,37 +763,47 @@ where
     U: &InnerProductInstanceNotZK<E>,
     transcript: &mut E::TE,
   ) -> Result<(), NovaError> {
-
     let (ck, _) = ck.clone().split_at(U.b_vec.len());
 
     transcript.dom_sep(Self::protocol_name());
     if U.b_vec.len() != n
-        || n != (1 << self.P_L_vec.len())
-        || self.P_L_vec.len() != self.P_R_vec.len()
-        || self.P_L_vec.len() >= 32
+      || n != (1 << self.P_L_vec.len())
+      || self.P_L_vec.len() != self.P_R_vec.len()
+      || self.P_L_vec.len() >= 32
     {
-        return Err(NovaError::InvalidInputLength);
+      return Err(NovaError::InvalidInputLength);
     }
 
-    // Sample a random base for committing to the inner product
+    // absorb the instance in the transcript
+    transcript.absorb(b"U", U);
+
+    // sample a random base for committing to the inner product
     let r = transcript.squeeze(b"r")?;
     ck_c.scale(&r);
 
     let P = U.comm_a_vec + CE::<E>::commit(&ck_c, &[U.c]);
 
-    // Compute a vector of public coins
+    // compute a vector of public coins using self.L_vec and self.R_vec
     let r = (0..self.P_L_vec.len())
-        .map(|_i| transcript.squeeze(b"r"))
-        .collect::<Result<Vec<E::Scalar>, NovaError>>()?;
+      .map(|i| {
+        transcript.absorb(b"L", &self.P_L_vec[i]);
+        transcript.absorb(b"R", &self.P_R_vec[i]);
+        transcript.squeeze(b"r")
+      })
+      .collect::<Result<Vec<E::Scalar>, NovaError>>()?;
 
-    // Precompute scalars
-    let r_square: Vec<E::Scalar> = r.par_iter().map(|r_i| *r_i * *r_i).collect();
-
+    // precompute scalars necessary for verification
+    let r_square: Vec<E::Scalar> = (0..self.P_L_vec.len())
+      .into_par_iter()
+      .map(|i| r[i] * r[i])
+      .collect();
     let r_inverse = batch_invert(r.clone())?;
-    
-    let r_inverse_square: Vec<E::Scalar> = r_inverse.par_iter().map(|r_i| *r_i * *r_i).collect();
+    let r_inverse_square: Vec<E::Scalar> = (0..self.P_L_vec.len())
+      .into_par_iter()
+      .map(|i| r_inverse[i] * r_inverse[i])
+      .collect();
 
-    // Compute the vector with the tensor structure
+    // compute the vector with the tensor structure
     let s = {
       let mut s = vec![E::Scalar::ZERO; n];
       s[0] = {
@@ -812,41 +821,35 @@ where
     };
 
     let ck_hat = {
-        let c = CE::<E>::commit(&ck, &s).compress();
-        CommitmentKey::<E>::reinterpret_commitments_as_ck(&[c], &ck)?
+      let c = CE::<E>::commit(&ck, &s).compress();
+      CommitmentKey::<E>::reinterpret_commitments_as_ck(&[c], &ck)?
     };
 
     let b_hat = inner_product(&U.b_vec, &s);
 
     let P_hat = {
-        let ck_folded = {
-            let ck_L = CommitmentKey::<E>::reinterpret_commitments_as_ck(&self.P_L_vec, &ck)?;
-            let ck_R = CommitmentKey::<E>::reinterpret_commitments_as_ck(&self.P_R_vec, &ck)?;
-            let ck_P = CommitmentKey::<E>::reinterpret_commitments_as_ck(&[P.compress()], &ck)?;
-            ck_L.combine(&ck_R).combine(&ck_P)
-        };
+      let ck_folded = {
+        let ck_L = CommitmentKey::<E>::reinterpret_commitments_as_ck(&self.P_L_vec, &ck)?;
+        let ck_R = CommitmentKey::<E>::reinterpret_commitments_as_ck(&self.P_R_vec, &ck)?;
+        let ck_P = CommitmentKey::<E>::reinterpret_commitments_as_ck(&[P.compress()], &ck)?;
+        ck_L.combine(&ck_R).combine(&ck_P)
+      };
 
-        CE::<E>::commit(
-          &ck_folded,
-          &r_square
-            .iter()
-            .chain(r_inverse_square.iter())
-            .chain(iter::once(&E::Scalar::ONE))
-            .copied()
-            .collect::<Vec<E::Scalar>>(),
-        )
+      CE::<E>::commit(
+        &ck_folded,
+        &r_square
+          .iter()
+          .chain(r_inverse_square.iter())
+          .chain(iter::once(&E::Scalar::ONE))
+          .copied()
+          .collect::<Vec<E::Scalar>>(),
+      )
     };
 
-    println!("Verifier z_1: {:?}", self.z_1);
-    println!("Verifier z_2: {:?}", self.z_2);
-
-
-    let right_hand_side = CE::<E>::commit(&ck_hat.combine(&ck_c), &[self.z_1, self.z_1 * b_hat]);
-
-    if P_hat == right_hand_side {
-        Ok(())
+    if P_hat == CE::<E>::commit(&ck_hat.combine(&ck_c), &[self.z_1, self.z_1 * b_hat]) {
+      Ok(())
     } else {
-        Err(NovaError::PCSError(PCSError::InvalidPCS))
+      Err(NovaError::PCSError(PCSError::InvalidPCS))
     }
   }
 
@@ -1161,7 +1164,6 @@ where
     if left_hand_side == right_hand_side {
       Ok(())
     } else {
-      println!("Invalid IPA! whoops");
       Err(NovaError::InvalidIPA)
     }
   }

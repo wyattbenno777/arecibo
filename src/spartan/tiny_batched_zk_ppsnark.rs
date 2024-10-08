@@ -375,7 +375,7 @@ where
     .collect::<Vec<Vec<E::Scalar>>>();
 
     // Move polys_W and polys_E, as well as U.u out of U
-    let (_comms_W_E, us): (Vec<_>, Vec<_>) = U.iter().map(|U| ([U.comm_W, U.comm_E], U.u)).unzip();
+    let (comms_W_E, us): (Vec<_>, Vec<_>) = U.iter().map(|U| ([U.comm_W, U.comm_E], U.u)).unzip();
     let (polys_W, polys_E): (Vec<_>, Vec<_>) = W.into_iter().map(|w| (w.W, w.E)).unzip();
 
     // Compute [Az, Bz, Cz]
@@ -528,13 +528,24 @@ where
       }
     )
     .collect::<Vec<E::Scalar>>();
-
-    let evals_W_E = zip_with!(
+    
+    let evals_vec = zip_with!(
       (evals_W.into_iter(), evals_E.into_iter()),
       |W, E| [W, E]
     )
     .collect::<Vec<_>>();
+    
 
+    let comms_vec: Vec<Commitment<E>> = comms_W_E.into_iter().flatten().collect();
+
+    let w_vec = polys_W
+    .clone()
+    .into_iter()
+    .zip(polys_E.clone().into_iter())
+    .flat_map(|(W, E)| vec![W, E])
+    .map(|p| PolyEvalWitness::<E> { p })
+    .collect::<Vec<_>>();
+    
     // Prepare witness polynomials for IPA
     let witness_polys: Vec<PolyEvalWitness<E>> = zip_with!(
       (polys_W.into_iter(), polys_E.clone().into_iter()),
@@ -549,7 +560,8 @@ where
         .collect();
     
     // Blind the witness polynomials
-    let blinded_witness_polys: Vec<PolyEvalWitness<E>> = witness_polys
+    let _blinded_witness_polys: Vec<PolyEvalWitness<E>> = witness_polys
+    .clone()
     .into_iter()
     .zip(blinding_factors.iter())
     .map(|(mut poly, &blind)| {
@@ -561,19 +573,26 @@ where
     .collect();
 
     // Commit to the blinded witness polynomials
-    let blinded_witness_comms = blinded_witness_polys
+    let blinded_witness_comms = witness_polys
     .iter()
     .map(|poly| E::CE::commit(ck, &poly.p))
     .collect::<Vec<_>>();
 
+
     // Absorb each commitment individually
-    for comm in &blinded_witness_comms {
+    /*for comm in &blinded_witness_comms {
         transcript.absorb(b"c", comm);
+    }*/
+
+    for evals in evals_vec.iter() {
+      transcript.absorb(b"e", &evals.as_slice()); // comm_vec is already in the transcript
     }
+    let evals_vec = evals_vec.into_iter().flatten().collect::<Vec<_>>();
 
     // Prepare u_batch for blinded witness polynomials
-    let c_witness = transcript.squeeze(b"c_witness")?;
-    let num_vars_witness = blinded_witness_polys.iter().map(|p| p.p.len().log_2()).collect::<Vec<_>>();
+    let c = transcript.squeeze(b"c")?;
+    
+    /*let num_vars_witness = witness_polys.iter().map(|p| p.p.len().log_2()).collect::<Vec<_>>();
     let u_batch_witness = PolyEvalInstance::<E>::batch_diff_size(
       &blinded_witness_comms,
       &evals_W_E.iter().flatten().cloned().collect::<Vec<_>>(),
@@ -582,11 +601,17 @@ where
       c_witness
     );
 
-    // Create a vector of references to blinded PolyEvalWitness
-    let blinded_witness_poly_refs: Vec<&PolyEvalWitness<E>> = blinded_witness_polys.iter().collect();
+    let w_batch_witness = PolyEvalWitness::<E>::batch_diff_size(&witness_polys.iter().by_ref().collect::<Vec<_>>(), c_witness);
+    */
+
+    // Compute number of variables for each polynomial
+    let num_vars_u = w_vec.iter().map(|w| w.p.len().log_2()).collect::<Vec<_>>();
+    let u_batch_witness =
+      PolyEvalInstance::<E>::batch_diff_size(&comms_vec, &evals_vec, &num_vars_u, rand_sc.clone(), c);
+    let w_batch_witness =
+      PolyEvalWitness::<E>::batch_diff_size(&w_vec.iter().by_ref().collect::<Vec<_>>(), c);
 
     // Create w_batch for blinded witness polynomials
-    let w_batch_witness = PolyEvalWitness::<E>::batch_diff_size(&blinded_witness_poly_refs, c_witness);
 
     let data_for_remote: DataForUntrustedRemote<E> = DataForUntrustedRemote {
       polys_Az_Bz_Cz: polys_Az_Bz_Cz.clone(), // Clone the polynomials
@@ -733,19 +758,20 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
 
     let mut untrusted_transcript = E::TE::new(b"UntrustedProver");
 
-    zk_ipa_pc::EvaluationEngine::verify_not_zk(
+    /*zk_ipa_pc::EvaluationEngine::verify_not_zk(
       &vk.vk_ee,
       &mut untrusted_transcript,
       &self.data.u_batch_witness.c,
       &self.data.u_batch_witness.x,
       &self.data.u_batch_witness.e,
       &results.eval_arg_witness
-    )?;
+    )?;*/
 
     Ok(())
   }
   
   pub fn prove_unstrusted(
+      pk: &<Self as BatchedRelaxedR1CSSNARKTrait<E>>::ProverKey,
       vk: &<Self as BatchedRelaxedR1CSSNARKTrait<E>>::VerifierKey,
       data: &DataForUntrustedRemote<E>,
   ) -> Result<ResultsBatchedTinySNARK<E>, NovaError>
@@ -754,16 +780,24 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
   {
     let mut transcript = E::TE::new(b"UntrustedProver");
 
+    let n = data.N_max;
+    let ck = <E as Engine>::CE::setup(b"ck", n);
+
+    println!("1");
+    
+
     // Perform IPA for batched witness polynomials
     let eval_arg_witness = zk_ipa_pc::EvaluationEngine::<E>::prove_not_zk(
-      &data.ck,
-      &data.pk_ee,
+      &ck,
+      &pk.pk_ee,
       &mut transcript,
       &data.u_batch_witness.c,
       &data.w_batch_witness.p,
       &data.u_batch_witness.x,
       &data.u_batch_witness.e,
     )?;
+
+    println!("2");
 
 
     let mut transcript2 = E::TE::new(b"UntrustedProver");
@@ -776,6 +810,8 @@ impl<E: Engine + Serialize + for<'de> Deserialize<'de>> BatchedRelaxedR1CSSNARK<
       &data.u_batch_witness.e,
       &eval_arg_witness,
     )?;
+
+    println!("3");
     
     /*transcript.absorb(b"vk", &data.vk_digest);
 

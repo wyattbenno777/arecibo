@@ -786,7 +786,7 @@ mod test {
 
     let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
     println!("done tiny");
-    let _results = ZKTINY::prove_unstrusted(&verifier_key.vk_primary, &compressed_snark.r_W_snark_primary.data).unwrap();
+    let _results = ZKTINY::prove_unstrusted(&prover_key.pk_primary, &verifier_key.vk_primary, &compressed_snark.r_W_snark_primary.data).unwrap();
     println!("done prove untrusted");
 
     /*compressed_snark.

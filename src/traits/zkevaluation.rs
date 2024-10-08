@@ -46,7 +46,7 @@ pub trait EvaluationEngineTrait<E: Engine>: Clone + Send + Sync {
   // /// A method to prove the evaluation of a multilinear polynomial
   fn prove_not_zk(
     ck: &<<E as Engine>::CE as CommitmentEngineTrait<E>>::CommitmentKey,
-    pk: &<<E as Engine>::CE as CommitmentEngineTrait<E>>::CommitmentKey,
+    pk: &Self::ProverKey,
     transcript: &mut E::TE,
     comm: &<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment,
     poly: &[E::Scalar],
