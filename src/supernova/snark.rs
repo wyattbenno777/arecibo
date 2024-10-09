@@ -784,18 +784,19 @@ mod test {
 
     let (prover_key, verifier_key) = CompressedSNARK::<_, ZKTINY, S2<Dual<ZKPallasEngine>>>::setup(&pp).unwrap();
 
+    println!("start tiny");
     let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
     println!("done tiny");
-    let _results = ZKTINY::prove_unstrusted(&prover_key.pk_primary, &verifier_key.vk_primary, &compressed_snark.r_W_snark_primary.data).unwrap();
+    let results = ZKTINY::prove_unstrusted(&prover_key.pk_primary, &compressed_snark.r_W_snark_primary.data).unwrap();
     println!("done prove untrusted");
 
-    /*compressed_snark.
-    r_W_snark_primary.verify_full(
+    //compressed_snark.
+    compressed_snark.r_W_snark_primary.verify_full(
         &verifier_key.vk_primary,
         results,
         &compressed_snark.r_U_primary,
     )
-    .unwrap();*/
+    .unwrap();
 
     // You can now use `results` for further verification or checks
     println!("Untrusted prover completed successfully");
