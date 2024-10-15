@@ -701,14 +701,14 @@ mod test {
 
     println!("done with recursive_snark");
 
-    let (prover_key, _verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
+    let (prover_key, verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
 
     println!("done with setup");
-    let _compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
+    let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
 
-    /*compressed_snark
+    compressed_snark
       .verify(&pp, &verifier_key, &z0_primary, &z0_secondary)
-      .unwrap();*/
+      .unwrap();
   }
 
   #[test]
