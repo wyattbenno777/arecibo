@@ -45,6 +45,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::fs;
 use tracing::error;
+use ff::PrimeField;
 
 /// A type that represents the prover's key
 #[derive(Debug)]
@@ -98,6 +99,9 @@ pub struct DataForUntrustedRemote<E: Engine> {
   Nis: Vec<usize>,
   num_rounds_sc: usize,
   rand_sc: Vec<E::Scalar>,
+  comms_Az_Bz_Cz: Vec<[CompressedCommitment<E>; 3]>,
+  comms_L_row_col: Vec<[CompressedCommitment<E>; 2]>,
+  comms_mem_oracles: Vec<[CompressedCommitment<E>; 4]>,
   //blinded_witness_comms: Vec<Commitment<E>>,
   //u_batch_witness: PolyEvalInstance<E>,
   //w_batch_witness: PolyEvalWitness<E>,
@@ -134,6 +138,12 @@ pub struct BatchedRelaxedR1CSSNARK<E: Engine> {
 
   // a PCS evaluation argument
   //eval_arg: ipa_pc::InnerProductArgument<E>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "E: Engine")]
+pub struct ResultsBatchedTinySNARK<E: Engine> {
+  data: DataForUntrustedRemote<E>,
 }
 
 
@@ -716,6 +726,9 @@ where
       Nis: Nis.clone(),
       num_rounds_sc: num_rounds_sc.clone(),
       rand_sc: rand_sc.clone(),
+      comms_Az_Bz_Cz: comms_Az_Bz_Cz.clone(),
+      comms_L_row_col: comms_L_row_col.clone(),
+      comms_mem_oracles: comms_mem_oracles.clone(),
       //blinded_witness_comms,
       //u_batch_witness,
       //w_batch_witness,
@@ -996,6 +1009,20 @@ where
 }
 
 impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
+
+  pub fn prove_unstrusted(
+    data: &DataForUntrustedRemote<E>,
+  ) -> Result<ResultsBatchedTinySNARK<E>, NovaError>
+  where
+      E::Scalar: PrimeField,
+  {
+   
+
+    Ok(ResultsBatchedTinySNARK{
+      data: data.clone()
+    })
+  }
+
   //Prove only the witness claims.
   #[allow(unused)]
   fn prove_witness<T1>(
