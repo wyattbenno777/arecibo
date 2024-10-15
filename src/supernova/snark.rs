@@ -12,6 +12,7 @@ use crate::{
 use crate::{errors::NovaError, scalar_as_base, RelaxedR1CSInstance, NIFS};
 
 use ff::PrimeField;
+use halo2curves::pasta::Fq;
 use serde::{Deserialize, Serialize};
 
 /// A type that holds the prover key for `CompressedSNARK`
@@ -297,8 +298,7 @@ mod test {
   type S1PP<E> = batched_ppsnark::BatchedRelaxedR1CSSNARK<E, EE<E>>;
   type S2<E> = RelaxedR1CSSNARK<E, EE<E>>;
 
-  type E = PallasEngine;
-  type TINY = tiny_batched_ppsnark::BatchedRelaxedR1CSSNARK<E>;
+  type TINY = tiny_batched_ppsnark::BatchedRelaxedR1CSSNARK<PallasEngine>;
 
   #[derive(Clone)]
   struct SquareCircuit<E> {
@@ -660,24 +660,26 @@ mod test {
     test_compression_with::<Secp256k1Engine, S1<_>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
   }
 
-  fn test_tiny_snark_with<E1, S1, S2, F, C>(num_steps: usize, circuits_factory: F)
+  fn test_tiny_snark_with<F, C>(num_steps: usize, circuits_factory: F)
   where
-    E1: CurveCycleEquipped,
-    S1: BatchedRelaxedR1CSSNARKTrait<E1>,
-    S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
-    <E1::Scalar as PrimeField>::Repr: Abomonation,
-    <<Dual<E1> as Engine>::Scalar as PrimeField>::Repr: Abomonation,
-    C: NonUniformCircuit<E1, C1 = C, C2 = TrivialSecondaryCircuit<<Dual<E1> as Engine>::Scalar>>
-      + StepCircuit<E1::Scalar>,
     F: Fn(usize) -> Vec<C>,
+    C: NonUniformCircuit<PallasEngine, C1 = C, C2 = TrivialSecondaryCircuit<<Dual<PallasEngine> as Engine>::Scalar>>
+        + StepCircuit<<PallasEngine as Engine>::Scalar>
+        + StepCircuit<Fq>,
+    <<PallasEngine as Engine>::Scalar as PrimeField>::Repr: Abomonation,
+    <<Dual<PallasEngine> as Engine>::Scalar as PrimeField>::Repr: Abomonation,
   {
     let secondary_circuit = TrivialSecondaryCircuit::default();
     let test_circuits = circuits_factory(num_steps);
 
-    let pp = PublicParams::setup(&test_circuits[0], &*S1::ck_floor(), &*S2::ck_floor());
+    let pp = PublicParams::setup(
+      &test_circuits[0],
+      &*<TINY as BatchedRelaxedR1CSSNARKTrait<PallasEngine>>::ck_floor(),
+      &*S2::<Dual<PallasEngine>>::ck_floor()
+    ) ;
 
-    let z0_primary = vec![E1::Scalar::from(17u64)];
-    let z0_secondary = vec![<Dual<E1> as Engine>::Scalar::ZERO];
+    let z0_primary = vec![<PallasEngine as Engine>::Scalar::from(17u64)];
+    let z0_secondary = vec![<Dual<PallasEngine> as Engine>::Scalar::ZERO];
 
     let mut recursive_snark = RecursiveSNARK::new(
       &pp,
@@ -701,10 +703,12 @@ mod test {
 
     println!("done with recursive_snark");
 
-    let (prover_key, verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
+    let (prover_key, verifier_key) = CompressedSNARK::<_, TINY, S2<Dual<PallasEngine>>>::setup(&pp).unwrap();
 
     println!("done with setup");
     let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
+
+    let _results = TINY::prove_unstrusted(&compressed_snark.r_W_snark_primary.data).unwrap();
 
     compressed_snark
       .verify(&pp, &verifier_key, &z0_primary, &z0_secondary)
@@ -714,6 +718,6 @@ mod test {
   #[test]
   fn test_tiny_snark() {
     const NUM_STEPS: usize = 2;
-    test_tiny_snark_with::<PallasEngine, TINY<>, S2<_>, _, _>(NUM_STEPS, BigTestCircuit::new);
+    test_tiny_snark_with(NUM_STEPS, BigTestCircuit::new);
   }
 }

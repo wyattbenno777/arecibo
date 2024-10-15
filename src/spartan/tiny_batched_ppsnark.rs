@@ -113,7 +113,7 @@ pub struct DataForUntrustedRemote<E: Engine> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "E: Engine")]
 pub struct BatchedRelaxedR1CSSNARK<E: Engine> {
-  data: DataForUntrustedRemote<E>,
+  pub data: DataForUntrustedRemote<E>,
     // commitment to oracles: the first three are for Az, Bz, Cz,
   // and the last two are for memory reads
   comms_Az_Bz_Cz: Vec<[CompressedCommitment<E>; 3]>,
