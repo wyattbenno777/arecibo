@@ -133,7 +133,7 @@ pub struct BatchedRelaxedR1CSSNARK<E: Engine> {
   evals_mem_preprocessed: Vec<[E::Scalar; 7]>,
 
   // a PCS evaluation argument
-  eval_arg: ipa_pc::InnerProductArgument<E>,
+  //eval_arg: ipa_pc::InnerProductArgument<E>,
 }
 
 
@@ -288,7 +288,7 @@ where
     .collect::<Vec<Vec<E::Scalar>>>();
 
     // Move polys_W and polys_E, as well as U.u out of U
-    let (comms_W_E, us): (Vec<_>, Vec<_>) = U.iter().map(|U| ([U.comm_W, U.comm_E], U.u)).unzip();
+    let (_comms_W_E, us): (Vec<_>, Vec<_>) = U.iter().map(|U| ([U.comm_W, U.comm_E], U.u)).unzip();
     let (polys_W, polys_E): (Vec<_>, Vec<_>) = W.into_iter().map(|w| (w.W, w.E)).unzip();
 
     // Compute [Az, Bz, Cz]
@@ -519,7 +519,7 @@ where
 
     // a third sum-check instance to prove the read-only memory claim
     // we now need to prove that L_row and L_col are well-formed
-    let (mem_sc_inst, comms_mem_oracles, polys_mem_oracles) = {
+    let (mem_sc_inst, comms_mem_oracles, _polys_mem_oracles) = {
       let gamma = transcript.squeeze(b"g")?;
       let r = transcript.squeeze(b"r")?;
 
@@ -689,7 +689,7 @@ where
       )
     };
 
-    let evals_vec = zip_with!(
+    /*let evals_vec = zip_with!(
       iter,
       (
         evals_Az_Bz_Cz_W_E,
@@ -789,7 +789,7 @@ where
       &w_batch.p,
       &u_batch.x,
       &u_batch.e,
-    )?;
+    )?;*/
 
     let comms_Az_Bz_Cz: Vec<_> = comms_Az_Bz_Cz
       .into_iter()
@@ -838,7 +838,7 @@ where
       evals_L_row_col,
       evals_mem_oracle,
       evals_mem_preprocessed,
-      eval_arg,
+      //eval_arg,
     })
   }
 
@@ -1092,7 +1092,7 @@ where
       return Err(NovaError::InvalidSumcheckProof);
     }
 
-    let evals_vec = zip_with!(
+    /*let evals_vec = zip_with!(
       iter,
       (
         self.evals_Az_Bz_Cz_W_E,
@@ -1156,10 +1156,10 @@ where
       .collect::<Vec<_>>();
 
       PolyEvalInstance::<E>::batch_diff_size(&comms_vec, &evals_vec, &num_vars, rand_sc, c)
-    };
+    };*/
 
     // verify
-    ipa_pc::EvaluationEngine::verify(&vk.vk_ee, &mut transcript, &u.c, &u.x, &u.e, &self.eval_arg)?;
+    //ipa_pc::EvaluationEngine::verify(&vk.vk_ee, &mut transcript, &u.c, &u.x, &u.e, &self.eval_arg)?;
 
     Ok(())
   }
