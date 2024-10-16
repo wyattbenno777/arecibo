@@ -833,18 +833,24 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
     U: &[RelaxedR1CSInstance<E>],
     vk: &VerifierKey<E>,
   ) -> Result<(), NovaError> {
-
     let num_instances = U.len();
     let num_claims_per_instance = 10;
 
+    // number of rounds of sum-check
     let num_rounds = vk.S_comm.iter().map(|s| s.N.log_2()).collect::<Vec<_>>();
     let num_rounds_max = *num_rounds.iter().max().unwrap();
 
     let mut transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
 
     transcript.absorb(b"vk", &vk.digest());
+    if num_instances > 1 {
+      let num_instances_field = E::Scalar::from(num_instances as u64);
+      transcript.absorb(b"n", &num_instances_field);
+    }
+    transcript.absorb(b"U", &U);
 
-    let comms_Az_Bz_Cz = &self.data
+    // Decompress commitments
+    let comms_Az_Bz_Cz = self.data
       .comms_Az_Bz_Cz
       .iter()
       .map(|comms| {
@@ -855,7 +861,7 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
       })
       .collect::<Result<Vec<_>, _>>()?;
 
-    let comms_L_row_col = &self.data
+    let comms_L_row_col = self.data
       .comms_L_row_col
       .iter()
       .map(|comms| {
@@ -877,9 +883,10 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
       })
       .collect::<Result<Vec<_>, _>>()?;
 
+    // Add commitments [Az, Bz, Cz] to the transcript
     comms_Az_Bz_Cz
-    .iter()
-    .for_each(|comms| transcript.absorb(b"c", &comms.as_slice()));
+      .iter()
+      .for_each(|comms| transcript.absorb(b"c", &comms.as_slice()));
 
     let tau = transcript.squeeze(b"t")?;
     let tau_coords = PowPolynomial::new(&tau, num_rounds_max).coordinates();
@@ -917,18 +924,15 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
 
     let gamma = u_transcript.squeeze(b"g")?;
     let r = u_transcript.squeeze(b"r")?;
-    println!("verfier gamma {:?}", gamma);
 
     for comms in comms_mem_oracles.iter() {
       u_transcript.absorb(b"l", &comms.as_slice());
     }
 
     let rho = u_transcript.squeeze(b"r")?;
-    println!("verfier rho {:?}", rho);
 
     let s = u_transcript.squeeze(b"r")?;
     let s_powers = powers(&s, num_instances * num_claims_per_instance);
-    println!("verfier s {:?}", s);
 
     let (claim_sc_final, rand_sc) = {
       // Gather all claims into a single vector
@@ -953,18 +957,11 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
         .verify_batch(&claims, &num_rounds_by_claim, &s_powers, 3, &mut u_transcript)?
     };
 
-    println!("verifier claim_sc_final {:?}", claim_sc_final);
-    println!("verifier rand_sc {:?}", rand_sc);
-
+    // Truncated sumcheck randomness for each instance
     let rand_sc_i = num_rounds
-    .iter()
-    .map(|num_rounds| rand_sc[(num_rounds_max - num_rounds)..].to_vec())
-    .collect::<Vec<_>>();
-
-    println!("verifier evals_Az_Bz_Cz_W_E {:?}", results.evals_Az_Bz_Cz_W_E);
-    println!("verifier evals_L_row_col {:?}", results.evals_L_row_col);
-    println!("verifier evals_mem_oracle {:?}", results.evals_mem_oracle);
-    println!("verifier evals_mem_preprocessed {:?}", results.evals_mem_preprocessed);
+      .iter()
+      .map(|num_rounds| rand_sc[(num_rounds_max - num_rounds)..].to_vec())
+      .collect::<Vec<_>>();
 
     let claim_sc_final_expected = zip_with!(
       (
@@ -1075,8 +1072,6 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
         let claims_inner = [L_row * L_col * (val_A + c * val_B + c * c * val_C)];
 
         let claims_witness = [eq_masked_tau * W];
-
-        //println!("verfier claims_outer {:?}", claims_outer);
 
         chain![claims_mem, claims_outer, claims_inner, claims_witness]
       }
@@ -1220,7 +1215,6 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
     // we now need to prove that L_row and L_col are well-formed
     let (mem_sc_inst, comms_mem_oracles, polys_mem_oracles) = {
       let gamma = u_transcript.squeeze(b"g")?;
-      println!("prover gamma {:?}", gamma);
       let r = u_transcript.squeeze(b"r")?;
 
       // We start by computing oracles and auxiliary polynomials to help prove the claim
@@ -1263,7 +1257,6 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
 
       // Sample new random variable for eq polynomial
       let rho = u_transcript.squeeze(b"r")?;
-      println!("prover rho {:?}", rho);
       let all_rhos = PowPolynomial::squares(&rho, data.N_max.log_2());
 
       let instances = zip_with!(
@@ -1302,40 +1295,6 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
       witness_sc_inst,
       &mut u_transcript,
     )?;
-
-    //println!("prover claims_outer {:?}", claims_outer);
-    println!("prover rand_sc {:?}", rand_sc);
-
-    /*let mut transcripta = E::TE::new(b"gfag");
-    let num_rounds = pk.S_comm.iter().map(|s| s.N.log_2()).collect::<Vec<_>>();
-    
-
-    let (claim_sc_final, rand_sc_2) = {
-      // Gather all claims into a single vector
-      let claims = evals_Mz
-        .iter()
-        .flat_map(|&eval_Mz| {
-          let mut claims = vec![E::Scalar::ZERO; 10];
-          claims[7] = eval_Mz;
-          claims[8] = eval_Mz;
-          claims.into_iter()
-        })
-        .collect::<Vec<_>>();
-
-      // Number of rounds for each claim
-      let num_rounds_by_claim = num_rounds
-        .iter()
-        .flat_map(|num_rounds_i| vec![*num_rounds_i; 10].into_iter())
-        .collect::<Vec<_>>();
-
-        sc
-        .verify_batch(&claims, &num_rounds_by_claim, &s_powers, 3, &mut transcripta)?
-    };
-
-    println!("prover rand_sc {:?}", rand_sc_2);
-
-    println!("prover claim_sc_final {:?}", claim_sc_final);*/
-
 
     let (evals_Az_Bz_Cz_W_E, evals_L_row_col, evals_mem_oracle, evals_mem_preprocessed) = {
       let evals_Az_Bz = claims_outer
@@ -1530,11 +1489,6 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
     .into_iter()
     .map(|comms| comms.map(|comm| comm.compress()))
     .collect();
-
-    println!("prover evals_Az_Bz_Cz_W_E {:?}", evals_Az_Bz_Cz_W_E);
-    println!("prover  evals_L_row_col {:?}", evals_L_row_col);
-    println!("prover  evals_mem_oracle {:?}", evals_mem_oracle);
-    println!("prover  evals_mem_preprocessed {:?}", evals_mem_preprocessed);
    
 
     Ok(ResultsBatchedTinySNARK{
@@ -1753,7 +1707,6 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E> {
 
     // Sample a challenge for the random linear combination of all scaled claims
     let s = transcript.squeeze(b"r")?;
-    println!("prover s {:?}", s);
     let coeffs = powers(&s, claims.len());
 
     // At the start of each round, the running claim is equal to the random linear combination
