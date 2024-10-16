@@ -716,7 +716,14 @@ mod test {
       vk_digest: prover_key.pk_primary.vk_digest,
     };
 
-    let _results = TINY::prove_unstrusted(&compressed_snark.r_W_snark_primary.data, &tiny_prover_key).unwrap();
+    let results = TINY::prove_unstrusted(&compressed_snark.r_W_snark_primary.data, &tiny_prover_key).unwrap();
+
+    compressed_snark.r_W_snark_primary.verify_untrusted(
+      results,
+      &compressed_snark.r_U_primary,
+      &verifier_key.vk_primary,
+    )
+    .unwrap();
 
     compressed_snark
       .verify(&pp, &verifier_key, &z0_primary, &z0_secondary)
