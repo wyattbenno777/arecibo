@@ -141,7 +141,7 @@ pub struct BatchedRelaxedR1CSSNARK<E: Engine> {
   evals_W: Vec<<E as Engine>::Scalar>,
 
   // a PCS evaluation argument
-  //eval_arg: ipa_pc::InnerProductArgument<E>,
+  eval_arg: ipa_pc::InnerProductArgument<E>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -652,10 +652,51 @@ where
     })
     .collect::<Vec<_>>();
 
-    let (sumcheck_result_witness, _rand_sc_w, claims_witness) = Self::prove_witness(
+    let (sumcheck_result_witness, rand_sc_w, claims_witness) = Self::prove_witness(
       num_rounds_sc,
       witness_sc_inst,
       &mut w_transcript,
+    )?;
+
+    // Compute final evaluations
+    let evals_W = claims_witness
+        .into_iter()
+        .map(|claims| claims[0][0])
+        .collect::<Vec<_>>();
+
+    let evals_vec = evals_W.iter().map(|&eval_W| vec![eval_W]).collect::<Vec<_>>();
+
+    let flattened_comms: Vec<Commitment<E>> = comms_W
+    .clone()
+    .into_iter()
+    .flatten()
+    .collect();
+
+    let w_vec = polys_W.clone()
+    .into_iter()
+    .map(|p| PolyEvalWitness::<E> { p })
+    .collect::<Vec<_>>();
+
+    for evals in evals_vec.iter() {
+      w_transcript.absorb(b"e", &evals.as_slice());
+    }
+    let evals_vec = evals_vec.into_iter().flatten().collect::<Vec<_>>();
+  
+    let c = w_transcript.squeeze(b"c")?;
+
+    // Compute number of variables for each polynomial
+    let num_vars_u = w_vec.iter().map(|w| w.p.len().log_2()).collect::<Vec<_>>();
+    let u_batch = PolyEvalInstance::<E>::batch_diff_size(&flattened_comms, &evals_vec, &num_vars_u, rand_sc_w.clone(), c);
+    let w_batch = PolyEvalWitness::<E>::batch_diff_size(&w_vec.iter().by_ref().collect::<Vec<_>>(), c);
+
+    let eval_arg = ipa_pc::EvaluationEngine::prove(
+        ck,
+        &pk.pk_ee,
+        &mut w_transcript,
+        &u_batch.c,
+        &w_batch.p,
+        &u_batch.x,
+        &u_batch.e,
     )?;
     
     let comms_Az_Bz_Cz: Vec<_> = comms_Az_Bz_Cz
@@ -699,13 +740,6 @@ where
     //serialize_data_for_remote(&data_for_remote);
 
 
-    // Compute final evaluations
-    let evals_W = claims_witness
-        .into_iter()
-        .map(|claims| claims[0][0])
-        .collect::<Vec<_>>();
-
-
     println!("done tiny prover");
 
     Ok(Self {
@@ -720,8 +754,8 @@ where
       //comms_mem_oracles,
 
       sumcheck_result_witness,
-      evals_W
-      //eval_arg,
+      evals_W,
+      eval_arg,
     })
   }
 
@@ -800,74 +834,23 @@ where
         return Err(NovaError::InvalidSumcheckProof);
     }
 
-    /*let evals_vec = zip_with!(
-      iter,
-      (
-        self.evals_Az_Bz_Cz_W_E,
-        self.evals_L_row_col,
-        self.evals_mem_oracle,
-        self.evals_mem_preprocessed
-      ),
-      |Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed| {
-        chain![Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed]
-          .cloned()
-          .collect::<Vec<_>>()
-      }
-    )
-    .collect::<Vec<_>>();
+    let evals_vec = self.evals_W.iter().map(|&eval_W| vec![eval_W]).collect::<Vec<_>>();
 
-    // Add all Sumcheck evaluations to the transcript
     for evals in evals_vec.iter() {
-      transcript.absorb(b"e", &evals.as_slice()); // comm_vec is already in the transcript
+      transcript.absorb(b"e", &evals.as_slice());
     }
 
     let c = transcript.squeeze(b"c")?;
 
-    // Compute batched polynomial evaluation instance at rand_sc
     let u = {
-      let num_evals = evals_vec[0].len();
-
       let evals_vec = evals_vec.into_iter().flatten().collect::<Vec<_>>();
 
-      let num_vars = num_rounds
-        .iter()
-        .flat_map(|num_rounds| vec![*num_rounds; num_evals].into_iter())
-        .collect::<Vec<_>>();
+      let comms_vec = U.iter().map(|U| U.comm_W).collect::<Vec<_>>();
 
-      let comms_vec = zip_with!(
-        (
-          comms_Az_Bz_Cz.into_iter(),
-          U.iter(),
-          comms_L_row_col.into_iter(),
-          comms_mem_oracles.into_iter(),
-          vk.S_comm.iter()
-        ),
-        |Az_Bz_Cz, U, L_row_col, mem_oracles, S_comm| {
-          chain![
-            Az_Bz_Cz,
-            [U.comm_W, U.comm_E],
-            L_row_col,
-            mem_oracles,
-            [
-              S_comm.comm_val_A,
-              S_comm.comm_val_B,
-              S_comm.comm_val_C,
-              S_comm.comm_row,
-              S_comm.comm_col,
-              S_comm.comm_ts_row,
-              S_comm.comm_ts_col,
-            ]
-          ]
-        }
-      )
-      .flatten()
-      .collect::<Vec<_>>();
-
-      PolyEvalInstance::<E>::batch_diff_size(&comms_vec, &evals_vec, &num_vars, rand_sc, c)
+      PolyEvalInstance::<E>::batch_diff_size(&comms_vec, &evals_vec, &num_rounds, rand_sc, c)
     };
 
-    // verify
-    ipa_pc::EvaluationEngine::verify(&vk.vk_ee, &mut transcript, &u.c, &u.x, &u.e, &self.eval_arg)?;*/
+    ipa_pc::EvaluationEngine::verify(&vk.vk_ee, &mut transcript, &u.c, &u.x, &u.e, &self.eval_arg)?;
 
     Ok(())
   }
