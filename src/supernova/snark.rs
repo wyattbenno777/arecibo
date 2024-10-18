@@ -709,21 +709,21 @@ mod test {
     println!("done with setup");
     let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
 
-    let _tiny_prover_key = TinyProverKey {
+    let tiny_prover_key = TinyProverKey {
       pk_ee: prover_key.pk_primary.pk_ee, 
       S_repr: prover_key.pk_primary.S_repr.clone(), 
       S_comm: prover_key.pk_primary.S_comm.clone(), 
       vk_digest: prover_key.pk_primary.vk_digest,
     };
 
-    //let results = TINY::prove_unstrusted(&compressed_snark.r_W_snark_primary.data, &tiny_prover_key).unwrap();
+    let results = TINY::prove_unstrusted(&compressed_snark.r_W_snark_primary.data, &tiny_prover_key).unwrap();
 
-    /*compressed_snark.r_W_snark_primary.verify_untrusted(
+    compressed_snark.r_W_snark_primary.verify_untrusted(
       results,
       &compressed_snark.r_U_primary,
       &verifier_key.vk_primary,
     )
-    .unwrap();*/
+    .unwrap();
 
     compressed_snark
       .verify(&pp, &verifier_key, &z0_primary, &z0_secondary)
