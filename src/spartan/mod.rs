@@ -11,6 +11,7 @@ pub mod batched_ppsnark;
 pub mod batched_zkppsnark;
 pub mod ipa_batched_ppsnark;
 pub mod verify_circuit;
+pub mod tiny_batched_ppsnark;
 #[macro_use]
 mod macros;
 pub mod lookup_ppsnark;
@@ -25,6 +26,7 @@ pub mod nizk;
 pub mod zksnark;
 mod zksumcheck;
 
+use serde::{Deserialize, Serialize};
 use crate::{
   r1cs::{R1CSShape, SparseMatrix},
   traits::Engine,
@@ -48,6 +50,7 @@ pub fn powers<F: Field>(s: &F, n: usize) -> Vec<F> {
 /// A type that holds a witness to a polynomial evaluation instance
 #[repr(transparent)]
 #[derive(Debug, RefCast)]
+#[derive(Clone, Serialize, Deserialize)]
 struct PolyEvalWitness<E: Engine> {
   p: Vec<E::Scalar>, // polynomial
 }
@@ -117,7 +120,9 @@ impl<E: Engine> PolyEvalWitness<E> {
 }
 
 /// A type that holds a polynomial evaluation instance
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound(serialize = "E::Scalar: Serialize, Commitment<E>: Serialize"))]
+#[serde(bound(deserialize = "E::Scalar: Deserialize<'de>, Commitment<E>: Deserialize<'de>"))]
 pub(crate) struct PolyEvalInstance<E: Engine> {
   c: Commitment<E>,  // commitment to the polynomial
   x: Vec<E::Scalar>, // evaluation point
