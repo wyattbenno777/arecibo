@@ -142,7 +142,7 @@ pub struct BatchedRelaxedR1CSSNARK<E: Engine> {
   evals_W: Vec<<E as Engine>::Scalar>,
 
   // a PCS evaluation argument
-  eval_arg: ipa_pc::InnerProductArgument<E>,
+  //eval_arg: ipa_pc::InnerProductArgument<E>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -535,10 +535,10 @@ where
 
     // Compute number of variables for each polynomial
     let num_vars_u = w_vec.iter().map(|w| w.p.len().log_2()).collect::<Vec<_>>();
-    let u_batch = PolyEvalInstance::<E>::batch_diff_size(&flattened_comms, &evals_vec, &num_vars_u, rand_sc_w.clone(), c);
-    let w_batch = PolyEvalWitness::<E>::batch_diff_size(&w_vec.iter().by_ref().collect::<Vec<_>>(), c);
+    let _u_batch = PolyEvalInstance::<E>::batch_diff_size(&flattened_comms, &evals_vec, &num_vars_u, rand_sc_w.clone(), c);
+    let _w_batch = PolyEvalWitness::<E>::batch_diff_size(&w_vec.iter().by_ref().collect::<Vec<_>>(), c);
 
-    let eval_arg = ipa_pc::EvaluationEngine::prove(
+    /*let eval_arg = ipa_pc::EvaluationEngine::prove(
         ck,
         &pk.pk_ee,
         &mut w_transcript,
@@ -546,7 +546,7 @@ where
         &w_batch.p,
         &u_batch.x,
         &u_batch.e,
-    )?;
+    )?;*/
 
     
     let comms_Az_Bz_Cz: Vec<_> = comms_Az_Bz_Cz
@@ -598,7 +598,7 @@ where
       //evals_Az_Bz_Cz_at_tau,
       sumcheck_result_witness,
       evals_W,
-      eval_arg,
+      //eval_arg,
     })
   }
 
@@ -693,7 +693,7 @@ where
       PolyEvalInstance::<E>::batch_diff_size(&comms_vec, &evals_vec, &num_rounds, rand_sc, c)
     };
 
-    ipa_pc::EvaluationEngine::verify(&vk.vk_ee, &mut transcript, &u.c, &u.x, &u.e, &self.eval_arg)?;
+    //ipa_pc::EvaluationEngine::verify(&vk.vk_ee, &mut transcript, &u.c, &u.x, &u.e, &self.eval_arg)?;
 
     Ok(())
   }
@@ -1425,6 +1425,8 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
       PolyEvalInstance::<E>::batch_diff_size(&comms_vec, &evals_vec, &num_vars_u, rand_sc.clone(), c);
     let w_batch =
       PolyEvalWitness::<E>::batch_diff_size(&w_vec.iter().by_ref().collect::<Vec<_>>(), c);
+
+    //TODO: blind this witness.
 
     let eval_arg = ipa_pc::EvaluationEngine::prove(
       &data.ck,
