@@ -53,7 +53,7 @@ static_assertions = "1.1.0"
 rayon-scan = "0.1.0"
 unzip-n = "0.1.2"
 poseidon_sponge = { git = "https://github.com/Forpee/poseidon_sponge", branch = "main" }
-serde_json = "1.0.1"
+serde_json = { version = "1.0" }
 
 [target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
 # grumpkin-msm has been patched to support MSMs for the pasta curve cycle
