@@ -46,7 +46,6 @@ use std::sync::Arc;
 use std::fs;
 use tracing::error;
 use ff::PrimeField;
-use serde_json;
 
 /// A type that represents the prover's key
 #[derive(Debug)]
