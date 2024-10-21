@@ -101,7 +101,7 @@ pub struct DataForUntrustedRemote<E: Engine> {
   N_max: usize,
   Nis: Vec<usize>,
   num_rounds_sc: usize,
-  comms_W: Vec<[CompressedCommitment<E>; 1]>,
+  comms_W_E: Vec<[CompressedCommitment<E>; 2]>,
   comms_Az_Bz_Cz: Vec<[CompressedCommitment<E>; 3]>,
   comms_L_row_col: Vec<[CompressedCommitment<E>; 2]>,
   evals_Az_Bz_Cz_at_tau: Vec<[E::Scalar; 3]>,
@@ -150,7 +150,7 @@ pub struct ResultsBatchedTinySNARK<E: Engine> {
   data: DataForUntrustedRemote<E>,
   sc: SumcheckProof<E>,
   // claims from the end of sum-check
-  evals_Az_Bz_Cz_W: Vec<[E::Scalar; 4]>,
+  evals_Az_Bz_Cz_W_E: Vec<[E::Scalar; 5]>,
   evals_L_row_col: Vec<[E::Scalar; 2]>,
   evals_mem_oracle: Vec<[E::Scalar; 4]>,
   evals_mem_preprocessed: Vec<[E::Scalar; 7]>,
@@ -314,6 +314,7 @@ where
     .collect::<Vec<Vec<E::Scalar>>>();
 
     // Move polys_W and polys_E, as well as U.u out of U
+    let (comms_W_E, _us): (Vec<_>, Vec<_>) = U.iter().map(|U| ([U.comm_W, U.comm_E], U.u)).unzip();
     let (comms_W, us): (Vec<_>, Vec<_>) = U.iter().map(|U| ([U.comm_W], U.u)).unzip();
     let (polys_W, polys_E): (Vec<_>, Vec<_>) = W.clone().into_iter().map(|w| (w.W, w.E)).unzip();
 
@@ -506,7 +507,7 @@ where
     )?;
 
      // Compute final evaluations
-     let evals_W = claims_witness
+    let evals_W = claims_witness
      .into_iter()
      .map(|claims| claims[0][0])
      .collect::<Vec<_>>();
@@ -555,7 +556,7 @@ where
       .into_iter()
       .map(|comms| comms.map(|comm| comm.compress()))
       .collect();
-    let comms_W: Vec<_> = comms_W
+    let comms_W_E: Vec<_> = comms_W_E
       .into_iter()
       .map(|comms| comms.map(|comm| comm.compress()))
       .collect();
@@ -577,7 +578,7 @@ where
       Nis: Nis.clone(),
       num_rounds_sc: num_rounds_sc.clone(),
       comms_Az_Bz_Cz: comms_Az_Bz_Cz.clone(),
-      comms_W: comms_W.clone(),
+      comms_W_E: comms_W_E.clone(),
       comms_L_row_col: comms_L_row_col.clone(),
       evals_Az_Bz_Cz_at_tau: evals_Az_Bz_Cz_at_tau.clone(),
       //blinded_witness_comms,
@@ -846,7 +847,7 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
         vk.num_vars.iter(),
         rand_sc_i.iter(),
         U.iter(),
-        results.evals_Az_Bz_Cz_W.iter().cloned(),
+        results.evals_Az_Bz_Cz_W_E.iter().cloned(),
         results.evals_L_row_col.iter().cloned(),
         results.evals_mem_oracle.iter().cloned(),
         results.evals_mem_preprocessed.iter().cloned()
@@ -854,11 +855,11 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
       |num_vars,
        rand_sc,
        U,
-       evals_Az_Bz_Cz_W,
+       evals_Az_Bz_Cz_W_E,
        evals_L_row_col,
        eval_mem_oracle,
        eval_mem_preprocessed| {
-        let [Az, Bz, Cz, W] = evals_Az_Bz_Cz_W;
+        let [Az, Bz, Cz, W, E] = evals_Az_Bz_Cz_W_E;
         let [L_row, L_col] = evals_L_row_col;
         let [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col] =
           eval_mem_oracle;
@@ -944,7 +945,7 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
         ];
 
         let claims_outer = [
-          eq_tau * (Az * Bz - U.u * Cz),
+          eq_tau * (Az * Bz - U.u * Cz - E),
           eq_tau * (Az + c * Bz + c * c * Cz),
         ];
         let claims_inner = [L_row * L_col * (val_A + c * val_B + c * c * val_C)];
@@ -965,13 +966,13 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
     let evals_vec = zip_with!(
       iter,
       (
-        results.evals_Az_Bz_Cz_W,
+        results.evals_Az_Bz_Cz_W_E,
         results.evals_L_row_col,
         results.evals_mem_oracle,
         results.evals_mem_preprocessed
       ),
-      |Az_Bz_Cz_W, L_row_col, mem_oracles, mem_preprocessed| {
-        chain![Az_Bz_Cz_W, L_row_col, mem_oracles, mem_preprocessed]
+      |Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed| {
+        chain![Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed]
           .cloned()
           .collect::<Vec<_>>()
       }
@@ -1007,7 +1008,7 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
         |Az_Bz_Cz, U, L_row_col, mem_oracles, S_comm| {
           chain![
             Az_Bz_Cz,
-            [U.comm_W],
+            [U.comm_W, U.comm_E],
             L_row_col,
             mem_oracles,
             [
@@ -1065,8 +1066,8 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
     })
     .collect::<Result<Vec<_>, _>>()?;
 
-    let comms_W = data
-    .comms_W
+    let comms_W_E = data
+    .comms_W_E
     .iter()
     .map(|comms| {
       comms
@@ -1243,7 +1244,7 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
       &mut u_transcript,
     )?;
 
-    let (evals_Az_Bz_Cz_W, evals_L_row_col, evals_mem_oracle, evals_mem_preprocessed) = {
+    let (evals_Az_Bz_Cz_W_E, evals_L_row_col, evals_mem_oracle, evals_mem_preprocessed) = {
       let evals_Az_Bz = claims_outer
         .into_iter()
         .map(|claims| [claims[0][0], claims[0][1]])
@@ -1274,16 +1275,17 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
         .map(|claims| claims[0][0])
         .collect::<Vec<_>>();
 
-      let (evals_Cz, evals_mem_val_row_col): (Vec<_>, Vec<_>) = zip_with!(
+      let (evals_Cz_E, evals_mem_val_row_col): (Vec<_>, Vec<_>) = zip_with!(
         iter,
-        (data.polys_Az_Bz_Cz, pk.S_repr),
-        |ABCzs, s_repr| {
+        (data.polys_Az_Bz_Cz, data.polys_E, pk.S_repr),
+        |ABCzs, poly_E, s_repr| {
           let [_, _, Cz] = ABCzs;
           let log_Ni = s_repr.N.log_2();
           let (_, rand_sc) = rand_sc.split_at(data.num_rounds_sc - log_Ni);
           let rand_sc_evals = EqPolynomial::evals_from_points(rand_sc);
           let e = [
             Cz,
+            poly_E,
             &s_repr.val_A,
             &s_repr.val_B,
             &s_repr.val_C,
@@ -1296,16 +1298,18 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
             zip_with!(par_iter, (p, rand_sc_evals), |p, eq| *p * eq).sum()
           })
           .collect::<Vec<E::Scalar>>();
-          (e[0], [e[1], e[2], e[3], e[4], e[5]])
+          ([e[0], e[1]], [e[2], e[3], e[4], e[5], e[6]])
+
         }
       )
       .unzip();
 
-      let evals_Az_Bz_Cz_W = zip_with!(
-        (evals_Az_Bz.into_iter(), evals_Cz.into_iter(), evals_W),
-        |Az_Bz, Cz, W| {
+      let evals_Az_Bz_Cz_W_E = zip_with!(
+        (evals_Az_Bz.into_iter(), evals_Cz_E.into_iter(), evals_W),
+        |Az_Bz, Cz_E, W| {
           let [Az, Bz] = Az_Bz;
-          [Az, Bz, Cz, W]
+          let [Cz, E] = Cz_E;
+          [Az, Bz, Cz, W, E]
         }
       )
       .collect::<Vec<_>>();
@@ -1321,7 +1325,7 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
       )
       .collect::<Vec<_>>();
       (
-        evals_Az_Bz_Cz_W,
+        evals_Az_Bz_Cz_W_E,
         evals_L_row_col,
         evals_mem_oracle,
         evals_mem_preprocessed,
@@ -1331,13 +1335,13 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
     let evals_vec = zip_with!(
       iter,
       (
-        evals_Az_Bz_Cz_W,
+        evals_Az_Bz_Cz_W_E,
         evals_L_row_col,
         evals_mem_oracle,
         evals_mem_preprocessed
       ),
-      |Az_Bz_Cz_W, L_row_col, mem_oracles, mem_preprocessed| {
-        chain![Az_Bz_Cz_W, L_row_col, mem_oracles, mem_preprocessed]
+      |Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed| {
+        chain![Az_Bz_Cz_W_E, L_row_col, mem_oracles, mem_preprocessed]
           .cloned()
           .collect::<Vec<_>>()
       }
@@ -1348,15 +1352,15 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
       iter,
       (
         comms_Az_Bz_Cz,
-        comms_W,
+        comms_W_E,
         comms_L_row_col,
         comms_mem_oracles,
         pk.S_comm
       ),
-      |Az_Bz_Cz, comms_W, L_row_col, mem_oracles, S_comm| {
+      |Az_Bz_Cz, comms_W_E, L_row_col, mem_oracles, S_comm| {
         chain![
           Az_Bz_Cz,
-          comms_W,
+          comms_W_E,
           L_row_col,
           mem_oracles,
           [
@@ -1379,14 +1383,16 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
       (
         data.polys_Az_Bz_Cz.clone().into_iter(),
         data.polys_W.clone().into_iter(),
+        data.polys_E.clone().into_iter(),
         data.polys_L_row_col.clone().into_iter(),
         polys_mem_oracles.clone().into_iter(),
         pk.S_repr.iter()
       ),
-      |Az_Bz_Cz, W, L_row_col, mem_oracles, S_repr| {
+      |Az_Bz_Cz, W, E, L_row_col, mem_oracles, S_repr| {
+
         chain![
           Az_Bz_Cz,
-          [W],
+          [W, E],
           L_row_col,
           mem_oracles,
           [
@@ -1438,7 +1444,7 @@ impl<E: Engine> BatchedRelaxedR1CSSNARK<E>
     Ok(ResultsBatchedTinySNARK{
       data: data.clone(),
       sc,
-      evals_Az_Bz_Cz_W,
+      evals_Az_Bz_Cz_W_E,
       evals_L_row_col,
       evals_mem_oracle,
       evals_mem_preprocessed,
