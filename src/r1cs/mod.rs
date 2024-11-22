@@ -554,6 +554,58 @@ impl<E: Engine> R1CSShape<E> {
     Ok((T, comm_T))
   }
 
+  /// A method to compute a commitment to the cross-term `T` given two
+  /// Relaxed R1CS instance-witness pair
+  pub fn commit_T_relaxed(
+    &self,
+    ck: &CommitmentKey<E>,
+    U1: &RelaxedR1CSInstance<E>,
+    W1: &RelaxedR1CSWitness<E>,
+    U2: &RelaxedR1CSInstance<E>,
+    W2: &RelaxedR1CSWitness<E>,
+  ) -> Result<(Vec<E::Scalar>, Commitment<E>), NovaError> {
+    let (AZ_1, BZ_1, CZ_1) = tracing::trace_span!("AZ_1, BZ_1, CZ_1")
+      .in_scope(|| self.multiply_witness(&W1.W, &U1.u, &U1.X))?;
+
+    let (AZ_2, BZ_2, CZ_2) = tracing::trace_span!("AZ_2, BZ_2, CZ_2")
+      .in_scope(|| self.multiply_witness(&W2.W, &E::Scalar::ONE, &U2.X))?;
+
+    let (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1, u_1_cdot_CZ_2, u_2_cdot_CZ_1) =
+      tracing::trace_span!("cross terms").in_scope(|| {
+        let AZ_1_circ_BZ_2 = (0..AZ_1.len())
+          .into_par_iter()
+          .map(|i| AZ_1[i] * BZ_2[i])
+          .collect::<Vec<E::Scalar>>();
+        let AZ_2_circ_BZ_1 = (0..AZ_2.len())
+          .into_par_iter()
+          .map(|i| AZ_2[i] * BZ_1[i])
+          .collect::<Vec<E::Scalar>>();
+        let u_1_cdot_CZ_2 = (0..CZ_2.len())
+          .into_par_iter()
+          .map(|i| U1.u * CZ_2[i])
+          .collect::<Vec<E::Scalar>>();
+        let u_2_cdot_CZ_1 = (0..CZ_1.len())
+          .into_par_iter()
+          .map(|i| U2.u * CZ_1[i])
+          .collect::<Vec<E::Scalar>>();
+        (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1, u_1_cdot_CZ_2, u_2_cdot_CZ_1)
+      });
+
+    let T = tracing::trace_span!("T").in_scope(|| {
+      AZ_1_circ_BZ_2
+        .par_iter()
+        .zip_eq(&AZ_2_circ_BZ_1)
+        .zip_eq(&u_1_cdot_CZ_2)
+        .zip_eq(&u_2_cdot_CZ_1)
+        .map(|(((a, b), c), d)| *a + *b - *c - *d)
+        .collect::<Vec<E::Scalar>>()
+    });
+
+    let comm_T = CE::<E>::commit(ck, &T);
+
+    Ok((T, comm_T))
+  }
+
   /// A method to compute a binding and hiding commitment to the cross-term `T` given a
   /// Relaxed R1CS instance-witness pair and an R1CS instance-witness pair
   pub fn commit_T_zk(
@@ -893,6 +945,30 @@ impl<E: Engine> RelaxedR1CSWitness<E> {
     Ok(Self { W, E })
   }
 
+  /// Folds an incoming `R1CSWitness` into the current one
+  pub fn fold_relaxed(
+    &self,
+    W2: &RelaxedR1CSWitness<E>,
+    T: &[E::Scalar],
+    r: &E::Scalar,
+  ) -> Result<Self, NovaError> {
+    let (W1, E1) = (&self.W, &self.E);
+    let (W2, E2) = (&W2.W, &W2.E);
+
+    if W1.len() != W2.len() {
+      return Err(NovaError::InvalidWitnessLength);
+    }
+    let r_squared = r.square();
+
+    let W = zip_with!((W1.par_iter(), W2), |a, b| *a + *r * *b).collect::<Vec<E::Scalar>>();
+    let E = zip_with!((E1.par_iter(), E2.par_iter(), T), |e1, e2, t| *e1
+      + *r * *t
+      + r_squared * *e2)
+    .collect::<Vec<E::Scalar>>();
+
+    Ok(Self { W, E })
+  }
+
   /// Mutably folds an incoming `R1CSWitness` into the current one
   pub fn fold_mut(
     &mut self,
@@ -1082,6 +1158,28 @@ impl<E: Engine> RelaxedR1CSInstance<E> {
     let comm_W = *comm_W_1 + *comm_W_2 * *r;
     let comm_E = *comm_E_1 + *comm_T * *r;
     let u = *u1 + *r;
+
+    Self {
+      comm_W,
+      comm_E,
+      X,
+      u,
+    }
+  }
+
+  /// Folds an incoming `RelaxedR1CSInstance` into the current one
+  pub fn fold_relaxed(&self, U2: &Self, comm_T: &Commitment<E>, r: &E::Scalar) -> Self {
+    let (X1, u1, comm_W_1, comm_E_1) =
+      (&self.X, &self.u, &self.comm_W.clone(), &self.comm_E.clone());
+    let (X2, u2, comm_W_2, comm_E_2) = (&U2.X, &U2.u, &U2.comm_W, &U2.comm_E);
+
+    // weighted sum of X, comm_W, comm_E, and u
+    let X = zip_with!((X1.par_iter(), X2), |a, b| *a + *r * *b).collect::<Vec<E::Scalar>>();
+    let comm_W = *comm_W_1 + *comm_W_2 * *r;
+
+    let r_squared = r.square();
+    let comm_E = *comm_E_1 + *comm_T * *r + *comm_E_2 * r_squared;
+    let u = *u1 + *r * u2;
 
     Self {
       comm_W,

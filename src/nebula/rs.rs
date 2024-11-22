@@ -56,7 +56,8 @@ where
   ro_consts_circuit_primary: ROConstantsCircuit<Dual<E1>>,
   /// Commitment key for primary circuit
   pub ck_primary: CommitmentKey<E1>,
-  circuit_shape_primary: R1CSWithArity<E1>,
+  /// R1CS shape we are arguing about
+  pub circuit_shape_primary: R1CSWithArity<E1>,
   augmented_circuit_params: AugmentedCircuitParams,
   ro_consts_cyclefold: ROConstants<Dual<E1>>,
   ck_cyclefold: CommitmentKey<Dual<E1>>,
@@ -560,6 +561,11 @@ where
   /// The number of steps which have been executed thus far.
   pub fn num_steps(&self) -> usize {
     self.i
+  }
+
+  /// Get relaxed instance witness pair for primary circuit
+  pub fn U_W(self) -> (RelaxedR1CSInstance<E1>, RelaxedR1CSWitness<E1>) {
+    (self.r_U_primary, self.r_W_primary)
   }
 }
 

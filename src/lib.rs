@@ -104,6 +104,11 @@ impl<E: Engine> R1CSWithArity<E> {
     let dc: DigestComputer<'_, <E as Engine>::Scalar, Self> = DigestComputer::new(self);
     dc.digest().expect("Failure in computing digest")
   }
+
+  /// Get the shape for [`R1CSWithArity`]
+  pub fn shape(&self) -> &R1CSShape<E> {
+    &self.r1cs_shape
+  }
 }
 
 /// A type that holds public parameters of Nova

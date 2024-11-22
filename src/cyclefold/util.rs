@@ -38,7 +38,7 @@ pub(crate) fn absorb_primary_commitment<E1, E2>(
   }
 }
 
-pub(super) fn absorb_primary_r1cs<E1, E2>(
+pub(crate) fn absorb_primary_r1cs<E1, E2>(
   u: &R1CSInstance<E1>,
   ro: &mut impl ROTrait<E2::Base, E2::Scalar>,
 ) where
@@ -51,7 +51,7 @@ pub(super) fn absorb_primary_r1cs<E1, E2>(
   }
 }
 
-pub(super) fn absorb_cyclefold_r1cs<E: Engine>(u: &R1CSInstance<E>, ro: &mut E::RO) {
+pub(crate) fn absorb_cyclefold_r1cs<E: Engine>(u: &R1CSInstance<E>, ro: &mut E::RO) {
   u.comm_W.absorb_in_ro(ro);
   u.X.iter().for_each(|x| {
     let limbs: Vec<E::Scalar> = nat_to_limbs(&f_to_nat(x), BN_LIMB_WIDTH, BN_N_LIMBS).unwrap();

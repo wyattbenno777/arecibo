@@ -309,10 +309,10 @@ mod test {
     spartan::{batched, batched_ppsnark, snark::RelaxedR1CSSNARK, tiny_batched_ppsnark},
     supernova::{circuit::TrivialSecondaryCircuit, NonUniformCircuit, StepCircuit},
   };
-
   use abomonation::Abomonation;
   use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
   use ff::{Field, PrimeField};
+  use halo2curves::pasta::Fq;
   use std::marker::PhantomData;
 
   type EE<E> = ipa_pc::EvaluationEngine<E>;
