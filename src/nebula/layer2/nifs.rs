@@ -60,7 +60,7 @@ where
 
     let mut ro = <Dual<E1> as Engine>::RO::new(
       ro_consts.clone(),
-      1 + 2 * NUM_FE_IN_EMULATED_POINT + arity + 1 + NUM_FE_IN_EMULATED_POINT, // pp_digest + u.W + U.comm_E + U.X + U.u + T
+      1 + 2 * NUM_FE_IN_EMULATED_POINT + arity + 1 + NUM_FE_IN_EMULATED_POINT, // pp_digest + u.W + U.comm_E + U.X + U.u + comm_T
     );
 
     ro.absorb(*pp_digest);
@@ -107,7 +107,7 @@ where
     // initialize a new RO
     let mut ro = <Dual<E1> as Engine>::RO::new(
       ro_consts.clone(),
-      1 + 2 * NUM_FE_IN_EMULATED_POINT + arity + 1 + NUM_FE_IN_EMULATED_POINT, // pp_digest + u.W + U.comm_E + U.X + U.u + T
+      1 + 2 * NUM_FE_IN_EMULATED_POINT + arity + 1 + NUM_FE_IN_EMULATED_POINT, // pp_digest + u.W + U.comm_E + U.X + U.u + comm_T
     );
 
     // append the digest of pp to the transcript

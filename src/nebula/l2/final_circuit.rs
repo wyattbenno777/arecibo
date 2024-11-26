@@ -3,20 +3,34 @@ use bellpepper_core::num::AllocatedNum;
 use bellpepper_core::{ConstraintSystem, SynthesisError};
 use serde::{Deserialize, Serialize};
 
-use super::gadgets::AllocatedRelaxedFoldingData;
-use super::RelaxedFoldingData;
-use crate::gadgets::alloc_scalar_as_base;
+use crate::constants::{NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS};
+use crate::gadgets::{alloc_scalar_as_base, le_bits_to_num};
+use crate::nebula::augmented_circuit::AugmentedCircuitParams;
+use crate::nebula::rs::StepCircuit;
 use crate::traits::commitment::CommitmentTrait;
+use crate::traits::ROCircuitTrait;
 use crate::{
   cyclefold::gadgets::emulated,
   traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
   Commitment,
 };
 
+use crate::nebula::layer2::gadgets::AllocatedRelaxedFoldingData;
+use crate::nebula::layer2::utils::RelaxedFoldingData;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Abomonation)]
 pub struct FinalCircuitParams {
   limb_width: usize,
   n_limbs: usize,
+}
+
+impl From<&AugmentedCircuitParams> for FinalCircuitParams {
+  fn from(value: &AugmentedCircuitParams) -> Self {
+    Self {
+      limb_width: value.limb_width,
+      n_limbs: value.n_limbs,
+    }
+  }
 }
 
 impl FinalCircuitParams {
@@ -28,7 +42,7 @@ impl FinalCircuitParams {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(bound = "")]
 pub struct FinalCircuitInputs<E1>
 where
@@ -61,6 +75,7 @@ where
   }
 }
 
+#[derive(Clone)]
 pub struct FinalCircuit<'a, E1>
 where
   E1: CurveCycleEquipped,
@@ -124,11 +139,25 @@ where
 
     Ok((pp_digest, data_F, E_new, W_new))
   }
+}
 
-  pub fn synthesize<CS: ConstraintSystem<E1::Scalar>>(
+impl<'a, E1> StepCircuit<E1::Scalar> for FinalCircuit<'a, E1>
+where
+  E1: CurveCycleEquipped,
+{
+  fn arity(&self) -> usize {
+    1
+  }
+
+  fn non_deterministic_advice(&self) -> Vec<E1::Scalar> {
+    vec![]
+  }
+
+  fn synthesize<CS: ConstraintSystem<E1::Scalar>>(
     &self,
     cs: &mut CS,
-  ) -> Result<(), SynthesisError> {
+    z: &[AllocatedNum<E1::Scalar>],
+  ) -> Result<Vec<AllocatedNum<E1::Scalar>>, SynthesisError> {
     // Allocate the witness
     let (pp_digest, data_F, E_new, W_new) = self.alloc_witness(cs.namespace(|| "alloc_witness"))?;
 
@@ -142,6 +171,18 @@ where
       self.ro_consts.clone(),
     )?;
 
-    Ok(())
+    // Calculate h_int = H(U_F)
+    let mut ro = <Dual<E1> as Engine>::ROCircuit::new(
+      self.ro_consts.clone(),
+      2 * NUM_FE_IN_EMULATED_POINT + 2 + 1, // U.comm_W + U.comm_E + U.X + U.u
+    );
+
+    U_F.absorb_in_ro(cs.namespace(|| "absorb U_F"), &mut ro)?;
+
+    let hash_bits = ro.squeeze(cs.namespace(|| "hash_bits"), NUM_HASH_BITS)?;
+    let hash = le_bits_to_num(cs.namespace(|| "hash"), &hash_bits)?;
+
+    hash.inputize(cs.namespace(|| "inputize hash"))?;
+    Ok(z.to_vec())
   }
 }

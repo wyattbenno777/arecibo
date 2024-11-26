@@ -53,12 +53,14 @@ where
   F_arity_primary: usize,
   /// RO constants for primary circuit
   pub ro_consts_primary: ROConstants<Dual<E1>>,
-  ro_consts_circuit_primary: ROConstantsCircuit<Dual<E1>>,
+  /// RO constants for primary circuit
+  pub ro_consts_circuit_primary: ROConstantsCircuit<Dual<E1>>,
   /// Commitment key for primary circuit
   pub ck_primary: CommitmentKey<E1>,
   /// R1CS shape we are arguing about
   pub circuit_shape_primary: R1CSWithArity<E1>,
-  augmented_circuit_params: AugmentedCircuitParams,
+  /// Parameters of big nats in circuit
+  pub augmented_circuit_params: AugmentedCircuitParams,
   ro_consts_cyclefold: ROConstants<Dual<E1>>,
   ck_cyclefold: CommitmentKey<Dual<E1>>,
   circuit_shape_cyclefold: R1CSWithArity<Dual<E1>>,
@@ -264,7 +266,7 @@ where
     })
   }
 
-  /// Create a new `RecursiveSNARK` (or updates the provided `RecursiveSNARK`)
+  /// Create a new [`RecursiveSNARK`] (or updates the provided [`RecursiveSNARK`])
   /// by executing a step of the incremental computation
   pub fn prove_step<C>(
     &mut self,
@@ -564,8 +566,8 @@ where
   }
 
   /// Get relaxed instance witness pair for primary circuit
-  pub fn U_W(self) -> (RelaxedR1CSInstance<E1>, RelaxedR1CSWitness<E1>) {
-    (self.r_U_primary, self.r_W_primary)
+  pub fn U_W(&self) -> (&RelaxedR1CSInstance<E1>, &RelaxedR1CSWitness<E1>) {
+    (&self.r_U_primary, &self.r_W_primary)
   }
 }
 

@@ -14,7 +14,7 @@ use crate::{
 
 use bellpepper::gadgets::Assignment;
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
-use ff::Field;
+use ff::{Field, PrimeField};
 use itertools::Itertools;
 
 // An allocated version of the R1CS instance obtained from a single cyclefold invocation
@@ -530,6 +530,69 @@ pub mod emulated {
         || "x1_fold = x1 + r * u_x1",
         |lc| lc + r.get_variable(),
         |lc| lc + u_x1.get_variable(),
+        |lc| lc + x1_fold.get_variable() - self.x1.get_variable(),
+      );
+
+      Ok(Self {
+        comm_W: W_new,
+        comm_E: E_new,
+        u: u_fold,
+        x0: x0_fold,
+        x1: x1_fold,
+      })
+    }
+
+    /// Performs a folding of a primary R1CS instance (`u_W`, `u_x0`, `u_x1`) into a running
+    /// `AllocatedEmulRelaxedR1CSInstance`
+    /// As the curve operations are performed in the CycleFold circuit and provided to the primary
+    /// circuit as non-deterministic advice, this folding simply sets those values as the new witness
+    /// and error vector commitments.
+    pub fn fold_with_relaxed_r1cs<CS: ConstraintSystem<<E as Engine>::Base>>(
+      &self,
+      mut cs: CS,
+      pp_digest: &AllocatedNum<E::Base>,
+      U2: &Self,
+      W_new: AllocatedEmulPoint<E::GE>,
+      E_new: AllocatedEmulPoint<E::GE>,
+      comm_T: &AllocatedEmulPoint<E::GE>,
+      ro_consts: ROConstantsCircuit<E>,
+    ) -> Result<Self, SynthesisError> {
+      let mut ro = E::ROCircuit::new(
+        ro_consts,
+        1 + 2 * NUM_FE_IN_EMULATED_POINT + 2 + 1 + NUM_FE_IN_EMULATED_POINT, // pp_digest + u.W + U.comm_E + U.X + U.u + comm_T
+      );
+      ro.absorb(pp_digest);
+
+      // Absorb U2
+      U2.absorb_in_ro(cs.namespace(|| "absorb U2"), &mut ro)?;
+
+      // Absorb comm_T
+      comm_T.absorb_in_ro(cs.namespace(|| "absorb comm_T"), &mut ro)?;
+
+      let r_bits = ro.squeeze(cs.namespace(|| "r bits"), NUM_CHALLENGE_BITS)?;
+      let r = le_bits_to_num(cs.namespace(|| "r"), &r_bits)?;
+
+      let u2_r = U2.u.mul(cs.namespace(|| "u2_r = U2.u * r"), &r)?;
+      let u_fold = self.u.add(cs.namespace(|| "u_fold = u + u2_r"), &u2_r)?;
+
+      let x0_fold = AllocatedNum::alloc(cs.namespace(|| "x0"), || {
+        Ok(*self.x0.get_value().get()? + *r.get_value().get()? * *U2.x0.get_value().get()?)
+      })?;
+      cs.enforce(
+        || "x0_fold = x0 + r * U2.x0",
+        |lc| lc + r.get_variable(),
+        |lc| lc + U2.x0.get_variable(),
+        |lc| lc + x0_fold.get_variable() - self.x0.get_variable(),
+      );
+
+      let x1_fold = AllocatedNum::alloc(cs.namespace(|| "x1"), || {
+        Ok(*self.x1.get_value().get()? + *r.get_value().get()? * *U2.x1.get_value().get()?)
+      })?;
+
+      cs.enforce(
+        || "x1_fold = x1 + r * U2.x1",
+        |lc| lc + r.get_variable(),
+        |lc| lc + U2.x1.get_variable(),
         |lc| lc + x1_fold.get_variable() - self.x1.get_variable(),
       );
 

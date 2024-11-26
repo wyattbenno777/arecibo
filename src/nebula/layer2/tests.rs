@@ -17,7 +17,9 @@ use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::Field;
 use ff::PrimeField;
 
-#[derive(Clone, Debug)]
+use super::Layer2RS;
+
+#[derive(Clone, Debug, Default)]
 struct Add32Circuit {
   a: u32,
   b: u32,
@@ -76,7 +78,7 @@ where
   }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct Mul32Circuit {
   a: u32,
   b: u32,
@@ -135,62 +137,106 @@ where
   }
 }
 
+#[derive(Clone, Debug, Default)]
+struct LineCircuit {
+  x: u32,
+}
+
+impl<F> StepCircuit<F> for LineCircuit
+where
+  F: PrimeField,
+{
+  fn arity(&self) -> usize {
+    1
+  }
+
+  fn non_deterministic_advice(&self) -> Vec<F> {
+    vec![]
+  }
+
+  fn synthesize<CS: ConstraintSystem<F>>(
+    &self,
+    cs: &mut CS,
+    z: &[AllocatedNum<F>],
+  ) -> Result<Vec<AllocatedNum<F>>, SynthesisError> {
+    // y = 2x + 1
+    let x = AllocatedNum::alloc(cs.namespace(|| "x"), || Ok(F::from(self.x as u64)))?;
+    let y = AllocatedNum::alloc(cs.namespace(|| "y"), || {
+      let two = F::from(2u64);
+      let one = F::from(1u64);
+      x.get_value()
+        .map(|x| x * two + one)
+        .ok_or(SynthesisError::AssignmentMissing)
+    })?;
+
+    // 2x = y - 1
+    cs.enforce(
+      || "2x = y - 1",
+      |lc| lc + x.get_variable(),
+      |lc| lc + (F::from(2u64), CS::one()),
+      |lc| lc + y.get_variable() - CS::one(),
+    );
+
+    Ok(z.to_vec())
+  }
+}
+
 type E1 = Bn256EngineIPA;
 type F = <E1 as Engine>::Scalar;
 
 #[test]
 fn test_4_4_4() {
-  let circuit1 = Add32Circuit { a: 4, b: 4 };
-  let circuit2 = Mul32Circuit { a: 4, b: 4 };
-  // Get shape
-  let ro_consts_circuit = ROConstantsCircuit::<Dual<E1>>::default();
+  let circuits1 = [Add32Circuit { a: 4, b: 4 }, Add32Circuit { a: 10, b: 12 }];
+  let circuits2 = [Mul32Circuit { a: 4, b: 4 }, Mul32Circuit { a: 11, b: 12 }];
+  let circuits3 = [LineCircuit { x: 4 }, LineCircuit { x: 10 }];
 
-  let augmented_circuit_params = AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
-
-  let aug_circuit1: AugmentedCircuit<'_, E1, _> = AugmentedCircuit::new(
-    &augmented_circuit_params,
-    ro_consts_circuit.clone(),
-    None,
-    &circuit1,
+  let pp1 = PublicParams::<E1>::setup(
+    &Add32Circuit::default(),
+    &*default_ck_hint(),
+    &*default_ck_hint(),
   );
-  let aug_circuit2: AugmentedCircuit<'_, E1, _> = AugmentedCircuit::new(
-    &augmented_circuit_params,
-    ro_consts_circuit.clone(),
-    None,
-    &circuit2,
+  let pp2 = PublicParams::<E1>::setup(
+    &Mul32Circuit::default(),
+    &*default_ck_hint(),
+    &*default_ck_hint(),
   );
-  let mut cs: ShapeCS<E1> = ShapeCS::new();
-  let _ = aug_circuit1.synthesize(&mut cs);
-  let _ = aug_circuit2.synthesize(&mut cs);
+  let pp3 = PublicParams::<E1>::setup(
+    &LineCircuit::default(),
+    &*default_ck_hint(),
+    &*default_ck_hint(),
+  );
 
-  let (r1cs_main, ck_main) = cs.r1cs_shape_and_key(&*default_ck_hint());
-  let U_main = RelaxedR1CSInstance::default(&ck_main, &r1cs_main);
-  let W_main = RelaxedR1CSWitness::default(&r1cs_main);
+  let (rs1, rs2, rs3) = {
+    (
+      RSNARK(&pp1, &circuits1),
+      RSNARK(&pp2, &circuits2),
+      RSNARK(&pp3, &circuits3),
+    )
+  };
 
-  let (U1, W1) = get_U_W::<E1>(circuit1);
-  let (U2, W2) = get_U_W::<E1>(circuit2);
-
-  // Folding
+  let final_rs = Layer2RS::new((&pp1, &pp2, &pp3));
+  final_rs
+    .prove_step((&pp1, &pp2, &pp3), (&rs1, &rs2, &rs3))
+    .unwrap();
 }
 
-fn get_U_W<E>(
-  circuit: impl StepCircuit<E::Scalar>,
-) -> (RelaxedR1CSInstance<E>, RelaxedR1CSWitness<E>)
+fn RSNARK(pp: &PublicParams<E1>, C: &[impl StepCircuit<F>]) -> RecursiveSNARK<E1>
 where
-  E: CurveCycleEquipped,
+  F: PrimeField,
 {
-  let pp = PublicParams::<E>::setup(&circuit, &*default_ck_hint(), &*default_ck_hint());
+  let z0 = vec![F::from(0u64)];
 
-  let z0 = vec![E::Scalar::from(2u64)];
+  let mut recursive_snark = RecursiveSNARK::new(&pp, &C[0], &z0).unwrap();
+  let mut IC_i = F::ZERO;
 
-  let mut recursive_snark = RecursiveSNARK::new(&pp, &circuit, &z0).unwrap();
-  let mut IC_i = E::Scalar::ZERO;
+  for i in 0..2 {
+    recursive_snark.prove_step(pp, &C[i], IC_i).unwrap();
 
-  for _ in 0..2 {
-    recursive_snark.prove_step(&pp, &circuit, IC_i).unwrap();
-
-    IC_i = recursive_snark.increment_commitment(&pp, &circuit);
+    IC_i = recursive_snark.increment_commitment(pp, &C[i]);
   }
+  recursive_snark
+    .verify(pp, recursive_snark.num_steps(), &z0, IC_i)
+    .unwrap();
 
-  recursive_snark.U_W()
+  recursive_snark
 }

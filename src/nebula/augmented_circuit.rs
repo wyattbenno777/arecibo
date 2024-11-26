@@ -33,8 +33,10 @@ use super::rs::StepCircuit;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Abomonation)]
 pub struct AugmentedCircuitParams {
-  limb_width: usize,
-  n_limbs: usize,
+  /// how many bits in each limb
+  pub limb_width: usize,
+  /// how many limbs represent the BigNat
+  pub n_limbs: usize,
 }
 
 impl AugmentedCircuitParams {

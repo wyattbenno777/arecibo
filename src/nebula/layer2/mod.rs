@@ -1,14 +1,22 @@
 //! This module contains components for the "second layer" which is used to fold finalized auxillary IVC proofs from the first layer.
 
-use super::rs::PublicParams;
+use nifs::RelaxedNIFS;
+use utils::RelaxedFoldingData;
+
+use super::rs::{PublicParams, RecursiveSNARK};
+use crate::cyclefold::util::FoldingData;
+use crate::traits::commitment::CommitmentTrait;
 use crate::{
+  errors::NovaError,
   r1cs::{RelaxedR1CSInstance, RelaxedR1CSWitness},
-  traits::CurveCycleEquipped,
+  traits::{CurveCycleEquipped, Dual},
+  Commitment,
 };
 
 mod final_circuit;
-mod nifs;
-mod utils;
+pub(crate) mod gadgets;
+pub(crate) mod nifs;
+pub(crate) mod utils;
 
 #[cfg(test)]
 mod tests;
@@ -17,9 +25,28 @@ mod tests;
 trait Layer2Getters {
   type T;
 
-  fn F(&self) -> Self::T;
-  fn ops(&self) -> Self::T;
-  fn scan(&self) -> Self::T;
+  fn F(&self) -> &Self::T;
+
+  fn ops(&self) -> &Self::T;
+  fn scan(&self) -> &Self::T;
+}
+
+type M<T> = (T, T, T);
+
+impl<T> Layer2Getters for M<T> {
+  type T = T;
+
+  fn F(&self) -> &Self::T {
+    &self.0
+  }
+
+  fn ops(&self) -> &Self::T {
+    &self.1
+  }
+
+  fn scan(&self) -> &Self::T {
+    &self.2
+  }
 }
 
 /// Layer2 PP
@@ -29,25 +56,6 @@ type PP<'a, E1> = (
   &'a PublicParams<E1>,
 );
 
-impl<'a, E1> Layer2Getters for PP<'a, E1>
-where
-  E1: CurveCycleEquipped,
-{
-  type T = &'a PublicParams<E1>;
-
-  fn F(&self) -> Self::T {
-    self.0
-  }
-
-  fn ops(&self) -> Self::T {
-    self.1
-  }
-
-  fn scan(&self) -> Self::T {
-    self.2
-  }
-}
-
 /// Finalized IVC proof
 type RS<'a, E1> = (
   &'a RecursiveSNARK<E1>,
@@ -55,8 +63,8 @@ type RS<'a, E1> = (
   &'a RecursiveSNARK<E1>,
 );
 
-/// [`RecursiveSNARK`] used to restore incremantality from Nebula finalized IVC proofs
-pub struct RecursiveSNARK<E1>
+/// [`Layer2RS`] used to restore incremantality from Nebula finalized IVC proofs
+pub struct Layer2RS<E1>
 where
   E1: CurveCycleEquipped,
 {
@@ -72,11 +80,11 @@ where
   ),
 }
 
-impl<E1> RecursiveSNARK<E1>
+impl<E1> Layer2RS<E1>
 where
   E1: CurveCycleEquipped,
 {
-  /// Create a new [`RecursiveSNARK`]
+  /// Create a new [`Layer2RS`]
   pub fn new<'a>(pp: PP<'a, E1>) -> Self {
     // Initialize the initial relaxed instance and witness pairs.
     let (r_U, r_W) = {
@@ -101,7 +109,25 @@ where
     Self { r_U, r_W }
   }
 
-  /// updates the provided [`RecursiveSNARK`]
+  /// updates the provided [`Layer2RS`]
   /// by executing a step of the incremental computation
-  pub fn prove_step<'a>(&self, pp: PP<'a, E1>, rs: RS<'a, E1>) {}
+  pub fn prove_step<'a>(&self, pp: PP<'a, E1>, rs: RS<'a, E1>) -> Result<(), NovaError> {
+    let pp = *pp.F();
+    let (l_U, l_W) = rs.F().U_W();
+    let (nifs_primary, (r_U, r_W), r) = RelaxedNIFS::<E1>::prove(
+      &pp.ck_primary,
+      &pp.ro_consts_primary,
+      &pp.digest(),
+      &pp.circuit_shape_primary.r1cs_shape,
+      self.r_U.F(),
+      self.r_W.F(),
+      l_U,
+      l_W,
+    )?;
+    let comm_T = Commitment::<E1>::decompress(&nifs_primary.comm_T)?;
+
+    let data_p = RelaxedFoldingData::new(self.r_U.F().clone(), l_U.clone(), comm_T);
+
+    Ok(())
+  }
 }
