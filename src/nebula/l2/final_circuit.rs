@@ -15,8 +15,8 @@ use crate::{
   Commitment,
 };
 
-use crate::nebula::layer2::gadgets::AllocatedRelaxedFoldingData;
-use crate::nebula::layer2::utils::RelaxedFoldingData;
+use crate::nebula::l2::gadgets::AllocatedRelaxedFoldingData;
+use crate::nebula::l2::utils::RelaxedFoldingData;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Abomonation)]
 pub struct FinalCircuitParams {
@@ -48,12 +48,12 @@ pub struct FinalCircuitInputs<E1>
 where
   E1: CurveCycleEquipped,
 {
-  pp_digest: E1::Base,
+  pp_digest: Option<E1::Base>,
 
-  data_F: RelaxedFoldingData<E1>,
+  data_F: Option<RelaxedFoldingData<E1>>,
 
-  E_F: Commitment<E1>,
-  W_F: Commitment<E1>,
+  E_F: Option<Commitment<E1>>,
+  W_F: Option<Commitment<E1>>,
 }
 
 impl<E1> FinalCircuitInputs<E1>
@@ -61,10 +61,10 @@ where
   E1: CurveCycleEquipped,
 {
   pub fn new(
-    pp_digest: E1::Base,
-    data_F: RelaxedFoldingData<E1>,
-    E_F: Commitment<E1>,
-    W_F: Commitment<E1>,
+    pp_digest: Option<E1::Base>,
+    data_F: Option<RelaxedFoldingData<E1>>,
+    E_F: Option<Commitment<E1>>,
+    W_F: Option<Commitment<E1>>,
   ) -> Self {
     Self {
       pp_digest,
@@ -82,7 +82,7 @@ where
 {
   params: &'a FinalCircuitParams,
   ro_consts: ROConstantsCircuit<Dual<E1>>,
-  inputs: FinalCircuitInputs<E1>,
+  inputs: Option<FinalCircuitInputs<E1>>,
 }
 
 impl<'a, E1> FinalCircuit<'a, E1>
@@ -92,7 +92,7 @@ where
   pub fn new(
     params: &'a FinalCircuitParams,
     ro_consts: ROConstantsCircuit<Dual<E1>>,
-    inputs: FinalCircuitInputs<E1>,
+    inputs: Option<FinalCircuitInputs<E1>>,
   ) -> Self {
     Self {
       params,
@@ -113,26 +113,39 @@ where
     ),
     SynthesisError,
   > {
-    let pp_digest =
-      alloc_scalar_as_base::<Dual<E1>, _>(cs.namespace(|| "params"), Some(self.inputs.pp_digest))?;
+    let pp_digest = alloc_scalar_as_base::<Dual<E1>, _>(
+      cs.namespace(|| "params"),
+      self.inputs.as_ref().and_then(|inputs| inputs.pp_digest),
+    )?;
 
     let data_F = AllocatedRelaxedFoldingData::alloc(
       cs.namespace(|| "data_F"),
-      &self.inputs.data_F,
+      self
+        .inputs
+        .as_ref()
+        .and_then(|inputs| inputs.data_F.as_ref()),
       self.params.limb_width,
       self.params.n_limbs,
     )?;
 
     let E_new = emulated::AllocatedEmulPoint::alloc(
       cs.namespace(|| "E_new"),
-      Some(self.inputs.E_F.to_coordinates()),
+      self
+        .inputs
+        .as_ref()
+        .and_then(|inputs| inputs.E_F)
+        .map(|E| E.to_coordinates()),
       self.params.limb_width,
       self.params.n_limbs,
     )?;
 
     let W_new = emulated::AllocatedEmulPoint::alloc(
       cs.namespace(|| "W_new"),
-      Some(self.inputs.W_F.to_coordinates()),
+      self
+        .inputs
+        .as_ref()
+        .and_then(|inputs| inputs.W_F)
+        .map(|W| W.to_coordinates()),
       self.params.limb_width,
       self.params.n_limbs,
     )?;
@@ -156,7 +169,7 @@ where
   fn synthesize<CS: ConstraintSystem<E1::Scalar>>(
     &self,
     cs: &mut CS,
-    z: &[AllocatedNum<E1::Scalar>],
+    _z: &[AllocatedNum<E1::Scalar>],
   ) -> Result<Vec<AllocatedNum<E1::Scalar>>, SynthesisError> {
     // Allocate the witness
     let (pp_digest, data_F, E_new, W_new) = self.alloc_witness(cs.namespace(|| "alloc_witness"))?;
@@ -182,7 +195,6 @@ where
     let hash_bits = ro.squeeze(cs.namespace(|| "hash_bits"), NUM_HASH_BITS)?;
     let hash = le_bits_to_num(cs.namespace(|| "hash"), &hash_bits)?;
 
-    hash.inputize(cs.namespace(|| "inputize hash"))?;
-    Ok(z.to_vec())
+    Ok(vec![hash])
   }
 }
