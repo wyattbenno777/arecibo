@@ -148,6 +148,12 @@ where
       self.circuit_shape_cyclefold.r1cs_shape.num_vars,
     )
   }
+
+  /// Break up into shape, ck and digest for layer 2
+  pub fn into_shape_ck_digest(self) -> (R1CSWithArity<E1>, CommitmentKey<E1>, E1::Scalar) {
+    let digest = self.digest();
+    (self.circuit_shape_primary, self.ck_primary, digest)
+  }
 }
 
 impl<E1> SimpleDigestible for PublicParams<E1> where E1: CurveCycleEquipped {}

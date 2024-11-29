@@ -1,46 +1,12 @@
-use abomonation_derive::Abomonation;
-use bellpepper_core::num::AllocatedNum;
-use bellpepper_core::{ConstraintSystem, SynthesisError};
+use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use serde::{Deserialize, Serialize};
 
-use crate::constants::{NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS};
-use crate::gadgets::{alloc_scalar_as_base, le_bits_to_num};
-use crate::nebula::augmented_circuit::AugmentedCircuitParams;
-use crate::nebula::rs::StepCircuit;
-use crate::traits::commitment::CommitmentTrait;
-use crate::traits::ROCircuitTrait;
 use crate::{
-  cyclefold::gadgets::emulated,
-  traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
-  Commitment,
+  nebula::{augmented_circuit::AugmentedCircuitParams, rs::StepCircuit},
+  traits::{CurveCycleEquipped, Dual, ROConstantsCircuit},
 };
 
-use crate::nebula::l2::gadgets::AllocatedRelaxedFoldingData;
-use crate::nebula::l2::utils::RelaxedFoldingData;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Abomonation)]
-pub struct FinalCircuitParams {
-  limb_width: usize,
-  n_limbs: usize,
-}
-
-impl From<&AugmentedCircuitParams> for FinalCircuitParams {
-  fn from(value: &AugmentedCircuitParams) -> Self {
-    Self {
-      limb_width: value.limb_width,
-      n_limbs: value.n_limbs,
-    }
-  }
-}
-
-impl FinalCircuitParams {
-  pub const fn new(limb_width: usize, n_limbs: usize) -> Self {
-    Self {
-      limb_width,
-      n_limbs,
-    }
-  }
-}
+use super::gadgets::{NIFSVerifierCircuit, NIFSVerifierCircuitInputs};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(bound = "")]
@@ -48,12 +14,9 @@ pub struct FinalCircuitInputs<E1>
 where
   E1: CurveCycleEquipped,
 {
-  pp_digest: Option<E1::Base>,
-
-  data_F: Option<RelaxedFoldingData<E1>>,
-
-  E_F: Option<Commitment<E1>>,
-  W_F: Option<Commitment<E1>>,
+  inputs_F: Option<NIFSVerifierCircuitInputs<E1>>,
+  inputs_ops: Option<NIFSVerifierCircuitInputs<E1>>,
+  inputs_scan: Option<NIFSVerifierCircuitInputs<E1>>,
 }
 
 impl<E1> FinalCircuitInputs<E1>
@@ -61,16 +24,14 @@ where
   E1: CurveCycleEquipped,
 {
   pub fn new(
-    pp_digest: Option<E1::Base>,
-    data_F: Option<RelaxedFoldingData<E1>>,
-    E_F: Option<Commitment<E1>>,
-    W_F: Option<Commitment<E1>>,
+    inputs_F: Option<NIFSVerifierCircuitInputs<E1>>,
+    inputs_ops: Option<NIFSVerifierCircuitInputs<E1>>,
+    inputs_scan: Option<NIFSVerifierCircuitInputs<E1>>,
   ) -> Self {
     Self {
-      pp_digest,
-      data_F,
-      E_F,
-      W_F,
+      inputs_F,
+      inputs_ops,
+      inputs_scan,
     }
   }
 }
@@ -80,7 +41,7 @@ pub struct FinalCircuit<'a, E1>
 where
   E1: CurveCycleEquipped,
 {
-  params: &'a FinalCircuitParams,
+  params: &'a AugmentedCircuitParams,
   ro_consts: ROConstantsCircuit<Dual<E1>>,
   inputs: Option<FinalCircuitInputs<E1>>,
 }
@@ -90,7 +51,7 @@ where
   E1: CurveCycleEquipped,
 {
   pub fn new(
-    params: &'a FinalCircuitParams,
+    params: &'a AugmentedCircuitParams,
     ro_consts: ROConstantsCircuit<Dual<E1>>,
     inputs: Option<FinalCircuitInputs<E1>>,
   ) -> Self {
@@ -100,58 +61,6 @@ where
       inputs,
     }
   }
-
-  fn alloc_witness<CS: ConstraintSystem<<E1 as Engine>::Scalar>>(
-    &self,
-    mut cs: CS,
-  ) -> Result<
-    (
-      AllocatedNum<E1::Scalar>,                               // pp_digest
-      AllocatedRelaxedFoldingData<Dual<E1>>,                  //data_F
-      emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // E_new
-      emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // W_new
-    ),
-    SynthesisError,
-  > {
-    let pp_digest = alloc_scalar_as_base::<Dual<E1>, _>(
-      cs.namespace(|| "params"),
-      self.inputs.as_ref().and_then(|inputs| inputs.pp_digest),
-    )?;
-
-    let data_F = AllocatedRelaxedFoldingData::alloc(
-      cs.namespace(|| "data_F"),
-      self
-        .inputs
-        .as_ref()
-        .and_then(|inputs| inputs.data_F.as_ref()),
-      self.params.limb_width,
-      self.params.n_limbs,
-    )?;
-
-    let E_new = emulated::AllocatedEmulPoint::alloc(
-      cs.namespace(|| "E_new"),
-      self
-        .inputs
-        .as_ref()
-        .and_then(|inputs| inputs.E_F)
-        .map(|E| E.to_coordinates()),
-      self.params.limb_width,
-      self.params.n_limbs,
-    )?;
-
-    let W_new = emulated::AllocatedEmulPoint::alloc(
-      cs.namespace(|| "W_new"),
-      self
-        .inputs
-        .as_ref()
-        .and_then(|inputs| inputs.W_F)
-        .map(|W| W.to_coordinates()),
-      self.params.limb_width,
-      self.params.n_limbs,
-    )?;
-
-    Ok((pp_digest, data_F, E_new, W_new))
-  }
 }
 
 impl<'a, E1> StepCircuit<E1::Scalar> for FinalCircuit<'a, E1>
@@ -159,7 +68,7 @@ where
   E1: CurveCycleEquipped,
 {
   fn arity(&self) -> usize {
-    1
+    3
   }
 
   fn non_deterministic_advice(&self) -> Vec<E1::Scalar> {
@@ -171,30 +80,36 @@ where
     cs: &mut CS,
     _z: &[AllocatedNum<E1::Scalar>],
   ) -> Result<Vec<AllocatedNum<E1::Scalar>>, SynthesisError> {
-    // Allocate the witness
-    let (pp_digest, data_F, E_new, W_new) = self.alloc_witness(cs.namespace(|| "alloc_witness"))?;
-
-    let U_F = data_F.U1.fold_with_relaxed_r1cs(
-      cs.namespace(|| "fold U2 into U1"),
-      &pp_digest,
-      &data_F.U2,
-      W_new,
-      E_new,
-      &data_F.T,
+    let hash_F = NIFSVerifierCircuit::new(
+      self.params,
       self.ro_consts.clone(),
-    )?;
+      self
+        .inputs
+        .as_ref()
+        .and_then(|inputs| inputs.inputs_F.as_ref()),
+    )
+    .synthesize(cs.namespace(|| "fold U_ops"))?;
 
-    // Calculate h_int = H(U_F)
-    let mut ro = <Dual<E1> as Engine>::ROCircuit::new(
+    let hash_ops = NIFSVerifierCircuit::new(
+      self.params,
       self.ro_consts.clone(),
-      2 * NUM_FE_IN_EMULATED_POINT + 2 + 1, // U.comm_W + U.comm_E + U.X + U.u
-    );
+      self
+        .inputs
+        .as_ref()
+        .and_then(|inputs| inputs.inputs_ops.as_ref()),
+    )
+    .synthesize(cs.namespace(|| "fold U_scan"))?;
 
-    U_F.absorb_in_ro(cs.namespace(|| "absorb U_F"), &mut ro)?;
+    let hash_scan = NIFSVerifierCircuit::new(
+      self.params,
+      self.ro_consts.clone(),
+      self
+        .inputs
+        .as_ref()
+        .and_then(|inputs| inputs.inputs_scan.as_ref()),
+    )
+    .synthesize(cs.namespace(|| "fold U_F"))?;
 
-    let hash_bits = ro.squeeze(cs.namespace(|| "hash_bits"), NUM_HASH_BITS)?;
-    let hash = le_bits_to_num(cs.namespace(|| "hash"), &hash_bits)?;
-
-    Ok(vec![hash])
+    Ok(vec![hash_F, hash_ops, hash_scan])
   }
 }
