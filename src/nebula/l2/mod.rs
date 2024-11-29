@@ -95,7 +95,7 @@ where
   }
 }
 
-pub struct L2AggregationEngine<E>
+pub struct L2AggregationRS<E>
 where
   E: CurveCycleEquipped,
 {
@@ -110,7 +110,7 @@ where
   i: usize,
 }
 
-impl<E> L2AggregationEngine<E>
+impl<E> L2AggregationRS<E>
 where
   E: CurveCycleEquipped,
 {
