@@ -430,6 +430,32 @@ where
       self.IC_i,
     )?;
 
+    let (res_r_F, (res_r_ops, res_r_scan)) = rayon::join(
+      || {
+        pp.circuit_shape_F
+          .r1cs_shape
+          .is_sat_relaxed(&pp.ck, &self.r_U_F, &self.r_W_F)
+      },
+      || {
+        rayon::join(
+          || {
+            pp.circuit_shape_ops
+              .r1cs_shape
+              .is_sat_relaxed(&pp.ck, &self.r_U_ops, &self.r_W_ops)
+          },
+          || {
+            pp.circuit_shape_scan
+              .r1cs_shape
+              .is_sat_relaxed(&pp.ck, &self.r_U_scan, &self.r_W_scan)
+          },
+        )
+      },
+    );
+
+    res_r_F?;
+    res_r_ops?;
+    res_r_scan?;
+
     Ok(())
   }
 }
