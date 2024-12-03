@@ -1,3 +1,4 @@
+//! Implements Layer2 of Nebula to restore incrementality to auxillary IVC proofs
 use crate::errors::NovaError;
 use crate::gadgets::scalar_as_base;
 use crate::r1cs::{RelaxedR1CSInstance, RelaxedR1CSWitness};
@@ -19,24 +20,31 @@ use utils::RelaxedFoldingData;
 mod final_circuit;
 mod gadgets;
 mod nifs;
-mod sharding;
+pub mod sharding;
 #[cfg(test)]
 mod tests;
 mod utils;
 
+/// Defines how a Layer1 RecursiveSNARK should be structured
 pub trait Layer1RSTrait<E>
 where
   E: CurveCycleEquipped,
 {
+  /// Returns the F instance
   fn F(&self) -> &RecursiveSNARK<E>;
+  /// Returns the ops instance
   fn ops(&self) -> &RecursiveSNARK<E>;
+  /// Returns the scan instance
   fn scan(&self) -> &RecursiveSNARK<E>;
 }
 
+/// Defines how a Layer1 PublicParams should be structured
 pub trait Layer1PP<E: CurveCycleEquipped> {
+  /// Splits the PublicParams into three parts (F, ops, scan)
   fn into_parts(self) -> (PublicParams<E>, PublicParams<E>, PublicParams<E>);
 }
 
+/// Defines the public parameters for the Aggregation layer
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct AggregationPublicParams<E>
@@ -57,6 +65,7 @@ impl<E> AggregationPublicParams<E>
 where
   E: CurveCycleEquipped,
 {
+  /// Produce the setup material for the Aggregation layer
   pub fn setup<'a, PP1>(node_pp: PP1) -> Self
   where
     PP1: Layer1PP<E>,
@@ -95,6 +104,7 @@ where
   }
 }
 
+/// Implements the Aggregation layer of Nebula, this folds layer1 proofs into a single proof
 pub struct AggregationRecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
@@ -114,6 +124,7 @@ impl<E> AggregationRecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
 {
+  /// Create a new instance of [`AggregationRecursiveSNARK`]
   pub fn new<RS1>(pp: &AggregationPublicParams<E>, l1_rs: &RS1) -> Result<Self, NovaError>
   where
     RS1: Layer1RSTrait<E>,

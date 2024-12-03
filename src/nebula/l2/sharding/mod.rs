@@ -1,3 +1,5 @@
+//! Sharding layer 2
+
 use super::gadgets::NIFSVerifierCircuitInputs;
 use super::nifs::RelaxedNIFS;
 use super::utils::RelaxedFoldingData;
@@ -18,6 +20,7 @@ use final_circuit::{FinalCircuit, FinalCircuitInputs};
 use serde::{Deserialize, Serialize};
 mod final_circuit;
 
+/// Get the scan commitments from the statement the Layer 1 proof is proving
 pub trait MemoryCommitmentsTraits<E>
 where
   E: CurveCycleEquipped,
@@ -28,6 +31,7 @@ where
   fn C_FS(&self) -> E::Scalar;
 }
 
+/// Sharding public parameters
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct ShardingPublicParams<E>
@@ -48,6 +52,7 @@ impl<E> ShardingPublicParams<E>
 where
   E: CurveCycleEquipped,
 {
+  /// Create new public parameters for the sharding layer 2
   pub fn setup<'a, PP1>(node_pp: PP1) -> Self
   where
     PP1: Layer1PP<E>,
@@ -86,6 +91,7 @@ where
   }
 }
 
+/// Sharding layer 2
 pub struct ShardingRecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
@@ -105,6 +111,7 @@ impl<E> ShardingRecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
 {
+  /// Create a new instance of [`ShardingRecursiveSNARK`]
   pub fn new<RS1>(
     pp: &ShardingPublicParams<E>,
     l1_rs: &RS1,
