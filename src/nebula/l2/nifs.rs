@@ -1,19 +1,15 @@
 //! This module defines the needed wrong-field NIFS prover
 
-use std::marker::PhantomData;
-
 use crate::{
-  constants::{NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT},
+  constants::{NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT},
   errors::NovaError,
   gadgets::scalar_as_base,
-  r1cs::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
+  r1cs::{R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROConstants, ROTrait},
   Commitment, CommitmentKey, CompressedCommitment,
 };
 
-use crate::cyclefold::util::{
-  absorb_cyclefold_r1cs, absorb_primary_commitment, absorb_primary_r1cs,
-};
+use crate::cyclefold::util::absorb_primary_commitment;
 
 use super::utils::absorb_U;
 
@@ -86,6 +82,7 @@ where
     ))
   }
 
+  #[allow(dead_code)]
   /// Takes as input a relaxed R1CS instance `U1` and R1CS instance `U2`
   /// with the same shape and defined with respect to the same parameters,
   /// and outputs a folded instance `U` with the same shape,

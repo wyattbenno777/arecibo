@@ -14,7 +14,7 @@ use crate::{
 
 use bellpepper::gadgets::Assignment;
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
-use ff::{Field, PrimeField};
+use ff::Field;
 use itertools::Itertools;
 
 // An allocated version of the R1CS instance obtained from a single cyclefold invocation
