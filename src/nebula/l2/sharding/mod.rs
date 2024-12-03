@@ -115,7 +115,7 @@ where
   pub fn new<RS1>(
     pp: &ShardingPublicParams<E>,
     l1_rs: &RS1,
-    U: impl MemoryCommitmentsTraits<E>,
+    U: &impl MemoryCommitmentsTraits<E>,
   ) -> Result<Self, NovaError>
   where
     RS1: Layer1RSTrait<E>,
@@ -278,7 +278,7 @@ where
     &mut self,
     pp: &ShardingPublicParams<E>,
     l1_rs: &RS1,
-    U: impl MemoryCommitmentsTraits<E>,
+    U: &impl MemoryCommitmentsTraits<E>,
   ) -> Result<(), NovaError>
   where
     RS1: Layer1RSTrait<E>,
