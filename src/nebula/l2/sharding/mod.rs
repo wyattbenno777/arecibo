@@ -18,6 +18,16 @@ use final_circuit::{FinalCircuit, FinalCircuitInputs};
 use serde::{Deserialize, Serialize};
 mod final_circuit;
 
+pub trait MemoryCommitmentsTraits<E>
+where
+  E: CurveCycleEquipped,
+{
+  /// Get commitment to C_is
+  fn C_IS(&self) -> E::Scalar;
+  /// commitment to C_fs
+  fn C_FS(&self) -> E::Scalar;
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct ShardingPublicParams<E>
@@ -95,7 +105,11 @@ impl<E> ShardingRecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
 {
-  pub fn new<RS1>(pp: &ShardingPublicParams<E>, l1_rs: &RS1) -> Result<Self, NovaError>
+  pub fn new<RS1>(
+    pp: &ShardingPublicParams<E>,
+    l1_rs: &RS1,
+    U: impl MemoryCommitmentsTraits<E>,
+  ) -> Result<Self, NovaError>
   where
     RS1: Layer1RSTrait<E>,
   {
@@ -216,8 +230,13 @@ where
       )
     };
 
-    let final_circuit_inputs =
-      FinalCircuitInputs::new(Some(inputs_F), Some(inputs_ops), Some(inputs_scan));
+    let final_circuit_inputs = FinalCircuitInputs::new(
+      Some(inputs_F),
+      Some(inputs_ops),
+      Some(inputs_scan),
+      Some(U.C_IS()),
+      Some(U.C_FS()),
+    );
 
     let final_circuit = FinalCircuit::<E>::new(
       &pp.pp.augmented_circuit_params,
@@ -252,6 +271,7 @@ where
     &mut self,
     pp: &ShardingPublicParams<E>,
     l1_rs: &RS1,
+    U: impl MemoryCommitmentsTraits<E>,
   ) -> Result<(), NovaError>
   where
     RS1: Layer1RSTrait<E>,
@@ -378,8 +398,13 @@ where
       )
     };
 
-    let final_circuit_inputs =
-      FinalCircuitInputs::new(Some(inputs_F), Some(inputs_ops), Some(inputs_scan));
+    let final_circuit_inputs = FinalCircuitInputs::new(
+      Some(inputs_F),
+      Some(inputs_ops),
+      Some(inputs_scan),
+      Some(U.C_IS()),
+      Some(U.C_FS()),
+    );
 
     let final_circuit = FinalCircuit::<E>::new(
       &pp.pp.augmented_circuit_params,

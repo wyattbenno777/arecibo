@@ -1,12 +1,13 @@
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use serde::{Deserialize, Serialize};
 
+use crate::nebula::l2::gadgets::{NIFSVerifierCircuit, NIFSVerifierCircuitInputs};
 use crate::{
   nebula::{augmented_circuit::AugmentedCircuitParams, rs::StepCircuit},
   traits::{CurveCycleEquipped, Dual, ROConstantsCircuit},
 };
-
-use crate::nebula::l2::gadgets::{NIFSVerifierCircuit, NIFSVerifierCircuitInputs};
+use bellpepper::gadgets::Assignment;
+use ff::Field;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(bound = "")]
@@ -17,6 +18,8 @@ where
   inputs_F: Option<NIFSVerifierCircuitInputs<E1>>,
   inputs_ops: Option<NIFSVerifierCircuitInputs<E1>>,
   inputs_scan: Option<NIFSVerifierCircuitInputs<E1>>,
+  C_IS: Option<E1::Scalar>,
+  C_FS: Option<E1::Scalar>,
 }
 
 impl<E1> FinalCircuitInputs<E1>
@@ -27,11 +30,15 @@ where
     inputs_F: Option<NIFSVerifierCircuitInputs<E1>>,
     inputs_ops: Option<NIFSVerifierCircuitInputs<E1>>,
     inputs_scan: Option<NIFSVerifierCircuitInputs<E1>>,
+    C_IS: Option<E1::Scalar>,
+    C_FS: Option<E1::Scalar>,
   ) -> Self {
     Self {
       inputs_F,
       inputs_ops,
       inputs_scan,
+      C_IS,
+      C_FS,
     }
   }
 }
@@ -68,7 +75,7 @@ where
   E1: CurveCycleEquipped,
 {
   fn arity(&self) -> usize {
-    3
+    4
   }
 
   fn non_deterministic_advice(&self) -> Vec<E1::Scalar> {
@@ -78,8 +85,40 @@ where
   fn synthesize<CS: ConstraintSystem<E1::Scalar>>(
     &self,
     cs: &mut CS,
-    _z: &[AllocatedNum<E1::Scalar>],
+    z: &[AllocatedNum<E1::Scalar>],
   ) -> Result<Vec<AllocatedNum<E1::Scalar>>, SynthesisError> {
+    let C_i = z[0].clone();
+
+    let C_IS = AllocatedNum::alloc(cs.namespace(|| "prev_IC"), || {
+      Ok(
+        *self
+          .inputs
+          .get()?
+          .C_IS
+          .as_ref()
+          .unwrap_or(&E1::Scalar::ZERO),
+      )
+    })?;
+
+    let C_FS = AllocatedNum::alloc(cs.namespace(|| "prev_IC"), || {
+      Ok(
+        *self
+          .inputs
+          .get()?
+          .C_FS
+          .as_ref()
+          .unwrap_or(&E1::Scalar::ZERO),
+      )
+    })?;
+
+    // 3. check that Ci =? CIS // finalized proof starts with previous memory
+    cs.enforce(
+      || "C_i = C_IS",
+      |lc| lc + C_i.get_variable(),
+      |lc| lc + CS::one(),
+      |lc| lc + C_IS.get_variable(),
+    );
+
     let hash_F = NIFSVerifierCircuit::new(
       self.params,
       self.ro_consts.clone(),
@@ -110,6 +149,6 @@ where
     )
     .synthesize(cs.namespace(|| "fold U_F"))?;
 
-    Ok(vec![hash_F, hash_ops, hash_scan])
+    Ok(vec![C_FS, hash_F, hash_ops, hash_scan])
   }
 }
