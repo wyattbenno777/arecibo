@@ -1,3 +1,7 @@
+use super::gadgets::NIFSVerifierCircuitInputs;
+use super::nifs::RelaxedNIFS;
+use super::utils::RelaxedFoldingData;
+use super::{Layer1PP, Layer1RSTrait};
 use crate::errors::NovaError;
 use crate::gadgets::scalar_as_base;
 use crate::r1cs::{RelaxedR1CSInstance, RelaxedR1CSWitness};
@@ -11,35 +15,12 @@ use crate::{
 use crate::{Commitment, CommitmentKey};
 use ff::Field;
 use final_circuit::{FinalCircuit, FinalCircuitInputs};
-use gadgets::NIFSVerifierCircuitInputs;
-use nifs::RelaxedNIFS;
 use serde::{Deserialize, Serialize};
-use utils::RelaxedFoldingData;
-
 mod final_circuit;
-mod gadgets;
-mod nifs;
-mod sharding;
-#[cfg(test)]
-mod tests;
-mod utils;
-
-pub trait Layer1RSTrait<E>
-where
-  E: CurveCycleEquipped,
-{
-  fn F(&self) -> &RecursiveSNARK<E>;
-  fn ops(&self) -> &RecursiveSNARK<E>;
-  fn scan(&self) -> &RecursiveSNARK<E>;
-}
-
-pub trait Layer1PP<E: CurveCycleEquipped> {
-  fn into_parts(self) -> (PublicParams<E>, PublicParams<E>, PublicParams<E>);
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct AggregationPublicParams<E>
+pub struct ShardingPublicParams<E>
 where
   E: CurveCycleEquipped,
 {
@@ -53,7 +34,7 @@ where
   ck: CommitmentKey<E>,
 }
 
-impl<E> AggregationPublicParams<E>
+impl<E> ShardingPublicParams<E>
 where
   E: CurveCycleEquipped,
 {
@@ -95,7 +76,7 @@ where
   }
 }
 
-pub struct AggregationRecursiveSNARK<E>
+pub struct ShardingRecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
 {
@@ -110,11 +91,11 @@ where
   i: usize,
 }
 
-impl<E> AggregationRecursiveSNARK<E>
+impl<E> ShardingRecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
 {
-  pub fn new<RS1>(pp: &AggregationPublicParams<E>, l1_rs: &RS1) -> Result<Self, NovaError>
+  pub fn new<RS1>(pp: &ShardingPublicParams<E>, l1_rs: &RS1) -> Result<Self, NovaError>
   where
     RS1: Layer1RSTrait<E>,
   {
@@ -269,7 +250,7 @@ where
   #[tracing::instrument(skip_all, name = "Layer2::prove_step")]
   pub fn prove_step<RS1>(
     &mut self,
-    pp: &AggregationPublicParams<E>,
+    pp: &ShardingPublicParams<E>,
     l1_rs: &RS1,
   ) -> Result<(), NovaError>
   where
@@ -422,7 +403,7 @@ where
   }
 
   /// Verifies the [`L2`] instance
-  pub fn verify(&self, pp: &AggregationPublicParams<E>) -> Result<(), NovaError> {
+  pub fn verify(&self, pp: &ShardingPublicParams<E>) -> Result<(), NovaError> {
     self.rs.verify(
       &pp.pp,
       self.rs.num_steps(),

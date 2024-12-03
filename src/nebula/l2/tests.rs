@@ -1,6 +1,4 @@
-use std::marker::PhantomData;
-
-use super::{L2AggregationPublicParams, L2AggregationRS, Layer1PP, Layer1RSTrait};
+use super::{AggregationPublicParams, AggregationRecursiveSNARK, Layer1PP, Layer1RSTrait};
 use crate::nebula::rs::{PublicParams, RecursiveSNARK};
 use crate::traits::snark::default_ck_hint;
 use crate::{nebula::rs::StepCircuit, provider::Bn256EngineIPA, traits::Engine};
@@ -20,8 +18,9 @@ fn test_ivc_folding() {
 }
 
 fn aggregation_node(node_pp: NodePP, nodes_rs: &[NodeRS]) {
-  let aggregation_pp = L2AggregationPublicParams::setup(node_pp);
-  let mut aggregation_engine = L2AggregationRS::new(&aggregation_pp, &nodes_rs[0]).unwrap();
+  let aggregation_pp = AggregationPublicParams::setup(node_pp);
+  let mut aggregation_engine =
+    AggregationRecursiveSNARK::new(&aggregation_pp, &nodes_rs[0]).unwrap();
 
   for node_rs in nodes_rs.iter() {
     aggregation_engine
