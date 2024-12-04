@@ -105,6 +105,7 @@ where
   rs: RecursiveSNARK<E>,
   IC_i: E::Scalar,
   i: usize,
+  z0: Vec<E::Scalar>,
 }
 
 impl<E> ShardingRecursiveSNARK<E>
@@ -251,12 +252,7 @@ where
       Some(final_circuit_inputs),
     );
 
-    let z0 = vec![
-      E::Scalar::ZERO,
-      E::Scalar::ZERO,
-      E::Scalar::ZERO,
-      E::Scalar::ZERO,
-    ];
+    let z0 = vec![U.C_IS(), E::Scalar::ZERO, E::Scalar::ZERO, E::Scalar::ZERO];
     let mut IC_i = E::Scalar::ZERO;
 
     let mut rs = RecursiveSNARK::new(&pp.pp, &final_circuit, &z0)?;
@@ -274,6 +270,7 @@ where
       rs,
       IC_i,
       i: 0,
+      z0,
     })
   }
 
@@ -441,17 +438,9 @@ where
 
   /// Verifies the [`L2`] instance
   pub fn verify(&self, pp: &ShardingPublicParams<E>) -> Result<(), NovaError> {
-    self.rs.verify(
-      &pp.pp,
-      self.rs.num_steps(),
-      &[
-        E::Scalar::ZERO,
-        E::Scalar::ZERO,
-        E::Scalar::ZERO,
-        E::Scalar::ZERO,
-      ],
-      self.IC_i,
-    )?;
+    self
+      .rs
+      .verify(&pp.pp, self.rs.num_steps(), &self.z0, self.IC_i)?;
 
     let (res_r_F, (res_r_ops, res_r_scan)) = rayon::join(
       || {
