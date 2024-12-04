@@ -251,7 +251,12 @@ where
       Some(final_circuit_inputs),
     );
 
-    let z0 = vec![E::Scalar::ZERO, E::Scalar::ZERO, E::Scalar::ZERO];
+    let z0 = vec![
+      E::Scalar::ZERO,
+      E::Scalar::ZERO,
+      E::Scalar::ZERO,
+      E::Scalar::ZERO,
+    ];
     let mut IC_i = E::Scalar::ZERO;
 
     let mut rs = RecursiveSNARK::new(&pp.pp, &final_circuit, &z0)?;
