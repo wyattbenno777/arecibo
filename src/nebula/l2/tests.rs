@@ -1,6 +1,8 @@
+use super::sharding::MemoryCommitmentsTraits;
 use super::{AggregationPublicParams, AggregationRecursiveSNARK, Layer1PP, Layer1RSTrait};
 use crate::nebula::rs::{PublicParams, RecursiveSNARK};
 use crate::traits::snark::default_ck_hint;
+use crate::traits::CurveCycleEquipped;
 use crate::{nebula::rs::StepCircuit, provider::Bn256EngineIPA, traits::Engine};
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::Field;
@@ -8,6 +10,21 @@ use ff::PrimeField;
 
 type E1 = Bn256EngineIPA;
 type F = <E1 as Engine>::Scalar;
+
+type TestMemoryComms<F> = (F, F);
+
+impl<E> MemoryCommitmentsTraits<E> for TestMemoryComms<E::Scalar>
+where
+  E: CurveCycleEquipped,
+{
+  fn C_FS(&self) -> <E>::Scalar {
+    self.1
+  }
+
+  fn C_IS(&self) -> <E>::Scalar {
+    self.0
+  }
+}
 
 #[test]
 fn test_ivc_folding() {
@@ -18,13 +35,14 @@ fn test_ivc_folding() {
 }
 
 fn aggregation_node(node_pp: NodePP, nodes_rs: &[NodeRS]) {
+  let test_memory_comms = (F::from(0u64), F::from(0u64));
   let aggregation_pp = AggregationPublicParams::setup(node_pp);
   let mut aggregation_engine =
-    AggregationRecursiveSNARK::new(&aggregation_pp, &nodes_rs[0]).unwrap();
+    AggregationRecursiveSNARK::new(&aggregation_pp, &nodes_rs[0], &test_memory_comms).unwrap();
 
   for node_rs in nodes_rs.iter() {
     aggregation_engine
-      .prove_step(&aggregation_pp, node_rs)
+      .prove_step(&aggregation_pp, node_rs, &test_memory_comms)
       .unwrap();
   }
 

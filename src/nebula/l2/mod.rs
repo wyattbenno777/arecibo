@@ -15,6 +15,7 @@ use final_circuit::{FinalCircuit, FinalCircuitInputs};
 use gadgets::NIFSVerifierCircuitInputs;
 use nifs::RelaxedNIFS;
 use serde::{Deserialize, Serialize};
+use sharding::MemoryCommitmentsTraits;
 use utils::RelaxedFoldingData;
 
 mod final_circuit;
@@ -125,7 +126,11 @@ where
   E: CurveCycleEquipped,
 {
   /// Create a new instance of [`AggregationRecursiveSNARK`]
-  pub fn new<RS1>(pp: &AggregationPublicParams<E>, l1_rs: &RS1) -> Result<Self, NovaError>
+  pub fn new<RS1>(
+    pp: &AggregationPublicParams<E>,
+    l1_rs: &RS1,
+    _U: &impl MemoryCommitmentsTraits<E>,
+  ) -> Result<Self, NovaError>
   where
     RS1: Layer1RSTrait<E>,
   {
@@ -282,6 +287,7 @@ where
     &mut self,
     pp: &AggregationPublicParams<E>,
     l1_rs: &RS1,
+    _U: &impl MemoryCommitmentsTraits<E>,
   ) -> Result<(), NovaError>
   where
     RS1: Layer1RSTrait<E>,
