@@ -444,7 +444,12 @@ where
     self.rs.verify(
       &pp.pp,
       self.rs.num_steps(),
-      &[E::Scalar::ZERO, E::Scalar::ZERO, E::Scalar::ZERO],
+      &[
+        E::Scalar::ZERO,
+        E::Scalar::ZERO,
+        E::Scalar::ZERO,
+        E::Scalar::ZERO,
+      ],
       self.IC_i,
     )?;
 
