@@ -92,6 +92,7 @@ where
 }
 
 /// Sharding layer 2
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ShardingRecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
