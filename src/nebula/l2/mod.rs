@@ -107,6 +107,7 @@ where
 
 /// Implements the Aggregation layer of Nebula, this folds layer1 proofs into a single proof
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct AggregationRecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
