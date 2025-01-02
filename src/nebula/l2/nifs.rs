@@ -1,5 +1,7 @@
 //! This module defines the needed wrong-field NIFS prover
 
+use super::utils::absorb_U;
+use crate::cyclefold::util::absorb_primary_commitment;
 use crate::{
   constants::{NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT},
   errors::NovaError,
@@ -8,10 +10,6 @@ use crate::{
   traits::{commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROConstants, ROTrait},
   Commitment, CommitmentKey, CompressedCommitment,
 };
-
-use crate::cyclefold::util::absorb_primary_commitment;
-
-use super::utils::absorb_U;
 
 /// A SNARK that holds the proof of a step of an incremental computation of the primary circuit
 /// in the CycleFold folding scheme.

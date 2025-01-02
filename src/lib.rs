@@ -29,7 +29,7 @@ pub mod r1cs;
 pub mod spartan;
 pub mod traits;
 
-pub mod cyclefold;
+mod cyclefold;
 pub mod nebula;
 pub mod supernova;
 
@@ -1106,7 +1106,7 @@ mod tests {
     /// Creates a new trivial test circuit with step counter type Incremental
     fn default() -> CubicCircuit<F> {
       Self {
-        _p: PhantomData::default(),
+        _p: PhantomData,
         counter_type: StepCounterType::Incremental,
       }
     }
@@ -1738,7 +1738,7 @@ mod tests {
       /// Creates a new trivial test circuit with step counter type Incremental
       fn default() -> CircuitWithInputize<F> {
         Self {
-          _p: PhantomData::default(),
+          _p: PhantomData,
           counter_type: StepCounterType::Incremental,
         }
       }

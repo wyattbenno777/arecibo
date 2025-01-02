@@ -53,7 +53,7 @@ where
   E: CurveCycleEquipped,
 {
   /// Create new public parameters for the sharding layer 2
-  pub fn setup<'a, PP1>(node_pp: PP1) -> Self
+  pub fn setup<PP1>(node_pp: PP1) -> Self
   where
     PP1: Layer1PP<E>,
   {
