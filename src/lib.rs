@@ -15,10 +15,6 @@ mod circuit;
 mod digest;
 mod nifs;
 
-#[cfg(test)]
-#[allow(unused)]
-mod zk_tests;
-
 // public modules
 pub mod bellpepper;
 pub mod constants;

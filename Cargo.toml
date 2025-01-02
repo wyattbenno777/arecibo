@@ -85,38 +85,6 @@ handlebars = "5.1.0"
 [build-dependencies]
 vergen = { version = "8", features = ["build", "git", "gitcl"] }
 
-[[bench]]
-name = "recursive-snark"
-harness = false
-
-[[bench]]
-name = "compressed-snark"
-harness = false
-
-[[bench]]
-name = "compute-digest"
-harness = false
-
-[[bench]]
-name = "sha256"
-harness = false
-
-[[bench]]
-name = "recursive-snark-supernova"
-harness = false
-
-[[bench]]
-name = "compressed-snark-supernova"
-harness = false
-
-[[bench]]
-name = "supernova-ci"
-harness = false
-
-[[bench]]
-name = "pcs"
-harness = false
-
 [features]
 default = []
 abomonate = []

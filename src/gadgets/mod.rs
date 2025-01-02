@@ -10,7 +10,6 @@ mod r1cs;
 pub(crate) use r1cs::{
   conditionally_select_alloc_relaxed_r1cs, conditionally_select_emul_alloc_relaxed_r1cs,
   conditionally_select_vec_allocated_relaxed_r1cs_instance,
-  conditionally_select_vec_emul_allocated_relaxed_r1cs_instance,
 };
 pub(crate) use r1cs::{AllocatedR1CSInstance, AllocatedRelaxedR1CSInstance};
 
