@@ -1,4 +1,5 @@
 //! CycleFold for Nova
+#![allow(clippy::upper_case_acronyms)]
 use crate::bellpepper::r1cs::NovaWitness;
 use crate::bellpepper::solver::SatisfyingAssignment;
 use crate::constants::NUM_CHALLENGE_BITS;
@@ -24,15 +25,15 @@ where
   E: CurveCycleEquipped,
 {
   // proof from primary fold
-  comm_T: Commitment<E>,
+  pub(super) comm_T: Commitment<E>,
 
   // proof from first cyclefold fold
-  comm_T1: Commitment<Dual<E>>,
-  l_u_cyclefold_E: R1CSInstance<Dual<E>>,
+  pub(super) comm_T1: Commitment<Dual<E>>,
+  pub(super) l_u_cyclefold_E: R1CSInstance<Dual<E>>,
 
   // proof from second cyclefold fold
-  comm_T2: Commitment<Dual<E>>,
-  l_u_cyclefold_W: R1CSInstance<Dual<E>>,
+  pub(super) comm_T2: Commitment<Dual<E>>,
+  pub(super) l_u_cyclefold_W: R1CSInstance<Dual<E>>,
 }
 
 impl<E> NIFS<E>
@@ -53,6 +54,9 @@ where
       Self,
       (RelaxedR1CSInstance<E>, RelaxedR1CSWitness<E>),
       (RelaxedR1CSInstance<Dual<E>>, RelaxedR1CSWitness<Dual<E>>),
+      E::Scalar,
+      // Advice
+      RelaxedR1CSInstance<Dual<E>>,
     ),
     NovaError,
   > {
@@ -163,9 +167,16 @@ where
       comm_T2,
       l_u_cyclefold_W,
     };
-    Ok((nifs, (U, W), (U_secondary, W_secondary)))
+    Ok((
+      nifs,
+      (U, W),
+      (U_secondary, W_secondary),
+      r,
+      U_secondary_temp,
+    ))
   }
 
+  #[allow(dead_code)] // Code kept here for educational purposes
   /// Verifier algorithm for: CycleFold folding scheme applied to Nova
   pub fn verify(
     &self,

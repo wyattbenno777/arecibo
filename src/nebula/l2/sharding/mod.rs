@@ -59,8 +59,7 @@ where
   {
     let (pp_F, pp_ops, pp_scan) = node_pp.into_parts();
     let params = pp_F.augmented_circuit_params.clone();
-    let final_circuit =
-      FinalCircuit::<E>::new(&params, pp_F.ro_consts_circuit_primary.clone(), None);
+    let final_circuit = FinalCircuit::<E>::new(&params, pp_F.ro_consts_circuit.clone(), None);
     let (circuit_shape_F, ck_F, digest_F) = pp_F.into_shape_ck_digest();
     let (circuit_shape_ops, ck_ops, digest_ops) = pp_ops.into_shape_ck_digest();
     let (circuit_shape_scan, ck_scan, digest_scan) = pp_scan.into_shape_ck_digest();
@@ -132,7 +131,7 @@ where
 
       let (nifs_primary, (r_U, r_W), r) = RelaxedNIFS::<E>::prove(
         &pp.ck,
-        &pp.pp.ro_consts_primary,
+        &pp.pp.ro_consts,
         &pp.digest_F,
         F_shape,
         &r_U,
@@ -171,7 +170,7 @@ where
 
       let (nifs_primary, (r_U, r_W), r) = RelaxedNIFS::<E>::prove(
         &pp.ck,
-        &pp.pp.ro_consts_primary,
+        &pp.pp.ro_consts,
         &pp.digest_ops,
         ops_shape,
         &r_U,
@@ -210,7 +209,7 @@ where
 
       let (nifs_primary, (r_U, r_W), r) = RelaxedNIFS::<E>::prove(
         &pp.ck,
-        &pp.pp.ro_consts_primary,
+        &pp.pp.ro_consts,
         &pp.digest_scan,
         scan_shape,
         &r_U,
@@ -250,7 +249,7 @@ where
 
     let final_circuit = FinalCircuit::<E>::new(
       &pp.pp.augmented_circuit_params,
-      pp.pp.ro_consts_circuit_primary.clone(),
+      pp.pp.ro_consts_circuit.clone(),
       Some(final_circuit_inputs),
     );
 
@@ -301,7 +300,7 @@ where
 
       let (nifs_primary, (r_U, r_W), r) = RelaxedNIFS::<E>::prove(
         &pp.ck,
-        &pp.pp.ro_consts_primary,
+        &pp.pp.ro_consts,
         &pp.digest_F,
         F_shape,
         &r_U,
@@ -340,7 +339,7 @@ where
 
       let (nifs_primary, (r_U, r_W), r) = RelaxedNIFS::<E>::prove(
         &pp.ck,
-        &pp.pp.ro_consts_primary,
+        &pp.pp.ro_consts,
         &pp.digest_ops,
         ops_shape,
         &r_U,
@@ -379,7 +378,7 @@ where
 
       let (nifs_primary, (r_U, r_W), r) = RelaxedNIFS::<E>::prove(
         &pp.ck,
-        &pp.pp.ro_consts_primary,
+        &pp.pp.ro_consts,
         &pp.digest_scan,
         scan_shape,
         &r_U,
@@ -419,7 +418,7 @@ where
 
     let final_circuit = FinalCircuit::<E>::new(
       &pp.pp.augmented_circuit_params,
-      pp.pp.ro_consts_circuit_primary.clone(),
+      pp.pp.ro_consts_circuit.clone(),
       Some(final_circuit_inputs),
     );
 

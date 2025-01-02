@@ -130,7 +130,6 @@ impl<E: Engine> AllocatedCycleFoldData<E> {
   pub fn apply_fold<CS>(
     &self,
     mut cs: CS,
-    params: &AllocatedNum<E::Base>,
     ro_consts: ROConstantsCircuit<E>,
     limb_width: usize,
     n_limbs: usize,
@@ -141,9 +140,8 @@ impl<E: Engine> AllocatedCycleFoldData<E> {
     // Compute r:
     let mut ro = E::ROCircuit::new(
       ro_consts,
-      1 + (3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS) + (3 + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // digest + (U) + (u) + T
+      (3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS) + (3 + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (u) + T
     );
-    ro.absorb(params);
 
     self.U.absorb_in_ro(
       cs.namespace(|| "absorb cyclefold running instance"),

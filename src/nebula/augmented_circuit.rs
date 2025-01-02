@@ -317,14 +317,15 @@ where
     ),
     SynthesisError,
   > {
-    // Follows the outline written down here https://hackmd.io/@lurk-lab/HybHrnNFT
+    /*
+     * check that u_i.x = hash(vk, i, z0, zi, Ui)
+     */
 
-    // Calculate the hash of the non-deterministic advice for the primary circuit
+    // Check u_i.x0
     let mut ro_p = <Dual<E1> as Engine>::ROCircuit::new(
       self.ro_consts.clone(),
       3 + 2 * arity + 2 * NUM_FE_IN_EMULATED_POINT + 3,
     );
-
     ro_p.absorb(pp_digest);
     ro_p.absorb(i);
     for e in z_0 {
@@ -337,23 +338,19 @@ where
       .U
       .absorb_in_ro(cs.namespace(|| "absorb U_p"), &mut ro_p)?;
     ro_p.absorb(prev_IC);
-
     let hash_bits_p = ro_p.squeeze(cs.namespace(|| "primary hash bits"), NUM_HASH_BITS)?;
     let hash_p = le_bits_to_num(cs.namespace(|| "primary hash"), &hash_bits_p)?;
-
-    // check the hash matches the public IO from the last primary instance
     let check_primary = alloc_num_equals(
       cs.namespace(|| "u.X[0] = H(params, i, z0, zi, U_p)"),
       &data_p.u_x0,
       &hash_p,
     )?;
 
-    // Calculate the hash of the non-dterministic advice for the secondary circuit
+    // Check u_i.x1
     let mut ro_c = <Dual<E1> as Engine>::ROCircuit::new(
       self.ro_consts.clone(),
       1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS, // pp + i + W + E + u + X
     );
-
     ro_c.absorb(pp_digest);
     ro_c.absorb(i);
     data_c_1
@@ -361,14 +358,13 @@ where
       .absorb_in_ro(cs.namespace(|| "absorb U_c"), &mut ro_c)?;
     let hash_c_bits = ro_c.squeeze(cs.namespace(|| "cyclefold hash bits"), NUM_HASH_BITS)?;
     let hash_c = le_bits_to_num(cs.namespace(|| "cyclefold hash"), &hash_c_bits)?;
-
-    // check the hash matches the public IO from the last primary instance
     let check_cyclefold = alloc_num_equals(
       cs.namespace(|| "u.X[1] = H(params, U_c)"),
       &data_p.u_x1,
       &hash_c,
     )?;
 
+    // Check for u_i.x0 && u_i.x1
     let check_io = AllocatedBit::and(
       cs.namespace(|| "both IOs match"),
       &check_primary,
@@ -378,12 +374,14 @@ where
     // Run NIVC.V on U_c, u_c_1, T_c_1
     let U_int = data_c_1.apply_fold(
       cs.namespace(|| "fold u_c_1 into U_c"),
-      pp_digest,
       self.ro_consts.clone(),
       self.params.limb_width,
       self.params.n_limbs,
     )?;
 
+    /*
+     *Check the intermediate-calculated running instance matches the non-deterministic advice provided to the prover
+     */
     // Calculate h_int = H(pp, U_c_int)
     let mut ro_c_int = <Dual<E1> as Engine>::ROCircuit::new(
       self.ro_consts.clone(),
@@ -400,33 +398,24 @@ where
       self.ro_consts.clone(),
       1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS, // pp + W + E + u + X
     );
-
     ro_c_1.absorb(pp_digest);
     data_c_2
       .U
       .absorb_in_ro(cs.namespace(|| "absorb U_c_1"), &mut ro_c_1)?;
     let h_c_1_bits = ro_c_1.squeeze(cs.namespace(|| "cyclefold_1 hash bits"), NUM_HASH_BITS)?;
     let h_c_1 = le_bits_to_num(cs.namespace(|| "cyclefold_1 hash"), &h_c_1_bits)?;
-
-    // Check the intermediate-calculated running instance matches the non-deterministic advice provided to the prover
     let check_cyclefold_int = alloc_num_equals(cs.namespace(|| "h_int = h_c_1"), &h_c_int, &h_c_1)?;
-
     let checks_pass = AllocatedBit::and(
       cs.namespace(|| "all checks passed"),
       &check_io,
       &check_cyclefold_int,
     )?;
 
-    // calculate the folded CycleFold accumulator
-    let U_c = data_c_2.apply_fold(
-      cs.namespace(|| "fold u_c_2 into U_c_1"),
-      pp_digest,
-      self.ro_consts.clone(),
-      self.params.limb_width,
-      self.params.n_limbs,
-    )?;
+    /*
+     * Nova-CycleFold verifier circuit
+     */
 
-    // calculate the folded primary circuit accumulator
+    // Primary NIFS.V
     let U_p = data_p.U.fold_with_r1cs(
       cs.namespace(|| "fold u_p into U_p"),
       pp_digest,
@@ -439,10 +428,17 @@ where
       self.ro_consts.clone(),
     )?;
 
+    // CycleFold NIFS.V
+    let U_c = data_c_2.apply_fold(
+      cs.namespace(|| "fold u_c_2 into U_c_1"),
+      self.ro_consts.clone(),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+
     Ok((U_c, U_p, checks_pass))
   }
 
-  /// Circuit is documented here: https://hackmd.io/SBvAur_2RQmaduDi7gYbhw
   pub fn synthesize<CS: ConstraintSystem<E1::Scalar>>(
     self,
     cs: &mut CS,

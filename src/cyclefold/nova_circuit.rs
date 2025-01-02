@@ -330,7 +330,6 @@ where
     // Run NIVC.V on U_c, u_c_1, T_c_1
     let U_int = data_c_1.apply_fold(
       cs.namespace(|| "fold u_c_1 into U_c"),
-      pp_digest,
       self.ro_consts.clone(),
       self.params.limb_width,
       self.params.n_limbs,
@@ -372,7 +371,6 @@ where
     // calculate the folded CycleFold accumulator
     let U_c = data_c_2.apply_fold(
       cs.namespace(|| "fold u_c_2 into U_c_1"),
-      pp_digest,
       self.ro_consts.clone(),
       self.params.limb_width,
       self.params.n_limbs,
