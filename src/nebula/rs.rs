@@ -314,8 +314,8 @@ where
       )?;
 
     // Get advice to pass into verifier circuit
-    let E_new = self.r_U_primary.comm_E + nifs.comm_T * r;
-    let W_new = self.r_U_primary.comm_W + self.l_u_primary.comm_W * r;
+    let E_new = r_U_primary.comm_E;
+    let W_new = r_U_primary.comm_W;
     let data_p = FoldingData::new(
       self.r_U_primary.clone(),
       self.l_u_primary.clone(),
