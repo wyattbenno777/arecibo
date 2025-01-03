@@ -47,30 +47,17 @@ where
     NovaError,
   > {
     let arity = U1.X.len();
-
-    if arity != U2.X.len() {
-      return Err(NovaError::InvalidInputLength);
-    }
-
     let mut ro = <Dual<E1> as Engine>::RO::new(
       ro_consts.clone(),
       1 + 2 * NUM_FE_IN_EMULATED_POINT + arity + 1 + NUM_FE_IN_EMULATED_POINT, // pp_digest + u.W + U.comm_E + U.X + U.u + comm_T
     );
-
     ro.absorb(*pp_digest);
-
     absorb_U::<E1>(U2, &mut ro);
-
     let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2)?;
-
     absorb_primary_commitment::<E1, Dual<E1>>(&comm_T, &mut ro);
-
     let r = scalar_as_base::<Dual<E1>>(ro.squeeze(NUM_CHALLENGE_BITS));
-
     let U = U1.fold_relaxed(U2, &comm_T, &r);
-
     let W = W1.fold_relaxed(W2, &T, &r)?;
-
     Ok((
       Self {
         comm_T: comm_T.compress(),
