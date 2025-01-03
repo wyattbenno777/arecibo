@@ -18,7 +18,7 @@ use crate::{
 };
 use ff::Field;
 
-use super::utils::{absorb_U, scalar_to_bools, RelaxedFoldingData};
+use super::utils::{absorb_U, scalar_to_bools};
 
 /// A non-interactive folding scheme for IVC proofs.
 pub struct NIFS<E>
@@ -26,15 +26,22 @@ where
   E: CurveCycleEquipped,
 {
   // proof from primary fold
-  pub(super) comm_T: Commitment<E>,
+  pub(super) nifs_primary: PrimaryRelaxedNIFS<E>,
 
   // proof from first cyclefold fold
-  pub(super) comm_T1: Commitment<Dual<E>>,
-  pub(super) l_u_cyclefold_E: R1CSInstance<Dual<E>>,
+  pub(super) nifs_E1: CycleFoldNIFS<E>,
+  pub(super) l_u_cyclefold_E1: R1CSInstance<Dual<E>>,
 
   // proof from second cyclefold fold
-  pub(super) comm_T2: Commitment<Dual<E>>,
+  pub(super) nifs_E2: CycleFoldNIFS<E>,
+  pub(super) l_u_cyclefold_E2: R1CSInstance<Dual<E>>,
+
+  // proof from third cyclefold fold
+  pub(super) nifs_W: CycleFoldNIFS<E>,
   pub(super) l_u_cyclefold_W: R1CSInstance<Dual<E>>,
+
+  // proof from fourth cyclefold fold
+  pub(super) nifs_final_cyclefold: CycleFoldRelaxedNIFS<E>,
 }
 
 impl<E> NIFS<E>
@@ -56,16 +63,13 @@ where
       Self,
       (RelaxedR1CSInstance<E>, RelaxedR1CSWitness<E>),
       (RelaxedR1CSInstance<Dual<E>>, RelaxedR1CSWitness<Dual<E>>),
-      E::Scalar,
-      // Advice
-      RelaxedR1CSInstance<Dual<E>>,
     ),
     NovaError,
   > {
     /*
      * *********** Primary Fold ***********
      */
-    let (primary_nifs, (U, W), r) =
+    let (nifs_primary, (U, W), r) =
       PrimaryRelaxedNIFS::prove(ck, ro_consts, pp_digest, S, (U1, W1), (U2, W2))?;
 
     /*
@@ -79,11 +83,11 @@ where
     // Get the committed R1CS instance and witness from first CycleFold instance.
     //
     // Computes: comm_E1 + r · comm_T
-    let (l_u_cyclefold_E, l_w_cyclefold_E) = compute_cyclefold_instance_witness_pair::<E>(
+    let (l_u_cyclefold_E1, l_w_cyclefold_E1) = compute_cyclefold_instance_witness_pair::<E>(
       S_secondary,
       ck_secondary,
       U1.comm_E,
-      primary_nifs.comm_T,
+      nifs_primary.comm_T,
       r_bools,
     )?;
 
@@ -93,7 +97,7 @@ where
     //  Computes:
     //
     // term1 + r^2 • comm_E2
-    let E_term_1 = U1.comm_E + primary_nifs.comm_T * r;
+    let E_term_1 = U1.comm_E + nifs_primary.comm_T * r;
     let (l_u_cyclefold_E2, l_w_cyclefold_E2) = compute_cyclefold_instance_witness_pair::<E>(
       S_secondary,
       ck_secondary,
@@ -116,20 +120,20 @@ where
     /*
      * *********** Fold first cyclefold instance ***********
      */
-    let (nifs_E, (U_secondary_temp, W_secondary_temp), r1) = CycleFoldNIFS::<E>::prove(
+    let (nifs_E1, (U_secondary_temp, W_secondary_temp), _) = CycleFoldNIFS::<E>::prove(
       ck_secondary,
       ro_consts,
       S_secondary,
       U1_secondary,
       W1_secondary,
-      &l_u_cyclefold_E,
-      &l_w_cyclefold_E,
+      &l_u_cyclefold_E1,
+      &l_w_cyclefold_E1,
     )?;
 
     /*
      * *********** Fold second cyclefold instance ***********
      */
-    let (nifs_E2, (U_secondary_temp_1, W_secondary_temp_1), r2) = CycleFoldNIFS::<E>::prove(
+    let (nifs_E2, (U_secondary_temp_1, W_secondary_temp_1), _) = CycleFoldNIFS::<E>::prove(
       ck_secondary,
       ro_consts,
       S_secondary,
@@ -142,7 +146,7 @@ where
     /*
      * *********** Fold third cyclefold instance ***********
      */
-    let (nifs_W, (U_secondary_temp_2, W_secondary_temp_2), r3) = CycleFoldNIFS::<E>::prove(
+    let (nifs_W, (U_secondary_temp_2, W_secondary_temp_2), _) = CycleFoldNIFS::<E>::prove(
       ck_secondary,
       ro_consts,
       S_secondary,
@@ -155,7 +159,7 @@ where
     /*
      * *********** Fold fourth cyclefold instance ***********
      */
-    let (nifs_final_cyclefold, (U_secondary, W_secondary), r4) = CycleFoldRelaxedNIFS::<E>::prove(
+    let (nifs_final_cyclefold, (U_secondary, W_secondary), _) = CycleFoldRelaxedNIFS::<E>::prove(
       ck_secondary,
       ro_consts,
       S_secondary,
@@ -165,11 +169,70 @@ where
       W2_secondary,
     )?;
 
-    todo!()
+    Ok((
+      Self {
+        nifs_primary,
+        nifs_E1,
+        l_u_cyclefold_E1,
+        nifs_E2,
+        l_u_cyclefold_E2,
+        nifs_W,
+        l_u_cyclefold_W,
+        nifs_final_cyclefold,
+      },
+      (U, W),
+      (U_secondary, W_secondary),
+    ))
   }
 
   /// Verifier algorithm for the NIFS used in folding IVC proofs
-  pub fn verify(&self) {}
+  pub fn verify(
+    &self,
+    ro_consts: &ROConstants<Dual<E>>,
+    pp_digest: &E::Scalar,
+    U1: &RelaxedR1CSInstance<E>,
+    U2: &RelaxedR1CSInstance<E>,
+    U1_secondary: &RelaxedR1CSInstance<Dual<E>>,
+    U2_secondary: &RelaxedR1CSInstance<Dual<E>>,
+  ) -> Result<(RelaxedR1CSInstance<E>, RelaxedR1CSInstance<Dual<E>>), NovaError> {
+    /*
+     * *********** Primary Fold ***********
+     */
+    let U = self.nifs_primary.verify(ro_consts, pp_digest, U1, U2)?;
+
+    /*
+     * *********** Fold first cyclefold instance ***********
+     */
+    let U_secondary_temp = self
+      .nifs_E1
+      .verify(ro_consts, U1_secondary, &self.l_u_cyclefold_E1)?;
+
+    /*
+     * *********** Fold second cyclefold instance ***********
+     */
+    let U_secondary_temp_1 =
+      self
+        .nifs_E2
+        .verify(ro_consts, &U_secondary_temp, &self.l_u_cyclefold_E2)?;
+
+    /*
+     * *********** Fold third cyclefold instance ***********
+     */
+    let U_secondary_temp_2 =
+      self
+        .nifs_W
+        .verify(ro_consts, &U_secondary_temp_1, &self.l_u_cyclefold_W)?;
+
+    /*
+     * *********** Fold fourth cyclefold instance ***********
+     */
+    let U_secondary =
+      self
+        .nifs_final_cyclefold
+        .verify(ro_consts, &U_secondary_temp_2, U2_secondary)?;
+
+    Ok((U, U_secondary))
+  }
 }
 
 /// NIFS for folding the primary relaxed r1cs instance and witness
@@ -213,6 +276,27 @@ where
     let W = W1.fold_relaxed(W2, &T, &r)?;
 
     Ok((Self { comm_T }, (U, W), r))
+  }
+
+  pub fn verify(
+    &self,
+    ro_consts: &ROConstants<Dual<E>>,
+    pp_digest: &E::Scalar,
+    U1: &RelaxedR1CSInstance<E>,
+    U2: &RelaxedR1CSInstance<E>,
+  ) -> Result<RelaxedR1CSInstance<E>, NovaError> {
+    let arity = U1.X.len();
+    let mut ro = <Dual<E> as Engine>::RO::new(
+      ro_consts.clone(),
+      1 + NUM_FE_IN_EMULATED_POINT + arity + NUM_FE_IN_EMULATED_POINT, // pp_digest + u.W + u.X + T
+    );
+    ro.absorb(*pp_digest);
+    absorb_U::<E>(U2, &mut ro);
+    absorb_primary_commitment::<E, Dual<E>>(&self.comm_T, &mut ro);
+    let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
+    let U = U1.fold_relaxed(U2, &self.comm_T, &r);
+
+    Ok(U)
   }
 }
 
@@ -259,6 +343,25 @@ where
 
     Ok((Self { comm_T }, (U, W), r))
   }
+
+  /// Verifier algorithm for folding incoming CycleFold [`R1CSInstance`] and [`R1CSWitness`] instances into running instance
+  pub fn verify(
+    &self,
+    ro_consts: &ROConstants<Dual<E>>,
+    U1: &RelaxedR1CSInstance<Dual<E>>,
+    U2: &R1CSInstance<Dual<E>>,
+  ) -> Result<RelaxedR1CSInstance<Dual<E>>, NovaError> {
+    let mut ro = <Dual<E> as Engine>::RO::new(
+      ro_consts.clone(),
+      45, // (3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS) + (3 + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (u) + T
+    );
+    U1.absorb_in_ro(&mut ro);
+    absorb_cyclefold_r1cs(U2, &mut ro);
+    self.comm_T.absorb_in_ro(&mut ro);
+    let r = ro.squeeze(NUM_CHALLENGE_BITS);
+    let U = U1.fold(U2, &self.comm_T, &r);
+    Ok(U)
+  }
 }
 
 /// NIFS for folding two Cyclefold [`RelaxedR1CSInstance`] and [`RelaxedR1CSWitness`] instances
@@ -301,8 +404,27 @@ where
     let r = ro.squeeze(NUM_CHALLENGE_BITS);
     let U = U1.fold_relaxed(U2, &comm_T, &r);
     let W = W1.fold_relaxed(W2, &T, &r)?;
-
     Ok((Self { comm_T }, (U, W), r))
+  }
+
+  /// Verifier algorithm for folding two CycleFold [`RelaxedR1CSInstance`] and [`RelaxedR1CSWitness`] instances
+  pub fn verify(
+    &self,
+    ro_consts: &ROConstants<Dual<E>>,
+    U1: &RelaxedR1CSInstance<Dual<E>>,
+
+    U2: &RelaxedR1CSInstance<Dual<E>>,
+  ) -> Result<RelaxedR1CSInstance<Dual<E>>, NovaError> {
+    let mut ro = <Dual<E> as Engine>::RO::new(
+      ro_consts.clone(),
+      2 * (3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (U) + T
+    );
+    U1.absorb_in_ro(&mut ro);
+    U2.absorb_in_ro(&mut ro);
+    self.comm_T.absorb_in_ro(&mut ro);
+    let r = ro.squeeze(NUM_CHALLENGE_BITS);
+    let U = U1.fold_relaxed(U2, &self.comm_T, &r);
+    Ok(U)
   }
 }
 
