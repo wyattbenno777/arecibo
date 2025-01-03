@@ -3,5 +3,6 @@
 pub mod aggregation;
 pub mod sharding;
 
+mod gadgets;
 mod nifs;
 mod utils;
