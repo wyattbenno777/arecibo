@@ -19,8 +19,8 @@ use itertools::Itertools;
 
 // An allocated version of the R1CS instance obtained from a single cyclefold invocation
 pub struct AllocatedCycleFoldInstance<E: Engine> {
-  W: AllocatedPoint<E::GE>,
-  X: [BigNat<E::Base>; NIO_CYCLE_FOLD],
+  pub(crate) W: AllocatedPoint<E::GE>,
+  pub(crate) X: [BigNat<E::Base>; NIO_CYCLE_FOLD],
 }
 
 impl<E: Engine> AllocatedCycleFoldInstance<E> {

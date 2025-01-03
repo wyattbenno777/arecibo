@@ -80,7 +80,7 @@ pub struct AllocatedRelaxedR1CSInstance<E: Engine, const N: usize> {
 }
 
 impl<E: Engine, const N: usize> AllocatedRelaxedR1CSInstance<E, N> {
-  /// Allocates the given `RelaxedR1CSInstance` as a witness of the circuit
+  /// Allocates the given [`RelaxedR1CSInstance`] as a witness of the circuit
   pub fn alloc<CS: ConstraintSystem<<E as Engine>::Base>>(
     mut cs: CS,
     inst: Option<&RelaxedR1CSInstance<E>>,

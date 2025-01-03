@@ -371,6 +371,23 @@ where
       &check_cyclefold,
     )?;
 
+    /*
+     * Nova-CycleFold verifier circuit
+     */
+
+    // Primary NIFS.V
+    let U_p = data_p.U.fold_with_r1cs(
+      cs.namespace(|| "fold u_p into U_p"),
+      pp_digest,
+      W_new,
+      E_new,
+      &data_p.u_W,
+      &data_p.u_x0,
+      &data_p.u_x1,
+      &data_p.T,
+      self.ro_consts.clone(),
+    )?;
+
     // Run NIVC.V on U_c, u_c_1, T_c_1
     let U_int = data_c_1.apply_fold(
       cs.namespace(|| "fold u_c_1 into U_c"),
@@ -405,28 +422,6 @@ where
     let h_c_1_bits = ro_c_1.squeeze(cs.namespace(|| "cyclefold_1 hash bits"), NUM_HASH_BITS)?;
     let h_c_1 = le_bits_to_num(cs.namespace(|| "cyclefold_1 hash"), &h_c_1_bits)?;
     let check_cyclefold_int = alloc_num_equals(cs.namespace(|| "h_int = h_c_1"), &h_c_int, &h_c_1)?;
-    let checks_pass = AllocatedBit::and(
-      cs.namespace(|| "all checks passed"),
-      &check_io,
-      &check_cyclefold_int,
-    )?;
-
-    /*
-     * Nova-CycleFold verifier circuit
-     */
-
-    // Primary NIFS.V
-    let U_p = data_p.U.fold_with_r1cs(
-      cs.namespace(|| "fold u_p into U_p"),
-      pp_digest,
-      W_new,
-      E_new,
-      &data_p.u_W,
-      &data_p.u_x0,
-      &data_p.u_x1,
-      &data_p.T,
-      self.ro_consts.clone(),
-    )?;
 
     // CycleFold NIFS.V
     let U_c = data_c_2.apply_fold(
@@ -434,6 +429,12 @@ where
       self.ro_consts.clone(),
       self.params.limb_width,
       self.params.n_limbs,
+    )?;
+
+    let checks_pass = AllocatedBit::and(
+      cs.namespace(|| "all checks passed"),
+      &check_io,
+      &check_cyclefold_int,
     )?;
 
     Ok((U_c, U_p, checks_pass))
