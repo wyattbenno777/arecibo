@@ -1,6 +1,5 @@
-use std::marker::PhantomData;
-
 use crate::constants::NUM_CHALLENGE_BITS;
+use crate::cyclefold::gadgets::emulated::{self, AllocatedEmulPoint};
 use crate::gadgets::{alloc_bignat_constant, le_bits_to_num, BigNat, Num};
 use crate::traits::Group;
 use crate::traits::ROCircuitTrait;
@@ -21,6 +20,9 @@ pub struct NIFSVerifierGadget<E>
 where
   E: CurveCycleEquipped,
 {
+  // proof from primary fold
+  pub(super) nifs_primary: PrimaryNIFSVerifierGadget<E>,
+
   // proof from first cyclefold fold
   pub(super) nifs_E1: CycleFoldNIFSVerifierGadget<E>,
   pub(super) l_u_cyclefold_E1: AllocatedCycleFoldInstance<Dual<E>>,
@@ -47,12 +49,33 @@ where
     ro_consts: ROConstantsCircuit<Dual<E>>,
     limb_width: usize,
     n_limbs: usize,
+    U1: emulated::AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
+    U2: emulated::AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
     U1_secondary: AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
     U2_secondary: AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
-  ) -> Result<(), SynthesisError>
+    pp_digest: &AllocatedNum<E::Scalar>,
+    W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    E_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+  ) -> Result<
+    (
+      emulated::AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
+      AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+    ),
+    SynthesisError,
+  >
   where
     CS: ConstraintSystem<E::Scalar>,
   {
+    let U = self.nifs_primary.verify(
+      cs.namespace(|| "primary fold"),
+      ro_consts.clone(),
+      &U1,
+      &U2,
+      pp_digest,
+      W_new,
+      E_new,
+    )?;
+
     let U_secondary_temp = self.nifs_E1.verify(
       cs.namespace(|| "verify first cyclefold"),
       ro_consts.clone(),
@@ -89,7 +112,44 @@ where
       &U2_secondary,
     )?;
 
-    Ok(())
+    Ok((U, U_secondary))
+  }
+}
+
+/// Verifier gadget for primary fold
+pub struct PrimaryNIFSVerifierGadget<E>
+where
+  E: CurveCycleEquipped,
+{
+  comm_T: emulated::AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+}
+
+impl<E> PrimaryNIFSVerifierGadget<E>
+where
+  E: CurveCycleEquipped,
+{
+  pub fn verify<CS>(
+    &self,
+    mut cs: CS,
+    ro_consts: ROConstantsCircuit<Dual<E>>,
+    U1: &emulated::AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
+    U2: &emulated::AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
+    pp_digest: &AllocatedNum<E::Scalar>,
+    W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    E_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+  ) -> Result<emulated::AllocatedEmulRelaxedR1CSInstance<Dual<E>>, SynthesisError>
+  where
+    CS: ConstraintSystem<E::Scalar>,
+  {
+    U1.fold_with_relaxed_r1cs(
+      cs.namespace(|| "fold with relaxed r1cs"),
+      pp_digest,
+      U2,
+      W_new,
+      E_new,
+      &self.comm_T,
+      ro_consts.clone(),
+    )
   }
 }
 
