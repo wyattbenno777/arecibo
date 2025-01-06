@@ -299,7 +299,7 @@ where
     // Parse Πi (self) as ((Ui, Wi), (ui, wi)) and then:
     //
     // 1. compute (Ui+1,Wi+1,T) ← NIFS.P(pk,(Ui,Wi),(ui,wi)),
-    let (nifs, (r_U_primary, r_W_primary), (r_U_cyclefold, r_W_cyclefold), r, U_secondary_temp) =
+    let (nifs, (r_U_primary, r_W_primary), (r_U_cyclefold, r_W_cyclefold), _, U_secondary_temp) =
       NIFS::<E1>::prove(
         (&pp.ck_primary, &pp.ck_cyclefold),
         &pp.ro_consts,
