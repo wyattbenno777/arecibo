@@ -17,9 +17,12 @@ use crate::{
   Commitment, CommitmentKey,
 };
 use ff::Field;
+use serde::{Deserialize, Serialize};
 
 use super::utils::{absorb_U, scalar_to_bools};
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 /// A non-interactive folding scheme for IVC proofs.
 pub struct NIFS<E>
 where
@@ -236,6 +239,8 @@ where
 }
 
 /// NIFS for folding the primary relaxed r1cs instance and witness
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct PrimaryRelaxedNIFS<E1>
 where
   E1: CurveCycleEquipped,
@@ -301,6 +306,8 @@ where
 }
 
 /// NIFS for folding CycleFold [`R1CSInstance`] and [`R1CSWitness`] instances into the running instance
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct CycleFoldNIFS<E>
 where
   E: CurveCycleEquipped,
@@ -365,6 +372,8 @@ where
 }
 
 /// NIFS for folding two Cyclefold [`RelaxedR1CSInstance`] and [`RelaxedR1CSWitness`] instances
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct CycleFoldRelaxedNIFS<E>
 where
   E: CurveCycleEquipped,
