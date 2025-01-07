@@ -1,6 +1,8 @@
+use super::nifs::PrimaryRelaxedNIFS;
 use crate::constants::NUM_CHALLENGE_BITS;
 use crate::cyclefold::gadgets::emulated::{self, AllocatedEmulPoint};
 use crate::gadgets::{alloc_bignat_constant, le_bits_to_num, BigNat, Num};
+use crate::traits::commitment::CommitmentTrait;
 use crate::traits::Group;
 use crate::traits::ROCircuitTrait;
 use crate::{
@@ -14,6 +16,9 @@ use bellpepper_core::boolean::{AllocatedBit, Boolean};
 use bellpepper_core::num::AllocatedNum;
 use bellpepper_core::{ConstraintSystem, SynthesisError};
 use itertools::Itertools;
+
+#[cfg(test)]
+mod test;
 
 /// Verifer gadget used to fold IVC proofs.
 pub struct NIFSVerifierGadget<E>
@@ -128,6 +133,25 @@ impl<E> PrimaryNIFSVerifierGadget<E>
 where
   E: CurveCycleEquipped,
 {
+  pub fn alloc<CS>(
+    mut cs: CS,
+    nifs: Option<&PrimaryRelaxedNIFS<E>>,
+    limb_width: usize,
+    n_limbs: usize,
+  ) -> Result<Self, SynthesisError>
+  where
+    CS: ConstraintSystem<E::Scalar>,
+  {
+    let comm_T = emulated::AllocatedEmulPoint::alloc(
+      cs.namespace(|| "allocate T"),
+      nifs.map(|nifs| nifs.comm_T.to_coordinates()),
+      limb_width,
+      n_limbs,
+    )?;
+
+    Ok(Self { comm_T })
+  }
+
   pub fn verify<CS>(
     &self,
     mut cs: CS,
@@ -135,8 +159,8 @@ where
     U1: &emulated::AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
     U2: &emulated::AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
     pp_digest: &AllocatedNum<E::Scalar>,
-    W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
     E_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
   ) -> Result<emulated::AllocatedEmulRelaxedR1CSInstance<Dual<E>>, SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
@@ -363,176 +387,4 @@ fn scalar_to_bits<E: Engine, CS: ConstraintSystem<E::Scalar>>(
       })
       .collect::<Vec<AllocatedBit>>(),
   )
-}
-
-#[cfg(test)]
-mod test {
-  use std::marker::PhantomData;
-
-  use crate::traits::commitment::CommitmentTrait;
-  use crate::{
-    cyclefold::gadgets::emulated,
-    errors::NovaError,
-    nebula::{
-      augmented_circuit::AugmentedCircuitParams,
-      layer_2::{self, nifs::NIFS},
-      rs::{PublicParams, RecursiveSNARK, StepCircuit},
-    },
-    provider::Bn256EngineIPA,
-    r1cs::RelaxedR1CSInstance,
-    traits::{snark::default_ck_hint, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
-    Commitment,
-  };
-  use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
-
-  // Proving Engine
-  type E = Bn256EngineIPA;
-  type F = <E as Engine>::Scalar;
-
-  #[test]
-  fn test_folding_ivc_proofs() {}
-
-  // Simulate orchestrator node
-  fn sim_orchestrator_node() -> Result<(), NovaError> {
-    let num_nodes = 10;
-    let circuit: PowCircuit<E> = PowCircuit {
-      _engine: PhantomData,
-    };
-    let pp = PublicParams::<E>::setup(&circuit, &default_ck_hint(), &default_ck_hint());
-    let snarks = sim_node_nw(&pp, &circuit, num_nodes)?;
-    Ok(())
-  }
-
-  // generate a collection of [`RecursiveSNARK`]'s simulating a node network producing [`RecursiveSNARK`]'s
-  fn sim_node_nw(
-    pp: &PublicParams<E>,
-    step_circuit: &impl StepCircuit<F>,
-    num_nodes: usize,
-  ) -> Result<Vec<RecursiveSNARK<E>>, NovaError> {
-    let mut z0 = vec![F::from(42_u64)];
-    let mut snarks = Vec::with_capacity(num_nodes);
-    let mut node = || {
-      let mut rs = RecursiveSNARK::new(pp, step_circuit, &z0)?;
-      let mut IC_i = F::zero();
-      for _ in 0..3 {
-        rs.prove_step(pp, step_circuit, IC_i)?;
-        IC_i = rs.increment_commitment(pp, step_circuit);
-      }
-      z0 = rs.verify(pp, rs.num_steps(), &z0, IC_i)?;
-      snarks.push(rs);
-      Ok::<(), NovaError>(())
-    };
-    for _ in 0..num_nodes {
-      node()?;
-    }
-    Ok(snarks)
-  }
-
-  #[derive(Clone)]
-  pub struct VerifierCircuit<'a, E>
-  where
-    E: CurveCycleEquipped,
-  {
-    pp_digest: Option<E::Scalar>,
-    nifs: Option<NIFS<E>>,
-    U1: Option<RelaxedR1CSInstance<E>>,
-    U2: Option<RelaxedR1CSInstance<E>>,
-    E_new: Option<Commitment<E>>,
-    W_new: Option<Commitment<E>>,
-    U1_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
-    U2_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
-    params: &'a AugmentedCircuitParams,
-    ro_consts: ROConstantsCircuit<Dual<E>>,
-  }
-
-  impl<'a, E> StepCircuit<E::Scalar> for VerifierCircuit<'a, E>
-  where
-    E: CurveCycleEquipped,
-  {
-    fn arity(&self) -> usize {
-      0
-    }
-
-    fn synthesize<CS: bellpepper_core::ConstraintSystem<E::Scalar>>(
-      &self,
-      cs: &mut CS,
-      z: &[AllocatedNum<E::Scalar>],
-    ) -> Result<Vec<AllocatedNum<E::Scalar>>, bellpepper_core::SynthesisError> {
-      Ok(z.to_vec())
-    }
-
-    fn non_deterministic_advice(&self) -> Vec<E::Scalar> {
-      vec![]
-    }
-  }
-
-  impl<'a, E> VerifierCircuit<'a, E>
-  where
-    E: CurveCycleEquipped,
-  {
-    fn alloc_witness<CS>(
-      &self,
-      mut cs: CS,
-    ) -> Result<
-      (
-        emulated::AllocatedEmulPoint<<Dual<E> as Engine>::GE>, // E_new
-        emulated::AllocatedEmulPoint<<Dual<E> as Engine>::GE>, // W_new
-      ),
-      SynthesisError,
-    >
-    where
-      CS: ConstraintSystem<E::Scalar>,
-    {
-      let E_new = emulated::AllocatedEmulPoint::alloc(
-        cs.namespace(|| "E_new"),
-        self.E_new.map(|E_new| E_new.to_coordinates()),
-        self.params.limb_width,
-        self.params.n_limbs,
-      )?;
-
-      let W_new = emulated::AllocatedEmulPoint::alloc(
-        cs.namespace(|| "W_new"),
-        self.W_new.map(|W_new| W_new.to_coordinates()),
-        self.params.limb_width,
-        self.params.n_limbs,
-      )?;
-
-      Ok((E_new, W_new))
-    }
-  }
-
-  #[derive(Clone, Default)]
-  pub struct PowCircuit<E>
-  where
-    E: Engine,
-  {
-    _engine: PhantomData<E>,
-  }
-
-  impl<E> StepCircuit<E::Scalar> for PowCircuit<E>
-  where
-    E: Engine,
-  {
-    fn arity(&self) -> usize {
-      1
-    }
-
-    fn synthesize<CS: bellpepper_core::ConstraintSystem<E::Scalar>>(
-      &self,
-      cs: &mut CS,
-      z: &[AllocatedNum<E::Scalar>],
-    ) -> Result<Vec<AllocatedNum<E::Scalar>>, bellpepper_core::SynthesisError> {
-      let mut x = z[0].clone();
-      let mut y = x.clone();
-      for i in 0..10 {
-        y = x.square(cs.namespace(|| format!("x_sq_{i}")))?;
-        x = y.clone();
-      }
-      Ok(vec![y])
-    }
-
-    fn non_deterministic_advice(&self) -> Vec<E::Scalar> {
-      vec![]
-    }
-  }
 }

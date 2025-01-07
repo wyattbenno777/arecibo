@@ -31,7 +31,7 @@ use crate::cyclefold::{
 
 use super::rs::StepCircuit;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Abomonation)]
+#[derive(Clone, Debug, PartialEq, Copy, Eq, Serialize, Deserialize, Abomonation)]
 pub struct AugmentedCircuitParams {
   /// how many bits in each limb
   pub limb_width: usize,
