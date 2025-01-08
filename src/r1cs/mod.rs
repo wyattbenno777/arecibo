@@ -372,30 +372,19 @@ impl<E: Engine> R1CSShape<E> {
     assert_eq!(U.X.len(), self.num_io);
 
     // verify if Az * Bz - u*Cz = E
-    // let E = self.compute_E(&W.W, &U.u, &U.X)?;
-    // W.E
-    //   .par_iter()
-    //   .zip_eq(E.into_par_iter())
-    //   .enumerate()
-    //   .try_for_each(|(i, (we, e))| {
-    //     if *we != e {
-    //       // constraint failed, retrieve constraint name
-    //       Err(NovaError::UnSatIndex(i))
-    //     } else {
-    //       Ok(())
-    //     }
-    //   })?;
-
-    // verify if Az * Bz = u*Cz + E
-    let res_eq = {
-      let z = [W.W.clone(), vec![U.u], U.X.clone()].concat();
-      let (Az, Bz, Cz) = self.multiply_vec(&z)?;
-      assert_eq!(Az.len(), self.num_cons);
-      assert_eq!(Bz.len(), self.num_cons);
-      assert_eq!(Cz.len(), self.num_cons);
-
-      (0..self.num_cons).all(|i| Az[i] * Bz[i] == U.u * Cz[i] + W.E[i])
-    };
+    let E = self.compute_E(&W.W, &U.u, &U.X)?;
+    W.E
+      .par_iter()
+      .zip_eq(E.into_par_iter())
+      .enumerate()
+      .try_for_each(|(i, (we, e))| {
+        if *we != e {
+          // constraint failed, retrieve constraint name
+          Err(NovaError::UnSatIndex(i))
+        } else {
+          Ok(())
+        }
+      })?;
 
     // verify if comm_E and comm_W are commitments to E and W
     let res_comm = {
@@ -405,10 +394,6 @@ impl<E: Engine> R1CSShape<E> {
     };
 
     if !res_comm {
-      return Err(NovaError::UnSat);
-    }
-
-    if !res_eq {
       return Err(NovaError::UnSat);
     }
 
@@ -581,42 +566,28 @@ impl<E: Engine> R1CSShape<E> {
     U2: &RelaxedR1CSInstance<E>,
     W2: &RelaxedR1CSWitness<E>,
   ) -> Result<(Vec<E::Scalar>, Commitment<E>), NovaError> {
-    let (AZ_1, BZ_1, CZ_1) = tracing::trace_span!("AZ_1, BZ_1, CZ_1")
-      .in_scope(|| self.multiply_witness(&W1.W, &U1.u, &U1.X))?;
+    let Z1 = [W1.W.clone(), vec![U1.u], U1.X.clone()].concat();
+    let Z2 = [W2.W.clone(), vec![U2.u], U2.X.clone()].concat();
 
-    let (AZ_2, BZ_2, CZ_2) = tracing::trace_span!("AZ_2, BZ_2, CZ_2")
-      .in_scope(|| self.multiply_witness(&W2.W, &E::Scalar::ONE, &U2.X))?;
+    // The following code uses the optimization suggested in
+    // Section 5.2 of [Mova](https://eprint.iacr.org/2024/1220.pdf)
+    let Z = Z1
+      .into_par_iter()
+      .zip_eq(Z2.into_par_iter())
+      .map(|(z1, z2)| z1 + z2)
+      .collect::<Vec<E::Scalar>>();
+    let u = U1.u + U2.u;
 
-    let (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1, u_1_cdot_CZ_2, u_2_cdot_CZ_1) =
-      tracing::trace_span!("cross terms").in_scope(|| {
-        let AZ_1_circ_BZ_2 = (0..AZ_1.len())
-          .into_par_iter()
-          .map(|i| AZ_1[i] * BZ_2[i])
-          .collect::<Vec<E::Scalar>>();
-        let AZ_2_circ_BZ_1 = (0..AZ_2.len())
-          .into_par_iter()
-          .map(|i| AZ_2[i] * BZ_1[i])
-          .collect::<Vec<E::Scalar>>();
-        let u_1_cdot_CZ_2 = (0..CZ_2.len())
-          .into_par_iter()
-          .map(|i| U1.u * CZ_2[i])
-          .collect::<Vec<E::Scalar>>();
-        let u_2_cdot_CZ_1 = (0..CZ_1.len())
-          .into_par_iter()
-          .map(|i| U2.u * CZ_1[i])
-          .collect::<Vec<E::Scalar>>();
-        (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1, u_1_cdot_CZ_2, u_2_cdot_CZ_1)
-      });
+    let (AZ, BZ, CZ) = self.multiply_vec(&Z)?;
 
-    let T = tracing::trace_span!("T").in_scope(|| {
-      AZ_1_circ_BZ_2
-        .par_iter()
-        .zip_eq(&AZ_2_circ_BZ_1)
-        .zip_eq(&u_1_cdot_CZ_2)
-        .zip_eq(&u_2_cdot_CZ_1)
-        .map(|(((a, b), c), d)| *a + *b - *c - *d)
-        .collect::<Vec<E::Scalar>>()
-    });
+    let T = AZ
+      .par_iter()
+      .zip_eq(BZ.par_iter())
+      .zip_eq(CZ.par_iter())
+      .zip_eq(W1.E.par_iter())
+      .zip_eq(W2.E.par_iter())
+      .map(|((((az, bz), cz), e1), e2)| *az * *bz - u * *cz - *e1 - *e2)
+      .collect::<Vec<E::Scalar>>();
 
     let comm_T = CE::<E>::commit(ck, &T);
 
