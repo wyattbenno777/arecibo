@@ -1,6 +1,9 @@
 use std::marker::PhantomData;
 
+use super::PrimaryNIFSVerifierGadget;
 use crate::cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance;
+use crate::nebula::l2::nifs::RelaxedNIFS;
+use crate::r1cs::RelaxedR1CSWitness;
 use crate::traits::commitment::CommitmentTrait;
 use crate::{
   cyclefold::gadgets::emulated,
@@ -15,39 +18,242 @@ use crate::{
   traits::{snark::default_ck_hint, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
   Commitment,
 };
+use crate::{CommitmentKey, R1CSWithArity};
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::Field;
-use num_traits::Pow;
-
-use super::PrimaryNIFSVerifierGadget;
+use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
+use tracing_texray::TeXRayLayer;
 
 // Proving Engine
 type E = Bn256EngineIPA;
 type F = <E as Engine>::Scalar;
 
+pub struct AggregationPublicParams<E>
+where
+  E: CurveCycleEquipped,
+{
+  pp: PublicParams<E>,
+  circuit_shape_F: R1CSWithArity<E>,
+  digest_F: E::Scalar,
+  ck: CommitmentKey<E>,
+}
+
+impl<E> AggregationPublicParams<E>
+where
+  E: CurveCycleEquipped,
+{
+  #[tracing::instrument(skip_all, name = "AggregationPublicParams::setup")]
+  fn setup(pp_F: PublicParams<E>) -> Self {
+    let verifier_circuit: VerifierCircuit<E> = VerifierCircuit::new(
+      pp_F.augmented_circuit_params,
+      pp_F.ro_consts_circuit.clone(),
+      None,
+      None,
+      None,
+      None,
+      None,
+      None,
+      None,
+      None,
+    );
+    let pp: PublicParams<E> =
+      PublicParams::setup(&verifier_circuit, &*default_ck_hint(), &*default_ck_hint());
+    let (circuit_shape_F, ck, digest_F) = pp_F.into_shape_ck_digest();
+
+    Self {
+      pp,
+      circuit_shape_F,
+      digest_F,
+      ck,
+    }
+  }
+
+  fn circuit_shape_cyclefold(&self) -> &R1CSWithArity<Dual<E>> {
+    &self.pp.circuit_shape_cyclefold
+  }
+
+  fn ck_cyclefold(&self) -> &CommitmentKey<Dual<E>> {
+    &self.pp.ck_cyclefold
+  }
+
+  fn ck(&self) -> &CommitmentKey<E> {
+    &self.ck
+  }
+
+  fn augmented_circuit_params(&self) -> AugmentedCircuitParams {
+    self.pp.augmented_circuit_params
+  }
+}
+
+pub struct AggregationRecursiveSNARK<E>
+where
+  E: CurveCycleEquipped,
+{
+  r_W: RelaxedR1CSWitness<E>,
+  r_U: RelaxedR1CSInstance<E>,
+  r_W_cyclefold: RelaxedR1CSWitness<Dual<E>>,
+  r_U_cyclefold: RelaxedR1CSInstance<Dual<E>>,
+  rs: RecursiveSNARK<E>,
+  IC_i: E::Scalar,
+  i: usize,
+}
+
+impl<E> AggregationRecursiveSNARK<E>
+where
+  E: CurveCycleEquipped,
+{
+  #[tracing::instrument(skip_all, name = "AggregationRecursiveSNARK::new")]
+  fn new(pp: &AggregationPublicParams<E>, rs_F: &RecursiveSNARK<E>) -> Result<Self, NovaError> {
+    let F_shape = &pp.circuit_shape_F.r1cs_shape;
+    let r_U = RelaxedR1CSInstance::default(&pp.ck, F_shape);
+    let r_W = RelaxedR1CSWitness::default(F_shape);
+    let r1cs_cyclefold = &pp.circuit_shape_cyclefold().r1cs_shape;
+    let r_U_cyclefold = RelaxedR1CSInstance::default(pp.ck_cyclefold(), r1cs_cyclefold);
+    let r_W_cyclefold = RelaxedR1CSWitness::default(r1cs_cyclefold);
+    let (U2, W2, U2_secondary, W2_secondary) = rs_F.primary_secondary_U_W();
+    let (nifs, (new_r_U, new_r_W), (new_r_U_cyclefold, new_r_W_cyclefold)) = NIFS::prove(
+      (pp.ck(), pp.ck_cyclefold()),
+      &pp.pp.ro_consts,
+      &pp.digest_F,
+      (
+        &pp.circuit_shape_F.r1cs_shape,
+        &pp.pp.circuit_shape_cyclefold.r1cs_shape,
+      ),
+      (&r_U, &r_W),
+      (U2, W2),
+      (&r_U_cyclefold, &r_W_cyclefold),
+      (U2_secondary, W2_secondary),
+    )?;
+    let E_new = new_r_U.comm_E;
+    let W_new = new_r_U.comm_W;
+    let verifier_circuit: VerifierCircuit<E> = VerifierCircuit::new(
+      pp.augmented_circuit_params(),
+      pp.pp.ro_consts_circuit.clone(),
+      Some(pp.digest_F),
+      Some(nifs),
+      Some(r_U),
+      Some(U2.clone()),
+      Some(E_new),
+      Some(W_new),
+      Some(r_U_cyclefold),
+      Some(U2_secondary.clone()),
+    );
+    let z0 = vec![E::Scalar::ZERO];
+    let mut IC_i = E::Scalar::ZERO;
+    let mut rs = RecursiveSNARK::new(&pp.pp, &verifier_circuit, &z0)?;
+    rs.prove_step(&pp.pp, &verifier_circuit, IC_i)?;
+    IC_i = rs.increment_commitment(&pp.pp, &verifier_circuit);
+    Ok(Self {
+      r_W: new_r_W,
+      r_U: new_r_U,
+      r_W_cyclefold: new_r_W_cyclefold,
+      r_U_cyclefold: new_r_U_cyclefold,
+      rs,
+      IC_i,
+      i: 0,
+    })
+  }
+
+  #[tracing::instrument(skip_all, name = "AggregationRecursiveSNARK::prove_step")]
+  fn prove_step(
+    &mut self,
+    pp: &AggregationPublicParams<E>,
+    rs_F: &RecursiveSNARK<E>,
+  ) -> Result<(), NovaError> {
+    if self.i == 0 {
+      self.i = 1;
+      return Ok(());
+    }
+    let (U2, W2, U2_secondary, W2_secondary) = rs_F.primary_secondary_U_W();
+    let (nifs, (new_r_U, new_r_W), (new_r_U_cyclefold, new_r_W_cyclefold)) = NIFS::prove(
+      (pp.ck(), pp.ck_cyclefold()),
+      &pp.pp.ro_consts,
+      &pp.digest_F,
+      (
+        &pp.circuit_shape_F.r1cs_shape,
+        &pp.pp.circuit_shape_cyclefold.r1cs_shape,
+      ),
+      (&self.r_U, &self.r_W),
+      (U2, W2),
+      (&self.r_U_cyclefold, &self.r_W_cyclefold),
+      (U2_secondary, W2_secondary),
+    )?;
+    let E_new = new_r_U.comm_E;
+    let W_new = new_r_U.comm_W;
+    let verifier_circuit: VerifierCircuit<E> = VerifierCircuit::new(
+      pp.augmented_circuit_params(),
+      pp.pp.ro_consts_circuit.clone(),
+      Some(pp.digest_F),
+      Some(nifs),
+      Some(self.r_U.clone()),
+      Some(U2.clone()),
+      Some(E_new),
+      Some(W_new),
+      Some(self.r_U_cyclefold.clone()),
+      Some(U2_secondary.clone()),
+    );
+    self.rs.prove_step(&pp.pp, &verifier_circuit, self.IC_i)?;
+    self.IC_i = self.rs.increment_commitment(&pp.pp, &verifier_circuit);
+    self.r_U = new_r_U;
+    self.r_W = new_r_W;
+    self.r_U_cyclefold = new_r_U_cyclefold;
+    self.r_W_cyclefold = new_r_W_cyclefold;
+    self.i += 1;
+    Ok(())
+  }
+
+  #[tracing::instrument(skip_all, name = "AggregationRecursiveSNARK::verify")]
+  pub fn verify(&self, pp: &AggregationPublicParams<E>) -> Result<(), NovaError> {
+    self
+      .rs
+      .verify(&pp.pp, self.rs.num_steps(), &[E::Scalar::ZERO], self.IC_i)?;
+    // let (res_r_F, res_r_cyclefold) = rayon::join(
+    //   || {
+    //     pp.circuit_shape_F
+    //       .r1cs_shape
+    //       .is_sat_relaxed(&pp.ck, &self.r_U, &self.r_W)
+    //   },
+    //   || {
+    //     pp.circuit_shape_cyclefold().r1cs_shape.is_sat_relaxed(
+    //       pp.ck_cyclefold(),
+    //       &self.r_U_cyclefold,
+    //       &self.r_W_cyclefold,
+    //     )
+    //   },
+    // );
+    // res_r_F?;
+    // res_r_cyclefold?;
+    pp.circuit_shape_F
+      .r1cs_shape
+      .is_sat_relaxed(&pp.ck, &self.r_U, &self.r_W)?;
+    // pp.circuit_shape_cyclefold().r1cs_shape.is_sat_relaxed(
+    //   pp.ck_cyclefold(),
+    //   &self.r_U_cyclefold,
+    //   &self.r_W_cyclefold,
+    // )?;
+    Ok(())
+  }
+}
+
 #[test]
-fn test_folding_ivc_proofs() {}
+fn test_folding_ivc_proofs() -> Result<(), NovaError> {
+  tracing_init();
+  tracing_texray::examine(tracing::info_span!("sim_orchestrator_node"))
+    .in_scope(sim_orchestrator_node)
+}
 
 // Simulate orchestrator node
 fn sim_orchestrator_node() -> Result<(), NovaError> {
-  let num_nodes = 10;
+  let num_nodes = 3;
   let circuit: PowCircuit<E> = PowCircuit::new();
-  let pp = PublicParams::<E>::setup(&circuit, &default_ck_hint(), &default_ck_hint());
-  let snarks = sim_node_nw(&pp, &circuit, num_nodes)?;
-  let verifier_circuit: VerifierCircuit<E> = VerifierCircuit::new(
-    pp.augmented_circuit_params,
-    pp.ro_consts_circuit.clone(),
-    None,
-    None,
-    None,
-    None,
-    None,
-    None,
-    None,
-    None,
-  );
-  let on_pp: PublicParams<E> =
-    PublicParams::setup(&verifier_circuit, &default_ck_hint(), &default_ck_hint());
+  let node_pp = PublicParams::<E>::setup(&circuit, &default_ck_hint(), &default_ck_hint());
+  let snarks = sim_node_nw(&node_pp, &circuit, num_nodes)?;
+  let on_pp = AggregationPublicParams::setup(node_pp);
+  let mut on_rs = AggregationRecursiveSNARK::new(&on_pp, &snarks[0])?;
+  for snark in snarks.iter() {
+    on_rs.prove_step(&on_pp, snark)?;
+  }
+  on_rs.verify(&on_pp)?;
   Ok(())
 }
 
@@ -98,7 +304,7 @@ where
   E: CurveCycleEquipped,
 {
   fn arity(&self) -> usize {
-    0
+    1
   }
 
   fn synthesize<CS: bellpepper_core::ConstraintSystem<E::Scalar>>(
@@ -253,4 +459,56 @@ where
   fn non_deterministic_advice(&self) -> Vec<E::Scalar> {
     vec![]
   }
+}
+
+fn tracing_init() {
+  // Create an EnvFilter that filters out spans below the 'info' level
+  let filter = EnvFilter::new("arecibo=debug");
+
+  // Create a TeXRayLayer
+  let texray_layer = TeXRayLayer::new(); // Optional: Only show spans longer than 100ms
+
+  // Set up the global subscriber
+  let subscriber = Registry::default()
+    .with(filter)
+    .with(fmt::layer())
+    .with(texray_layer);
+  tracing::subscriber::set_global_default(subscriber).expect("Failed to set global subscriber");
+}
+
+#[test]
+fn test_old_nifs() -> Result<(), NovaError> {
+  let num_nodes = 10;
+  let circuit: PowCircuit<E> = PowCircuit::new();
+  let node_pp = PublicParams::<E>::setup(&circuit, &default_ck_hint(), &default_ck_hint());
+  let snarks = sim_node_nw(&node_pp, &circuit, num_nodes)?;
+
+  let mut U1 = RelaxedR1CSInstance::default(
+    &node_pp.ck_primary,
+    &node_pp.circuit_shape_primary.r1cs_shape,
+  );
+  let mut W1 = RelaxedR1CSWitness::default(&node_pp.circuit_shape_primary.r1cs_shape);
+
+  for snark in snarks.iter() {
+    let (U2, W2) = snark.U_W();
+    let (_, (new_U1, new_W1), _) = RelaxedNIFS::prove(
+      &node_pp.ck_primary,
+      &node_pp.ro_consts,
+      &node_pp.digest(),
+      &node_pp.circuit_shape_primary.r1cs_shape,
+      &U1,
+      &W1,
+      U2,
+      W2,
+    )?;
+    U1 = new_U1;
+    W1 = new_W1;
+  }
+
+  node_pp
+    .circuit_shape_primary
+    .r1cs_shape
+    .is_sat_relaxed(&node_pp.ck_primary, &U1, &W1)?;
+
+  Ok(())
 }
