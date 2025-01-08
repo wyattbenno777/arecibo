@@ -1,10 +1,13 @@
 use std::marker::PhantomData;
 
-use super::PrimaryNIFSVerifierGadget;
+use super::{PrimaryNIFSVerifierGadget, NUM_CHALLENGE_BITS};
+use crate::constants::NUM_FE_IN_EMULATED_POINT;
 use crate::cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance;
-use crate::nebula::l2::nifs::RelaxedNIFS;
+use crate::gadgets::scalar_as_base;
+use crate::nebula::layer_2::utils::absorb_U;
 use crate::r1cs::RelaxedR1CSWitness;
 use crate::traits::commitment::CommitmentTrait;
+use crate::traits::ROTrait;
 use crate::{
   cyclefold::gadgets::emulated,
   errors::NovaError,
@@ -96,6 +99,7 @@ where
   rs: RecursiveSNARK<E>,
   IC_i: E::Scalar,
   i: usize,
+  z0: Vec<E::Scalar>,
 }
 
 impl<E> AggregationRecursiveSNARK<E>
@@ -131,14 +135,23 @@ where
       pp.pp.ro_consts_circuit.clone(),
       Some(pp.digest_F),
       Some(nifs),
-      Some(r_U),
+      Some(r_U.clone()),
       Some(U2.clone()),
       Some(E_new),
       Some(W_new),
       Some(r_U_cyclefold),
       Some(U2_secondary.clone()),
     );
-    let z0 = vec![E::Scalar::ZERO];
+    let z0 = {
+      let mut ro = <Dual<E> as Engine>::RO::new(
+        pp.pp.ro_consts.clone(),
+        2 * NUM_FE_IN_EMULATED_POINT + 2, // U.comm_E + U.comm_W + U.X
+      );
+      absorb_U::<E>(&r_U, &mut ro);
+      let hash_U = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
+      vec![hash_U]
+    };
+
     let mut IC_i = E::Scalar::ZERO;
     let mut rs = RecursiveSNARK::new(&pp.pp, &verifier_circuit, &z0)?;
     rs.prove_step(&pp.pp, &verifier_circuit, IC_i)?;
@@ -151,6 +164,7 @@ where
       rs,
       IC_i,
       i: 0,
+      z0,
     })
   }
 
@@ -206,31 +220,23 @@ where
   pub fn verify(&self, pp: &AggregationPublicParams<E>) -> Result<(), NovaError> {
     self
       .rs
-      .verify(&pp.pp, self.rs.num_steps(), &[E::Scalar::ZERO], self.IC_i)?;
-    // let (res_r_F, res_r_cyclefold) = rayon::join(
-    //   || {
-    //     pp.circuit_shape_F
-    //       .r1cs_shape
-    //       .is_sat_relaxed(&pp.ck, &self.r_U, &self.r_W)
-    //   },
-    //   || {
-    //     pp.circuit_shape_cyclefold().r1cs_shape.is_sat_relaxed(
-    //       pp.ck_cyclefold(),
-    //       &self.r_U_cyclefold,
-    //       &self.r_W_cyclefold,
-    //     )
-    //   },
-    // );
-    // res_r_F?;
-    // res_r_cyclefold?;
-    pp.circuit_shape_F
-      .r1cs_shape
-      .is_sat_relaxed(&pp.ck, &self.r_U, &self.r_W)?;
-    // pp.circuit_shape_cyclefold().r1cs_shape.is_sat_relaxed(
-    //   pp.ck_cyclefold(),
-    //   &self.r_U_cyclefold,
-    //   &self.r_W_cyclefold,
-    // )?;
+      .verify(&pp.pp, self.rs.num_steps(), &self.z0, self.IC_i)?;
+    let (res_r_F, res_r_cyclefold) = rayon::join(
+      || {
+        pp.circuit_shape_F
+          .r1cs_shape
+          .is_sat_relaxed(&pp.ck, &self.r_U, &self.r_W)
+      },
+      || {
+        pp.circuit_shape_cyclefold().r1cs_shape.is_sat_relaxed(
+          pp.ck_cyclefold(),
+          &self.r_U_cyclefold,
+          &self.r_W_cyclefold,
+        )
+      },
+    );
+    res_r_F?;
+    res_r_cyclefold?;
     Ok(())
   }
 }
@@ -244,7 +250,7 @@ fn test_folding_ivc_proofs() -> Result<(), NovaError> {
 
 // Simulate orchestrator node
 fn sim_orchestrator_node() -> Result<(), NovaError> {
-  let num_nodes = 3;
+  let num_nodes = 10;
   let circuit: PowCircuit<E> = PowCircuit::new();
   let node_pp = PublicParams::<E>::setup(&circuit, &default_ck_hint(), &default_ck_hint());
   let snarks = sim_node_nw(&node_pp, &circuit, num_nodes)?;
@@ -463,7 +469,7 @@ where
 
 fn tracing_init() {
   // Create an EnvFilter that filters out spans below the 'info' level
-  let filter = EnvFilter::new("arecibo=debug");
+  let filter = EnvFilter::new("arecibo=info");
 
   // Create a TeXRayLayer
   let texray_layer = TeXRayLayer::new(); // Optional: Only show spans longer than 100ms
@@ -474,41 +480,4 @@ fn tracing_init() {
     .with(fmt::layer())
     .with(texray_layer);
   tracing::subscriber::set_global_default(subscriber).expect("Failed to set global subscriber");
-}
-
-#[test]
-fn test_old_nifs() -> Result<(), NovaError> {
-  let num_nodes = 10;
-  let circuit: PowCircuit<E> = PowCircuit::new();
-  let node_pp = PublicParams::<E>::setup(&circuit, &default_ck_hint(), &default_ck_hint());
-  let snarks = sim_node_nw(&node_pp, &circuit, num_nodes)?;
-
-  let mut U1 = RelaxedR1CSInstance::default(
-    &node_pp.ck_primary,
-    &node_pp.circuit_shape_primary.r1cs_shape,
-  );
-  let mut W1 = RelaxedR1CSWitness::default(&node_pp.circuit_shape_primary.r1cs_shape);
-
-  for snark in snarks.iter() {
-    let (U2, W2) = snark.U_W();
-    let (_, (new_U1, new_W1), _) = RelaxedNIFS::prove(
-      &node_pp.ck_primary,
-      &node_pp.ro_consts,
-      &node_pp.digest(),
-      &node_pp.circuit_shape_primary.r1cs_shape,
-      &U1,
-      &W1,
-      U2,
-      W2,
-    )?;
-    U1 = new_U1;
-    W1 = new_W1;
-  }
-
-  node_pp
-    .circuit_shape_primary
-    .r1cs_shape
-    .is_sat_relaxed(&node_pp.ck_primary, &U1, &W1)?;
-
-  Ok(())
 }
