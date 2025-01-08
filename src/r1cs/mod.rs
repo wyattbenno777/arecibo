@@ -113,6 +113,7 @@ pub type CommitmentKeyHint<E> = dyn Fn(&R1CSShape<E>) -> usize;
 /// * `ck_floor`: A function that provides a floor for the number of generators. A good function to
 ///   provide is the `commitment_key_floor` field in the trait `RelaxedR1CSSNARKTrait`.
 ///
+#[tracing::instrument(level = "debug", skip_all name="generate ck")]
 pub fn commitment_key<E: Engine>(
   S: &R1CSShape<E>,
   ck_floor: &CommitmentKeyHint<E>,
@@ -371,19 +372,30 @@ impl<E: Engine> R1CSShape<E> {
     assert_eq!(U.X.len(), self.num_io);
 
     // verify if Az * Bz - u*Cz = E
-    let E = self.compute_E(&W.W, &U.u, &U.X)?;
-    W.E
-      .par_iter()
-      .zip_eq(E.into_par_iter())
-      .enumerate()
-      .try_for_each(|(i, (we, e))| {
-        if *we != e {
-          // constraint failed, retrieve constraint name
-          Err(NovaError::UnSatIndex(i))
-        } else {
-          Ok(())
-        }
-      })?;
+    // let E = self.compute_E(&W.W, &U.u, &U.X)?;
+    // W.E
+    //   .par_iter()
+    //   .zip_eq(E.into_par_iter())
+    //   .enumerate()
+    //   .try_for_each(|(i, (we, e))| {
+    //     if *we != e {
+    //       // constraint failed, retrieve constraint name
+    //       Err(NovaError::UnSatIndex(i))
+    //     } else {
+    //       Ok(())
+    //     }
+    //   })?;
+
+    // verify if Az * Bz = u*Cz + E
+    let res_eq = {
+      let z = [W.W.clone(), vec![U.u], U.X.clone()].concat();
+      let (Az, Bz, Cz) = self.multiply_vec(&z)?;
+      assert_eq!(Az.len(), self.num_cons);
+      assert_eq!(Bz.len(), self.num_cons);
+      assert_eq!(Cz.len(), self.num_cons);
+
+      (0..self.num_cons).all(|i| Az[i] * Bz[i] == U.u * Cz[i] + W.E[i])
+    };
 
     // verify if comm_E and comm_W are commitments to E and W
     let res_comm = {
@@ -395,6 +407,11 @@ impl<E: Engine> R1CSShape<E> {
     if !res_comm {
       return Err(NovaError::UnSat);
     }
+
+    if !res_eq {
+      return Err(NovaError::UnSat);
+    }
+
     Ok(())
   }
 

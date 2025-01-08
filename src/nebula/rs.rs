@@ -55,8 +55,10 @@ where
   pub circuit_shape_primary: R1CSWithArity<E1>,
   /// Parameters of big nats in circuit
   pub augmented_circuit_params: AugmentedCircuitParams,
-  ck_cyclefold: CommitmentKey<Dual<E1>>,
-  circuit_shape_cyclefold: R1CSWithArity<Dual<E1>>,
+  /// secondary commitment key
+  pub ck_cyclefold: CommitmentKey<Dual<E1>>,
+  /// R1CS shape of cyclefold circuit
+  pub circuit_shape_cyclefold: R1CSWithArity<Dual<E1>>,
   #[abomonation_skip]
   #[serde(skip, default = "OnceCell::new")]
   digest: OnceCell<E1::Scalar>,
@@ -70,6 +72,7 @@ where
   /// The same note for public parameter hints apply as in the case for Nova's public parameters:
   /// For some final compressing SNARKs the size of the commitment key must be larger, so we include
   /// `ck_hint_primary` and `ck_hint_cyclefold` parameters to accommodate this.
+  #[tracing::instrument(skip_all, name = "nebula::PublicParams::setup")]
   pub fn setup<C1: StepCircuit<E1::Scalar>>(
     c_primary: &C1,
     ck_hint_primary: &CommitmentKeyHint<E1>,
@@ -193,6 +196,7 @@ where
   E1: CurveCycleEquipped,
 {
   /// Create a new instance of RecursiveSNARK
+  #[tracing::instrument(skip_all, name = "nebula::RecursiveSNARK::new")]
   pub fn new<C>(
     pp: &PublicParams<E1>,
     step_circuit: &C,
@@ -384,6 +388,7 @@ where
   }
 
   /// Verify the correctness of the `RecursiveSNARK`
+  #[tracing::instrument(skip_all, name = "nebula::RecursiveSNARK::verify")]
   pub fn verify(
     &self,
     pp: &PublicParams<E1>,
@@ -491,6 +496,11 @@ where
   }
 
   /// Increment the incremental commitment with the new non-deterministic witness from the circuit
+  #[tracing::instrument(
+    skip_all,
+    name = "nebula::RecursiveSNARK::increment_commitment",
+    level = "debug"
+  )]
   pub fn increment_commitment<C>(&self, pp: &PublicParams<E1>, step_circuit: &C) -> E1::Scalar
   where
     C: StepCircuit<E1::Scalar>,
@@ -511,6 +521,23 @@ where
   /// Get relaxed instance witness pair for primary circuit
   pub fn U_W(&self) -> (&RelaxedR1CSInstance<E1>, &RelaxedR1CSWitness<E1>) {
     (&self.r_U_primary, &self.r_W_primary)
+  }
+
+  /// Get primary & secondayr relaxed instance witness pair
+  pub fn primary_secondary_U_W(
+    &self,
+  ) -> (
+    &RelaxedR1CSInstance<E1>,
+    &RelaxedR1CSWitness<E1>,
+    &RelaxedR1CSInstance<Dual<E1>>,
+    &RelaxedR1CSWitness<Dual<E1>>,
+  ) {
+    (
+      &self.r_U_primary,
+      &self.r_W_primary,
+      &self.r_U_cyclefold,
+      &self.r_W_cyclefold,
+    )
   }
 }
 

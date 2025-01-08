@@ -52,6 +52,7 @@ where
   E: CurveCycleEquipped,
 {
   /// Prover algorithm for the NIFS used in folding IVC proofs. Implemented with CycleFold.
+  #[tracing::instrument(skip_all, name = "Fold Recursive SNARK", level = "debug")]
   pub fn prove(
     (ck, ck_secondary): (&CommitmentKey<E>, &CommitmentKey<Dual<E>>),
     ro_consts: &ROConstants<Dual<E>>,
@@ -252,6 +253,7 @@ impl<E> PrimaryRelaxedNIFS<E>
 where
   E: CurveCycleEquipped,
 {
+  #[tracing::instrument(skip_all, name = "PrimaryRelaxedNIFS::prove", level = "debug")]
   pub fn prove(
     ck: &CommitmentKey<E>,
     ro_consts: &ROConstants<Dual<E>>,
@@ -268,9 +270,12 @@ where
     NovaError,
   > {
     let arity = U1.X.len();
+    if arity != U2.X.len() {
+      return Err(NovaError::InvalidInputLength);
+    }
     let mut ro = <Dual<E> as Engine>::RO::new(
       ro_consts.clone(),
-      1 + NUM_FE_IN_EMULATED_POINT + arity + NUM_FE_IN_EMULATED_POINT, // pp_digest + u.W + u.X + T
+      1 + (2 * NUM_FE_IN_EMULATED_POINT + arity + 1) + NUM_FE_IN_EMULATED_POINT, // pp_digest + (U.comm_W + U.comm_E + U.X + U.u) + comm_T
     );
     ro.absorb(*pp_digest);
     absorb_U::<E>(U2, &mut ro);
@@ -279,7 +284,6 @@ where
     let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
     let U = U1.fold_relaxed(U2, &comm_T, &r);
     let W = W1.fold_relaxed(W2, &T, &r)?;
-
     Ok((Self { comm_T }, (U, W), r))
   }
 
@@ -290,10 +294,9 @@ where
     U1: &RelaxedR1CSInstance<E>,
     U2: &RelaxedR1CSInstance<E>,
   ) -> Result<RelaxedR1CSInstance<E>, NovaError> {
-    let arity = U1.X.len();
     let mut ro = <Dual<E> as Engine>::RO::new(
       ro_consts.clone(),
-      1 + NUM_FE_IN_EMULATED_POINT + arity + NUM_FE_IN_EMULATED_POINT, // pp_digest + u.W + u.X + T
+      1 + (2 * NUM_FE_IN_EMULATED_POINT + 2 + 1) + NUM_FE_IN_EMULATED_POINT, // pp_digest + (U.W + U.comm_E + U.X + U.u) + comm_T
     );
     ro.absorb(*pp_digest);
     absorb_U::<E>(U2, &mut ro);
@@ -320,6 +323,7 @@ where
   E: CurveCycleEquipped,
 {
   /// Prover algorithm for folding incoming CycleFold [`R1CSInstance`] and [`R1CSWitness`] instances into running instance
+  #[tracing::instrument(skip_all, name = "CycleFoldNIFS::prove", level = "debug")]
   pub fn prove(
     ck: &CommitmentKey<Dual<E>>,
     ro_consts: &ROConstants<Dual<E>>,
@@ -347,7 +351,6 @@ where
     let r = ro.squeeze(NUM_CHALLENGE_BITS);
     let U = U1.fold(U2, &comm_T, &r);
     let W = W1.fold(W2, &T, &r)?;
-
     Ok((Self { comm_T }, (U, W), r))
   }
 
@@ -386,6 +389,7 @@ where
   E: CurveCycleEquipped,
 {
   /// Prover algorithm for folding two CycleFold [`RelaxedR1CSInstance`] and [`RelaxedR1CSWitness`] instances
+  #[tracing::instrument(skip_all, name = "CycleFoldRelaxedNIFS::prove", level = "debug")]
   pub fn prove(
     ck: &CommitmentKey<Dual<E>>,
     ro_consts: &ROConstants<Dual<E>>,

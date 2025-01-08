@@ -29,6 +29,7 @@ pub struct PoseidonConstantsCircuit<Scalar: PrimeField>(pub(crate) PoseidonConst
 
 impl<Scalar: PrimeField> Default for PoseidonConstantsCircuit<Scalar> {
   /// Generate Poseidon constants
+  #[tracing::instrument(level = "debug" name = "Generate Poseidon Consts")]
   fn default() -> Self {
     Self(Sponge::<Scalar, U24>::api_constants(Strength::Standard))
   }

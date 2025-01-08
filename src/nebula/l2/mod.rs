@@ -20,7 +20,7 @@ use utils::RelaxedFoldingData;
 
 mod final_circuit;
 mod gadgets;
-mod nifs;
+pub mod nifs;
 pub mod sharding;
 #[cfg(test)]
 mod tests;

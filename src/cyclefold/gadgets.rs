@@ -557,7 +557,7 @@ pub mod emulated {
     ) -> Result<Self, SynthesisError> {
       let mut ro = E::ROCircuit::new(
         ro_consts,
-        1 + 2 * NUM_FE_IN_EMULATED_POINT + 2 + 1 + NUM_FE_IN_EMULATED_POINT, // pp_digest + u.W + U.comm_E + U.X + U.u + comm_T
+        1 + (2 * NUM_FE_IN_EMULATED_POINT + 2 + 1) + NUM_FE_IN_EMULATED_POINT, // pp_digest + (U.W + U.comm_E + U.X + U.u) + comm_T
       );
       ro.absorb(pp_digest);
 
