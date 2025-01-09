@@ -23,7 +23,6 @@ use crate::{
     layer_2::nifs::NIFS,
     rs::{PublicParams, RecursiveSNARK, StepCircuit},
   },
-  provider::Bn256EngineIPA,
   r1cs::RelaxedR1CSInstance,
   traits::{snark::default_ck_hint, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
   Commitment,

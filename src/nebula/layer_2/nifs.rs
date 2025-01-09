@@ -425,7 +425,6 @@ where
     &self,
     ro_consts: &ROConstants<Dual<E>>,
     U1: &RelaxedR1CSInstance<Dual<E>>,
-
     U2: &RelaxedR1CSInstance<Dual<E>>,
   ) -> Result<RelaxedR1CSInstance<Dual<E>>, NovaError> {
     let mut ro = <Dual<E> as Engine>::RO::new(

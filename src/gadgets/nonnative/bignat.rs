@@ -4,7 +4,7 @@ use super::{
   },
   OptionExt,
 };
-use bellpepper_core::{ConstraintSystem, LinearCombination, SynthesisError};
+use bellpepper_core::{boolean::AllocatedBit, ConstraintSystem, LinearCombination, SynthesisError};
 use ff::PrimeField;
 use itertools::Itertools as _;
 use num_bigint::BigInt;
@@ -306,6 +306,28 @@ impl<Scalar: PrimeField> BigNat<Scalar> {
       values,
       allocations,
     })
+  }
+
+  /// Break `self` up into a Vec<AllocatedBit> (little endian).
+  pub fn to_bits_le<CS: ConstraintSystem<Scalar>>(
+    &self,
+    mut cs: CS,
+  ) -> Result<Vec<AllocatedBit>, SynthesisError> {
+    let limb_values_split =
+      (0..self.limbs.len()).map(|i| self.limb_values.as_ref().map(|vs| vs[i]));
+    let bitvectors: Vec<Vec<AllocatedBit>> = self
+      .limbs
+      .iter()
+      .zip_eq(limb_values_split)
+      .enumerate()
+      .map(|(i, (limb, limb_value))| {
+        Num::new(limb_value, limb.clone()).to_bits_le(
+          cs.namespace(|| format!("subdecmop {i}")),
+          self.params.limb_width,
+        )
+      })
+      .collect::<Result<Vec<_>, _>>()?;
+    Ok(bitvectors.into_iter().flatten().collect::<Vec<_>>())
   }
 
   pub fn enforce_limb_width_agreement(

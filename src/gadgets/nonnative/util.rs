@@ -1,7 +1,7 @@
 use super::{BitAccess, OptionExt};
 use bellpepper_core::{
-  num::AllocatedNum,
-  {ConstraintSystem, LinearCombination, SynthesisError, Variable},
+  boolean::AllocatedBit, num::AllocatedNum, ConstraintSystem, LinearCombination, SynthesisError,
+  Variable,
 };
 use byteorder::WriteBytesExt;
 use ff::PrimeField;
@@ -210,6 +210,27 @@ impl<Scalar: PrimeField> Num<Scalar> {
       values,
       bits,
     })
+  }
+
+  /// Convert to vector of AllocatedBits. little-endian
+  pub fn to_bits_le<CS: ConstraintSystem<Scalar>>(
+    &self,
+    mut cs: CS,
+    n_bits: usize,
+  ) -> Result<Vec<AllocatedBit>, SynthesisError> {
+    let values: Option<Vec<bool>> = self.value.as_ref().map(|v| {
+      let num = *v;
+      (0..n_bits).map(|i| num.get_bit(i).unwrap()).collect()
+    });
+    let allocations: Vec<AllocatedBit> = (0..n_bits)
+      .map(|bit_i| {
+        AllocatedBit::alloc(
+          cs.namespace(|| format!("bit{bit_i}")),
+          values.as_ref().map(|vs| vs[bit_i]),
+        )
+      })
+      .collect::<Result<Vec<_>, _>>()?;
+    Ok(allocations)
   }
 
   pub fn as_allocated_num<CS: ConstraintSystem<Scalar>>(
