@@ -1,14 +1,21 @@
-use std::marker::PhantomData;
-
+use super::{
+  le_bits_to_num, AllocatedRelaxedR1CSInstance, CycleFoldNIFSVerifierGadget,
+  CycleFoldRelaxedNIFSVerifierGadget, NIFSVerifierGadget,
+};
 use super::{PrimaryNIFSVerifierGadget, NUM_CHALLENGE_BITS};
 use crate::constants::NUM_FE_IN_EMULATED_POINT;
 use crate::cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance;
+use crate::cyclefold::gadgets::AllocatedCycleFoldInstance;
 use crate::gadgets::scalar_as_base;
 use crate::nebula::layer_2::utils::absorb_U;
+use crate::provider::PallasEngine;
 use crate::r1cs::RelaxedR1CSWitness;
 use crate::traits::commitment::CommitmentTrait;
+use crate::traits::AbsorbInROTrait;
+use crate::traits::ROCircuitTrait;
 use crate::traits::ROTrait;
 use crate::{
+  constants::{BN_N_LIMBS, NIO_CYCLE_FOLD},
   cyclefold::gadgets::emulated,
   errors::NovaError,
   nebula::{
@@ -24,12 +31,60 @@ use crate::{
 use crate::{CommitmentKey, R1CSWithArity};
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::Field;
+use std::marker::PhantomData;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
 use tracing_texray::TeXRayLayer;
 
 // Proving Engine
-type E = Bn256EngineIPA;
+type E = PallasEngine;
 type F = <E as Engine>::Scalar;
+
+#[test]
+fn test_folding_ivc_proofs() -> Result<(), NovaError> {
+  tracing_init();
+  tracing_texray::examine(tracing::info_span!("sim_orchestrator_node"))
+    .in_scope(sim_orchestrator_node)
+}
+
+// Simulate orchestrator node
+fn sim_orchestrator_node() -> Result<(), NovaError> {
+  let num_nodes = 10;
+  let circuit: PowCircuit<E> = PowCircuit::new();
+  let node_pp = PublicParams::<E>::setup(&circuit, &default_ck_hint(), &default_ck_hint());
+  let snarks = sim_node_nw(&node_pp, &circuit, num_nodes)?;
+  let on_pp = AggregationPublicParams::setup(node_pp);
+  let mut on_rs = AggregationRecursiveSNARK::new(&on_pp, &snarks[0])?;
+  for snark in snarks.iter() {
+    on_rs.prove_step(&on_pp, snark)?;
+  }
+  on_rs.verify(&on_pp)?;
+  Ok(())
+}
+
+// generate a collection of [`RecursiveSNARK`]'s simulating a node network producing [`RecursiveSNARK`]'s
+fn sim_node_nw(
+  pp: &PublicParams<E>,
+  step_circuit: &impl StepCircuit<F>,
+  num_nodes: usize,
+) -> Result<Vec<RecursiveSNARK<E>>, NovaError> {
+  let mut z0 = vec![F::from(42_u64)];
+  let mut snarks = Vec::with_capacity(num_nodes);
+  let mut node = || {
+    let mut rs = RecursiveSNARK::new(pp, step_circuit, &z0)?;
+    let mut IC_i = F::zero();
+    for _ in 0..3 {
+      rs.prove_step(pp, step_circuit, IC_i)?;
+      IC_i = rs.increment_commitment(pp, step_circuit);
+    }
+    z0 = rs.verify(pp, rs.num_steps(), &z0, IC_i)?;
+    snarks.push(rs);
+    Ok::<(), NovaError>(())
+  };
+  for _ in 0..num_nodes {
+    node()?;
+  }
+  Ok(snarks)
+}
 
 pub struct AggregationPublicParams<E>
 where
@@ -62,7 +117,6 @@ where
     let pp: PublicParams<E> =
       PublicParams::setup(&verifier_circuit, &*default_ck_hint(), &*default_ck_hint());
     let (circuit_shape_F, ck, digest_F) = pp_F.into_shape_ck_digest();
-
     Self {
       pp,
       circuit_shape_F,
@@ -139,19 +193,19 @@ where
       Some(U2.clone()),
       Some(E_new),
       Some(W_new),
-      Some(r_U_cyclefold),
+      Some(r_U_cyclefold.clone()),
       Some(U2_secondary.clone()),
     );
     let z0 = {
       let mut ro = <Dual<E> as Engine>::RO::new(
         pp.pp.ro_consts.clone(),
-        2 * NUM_FE_IN_EMULATED_POINT + 2, // U.comm_E + U.comm_W + U.X
+        (2 * NUM_FE_IN_EMULATED_POINT + 3) + (3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS), // (U.comm_E + U.comm_W + U.X + U.u) + U_cyclefold
       );
       absorb_U::<E>(&r_U, &mut ro);
+      r_U_cyclefold.absorb_in_ro(&mut ro);
       let hash_U = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
       vec![hash_U]
     };
-
     let mut IC_i = E::Scalar::ZERO;
     let mut rs = RecursiveSNARK::new(&pp.pp, &verifier_circuit, &z0)?;
     rs.prove_step(&pp.pp, &verifier_circuit, IC_i)?;
@@ -241,53 +295,6 @@ where
   }
 }
 
-#[test]
-fn test_folding_ivc_proofs() -> Result<(), NovaError> {
-  tracing_init();
-  tracing_texray::examine(tracing::info_span!("sim_orchestrator_node"))
-    .in_scope(sim_orchestrator_node)
-}
-
-// Simulate orchestrator node
-fn sim_orchestrator_node() -> Result<(), NovaError> {
-  let num_nodes = 10;
-  let circuit: PowCircuit<E> = PowCircuit::new();
-  let node_pp = PublicParams::<E>::setup(&circuit, &default_ck_hint(), &default_ck_hint());
-  let snarks = sim_node_nw(&node_pp, &circuit, num_nodes)?;
-  let on_pp = AggregationPublicParams::setup(node_pp);
-  let mut on_rs = AggregationRecursiveSNARK::new(&on_pp, &snarks[0])?;
-  for snark in snarks.iter() {
-    on_rs.prove_step(&on_pp, snark)?;
-  }
-  on_rs.verify(&on_pp)?;
-  Ok(())
-}
-
-// generate a collection of [`RecursiveSNARK`]'s simulating a node network producing [`RecursiveSNARK`]'s
-fn sim_node_nw(
-  pp: &PublicParams<E>,
-  step_circuit: &impl StepCircuit<F>,
-  num_nodes: usize,
-) -> Result<Vec<RecursiveSNARK<E>>, NovaError> {
-  let mut z0 = vec![F::from(42_u64)];
-  let mut snarks = Vec::with_capacity(num_nodes);
-  let mut node = || {
-    let mut rs = RecursiveSNARK::new(pp, step_circuit, &z0)?;
-    let mut IC_i = F::zero();
-    for _ in 0..3 {
-      rs.prove_step(pp, step_circuit, IC_i)?;
-      IC_i = rs.increment_commitment(pp, step_circuit);
-    }
-    z0 = rs.verify(pp, rs.num_steps(), &z0, IC_i)?;
-    snarks.push(rs);
-    Ok::<(), NovaError>(())
-  };
-  for _ in 0..num_nodes {
-    node()?;
-  }
-  Ok(snarks)
-}
-
 #[derive(Clone)]
 pub struct VerifierCircuit<E>
 where
@@ -318,18 +325,51 @@ where
     cs: &mut CS,
     z: &[AllocatedNum<E::Scalar>],
   ) -> Result<Vec<AllocatedNum<E::Scalar>>, bellpepper_core::SynthesisError> {
-    let (pp_digest, U1, U2, nifs_primary, E_new, W_new) =
+    let (pp_digest, U1, U2, E_new, W_new, U1_secondary, U2_secondary, nifs) =
       self.alloc_witness(cs.namespace(|| "alloc witness"))?;
-    let U = nifs_primary.verify(
-      cs.namespace(|| "nifs primary verify"),
+
+    // i/o hash check
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(
       self.ro_consts.clone(),
+      (2 * NUM_FE_IN_EMULATED_POINT + 3) + (3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS), // (U.W + U.comm_E + U.X + U.u) + U_cyclefold
+    );
+    U1.absorb_in_ro(cs.namespace(|| "absorb U"), &mut ro)?;
+    U1_secondary.absorb_in_ro(cs.namespace(|| "absorb U1_secondary"), &mut ro)?;
+    let hash_U_bits = ro.squeeze(cs.namespace(|| "hash_U bits"), NUM_CHALLENGE_BITS)?;
+    let hash_U = le_bits_to_num(cs.namespace(|| "hash_U"), &hash_U_bits)?;
+    let expected_hash_U = z[0].clone();
+    cs.enforce(
+      || "hash_U == z0",
+      |lc| lc + hash_U.get_variable(),
+      |lc| lc + CS::one(),
+      |lc| lc + expected_hash_U.get_variable(),
+    );
+
+    // Primary NIFS.V
+    let (U, U_secondary) = nifs.verify(
+      cs.namespace(|| "nifs"),
+      self.ro_consts.clone(),
+      self.params.limb_width,
+      self.params.n_limbs,
       &U1,
       &U2,
+      &U1_secondary,
+      &U2_secondary,
       &pp_digest,
       E_new,
       W_new,
     )?;
-    Ok(z.to_vec())
+
+    // output hash
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(
+      self.ro_consts.clone(),
+      2 * NUM_FE_IN_EMULATED_POINT + 3 + (3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS), // (U.W + U.comm_E + U.X + U.u) + U_cyclefold
+    );
+    U.absorb_in_ro(cs.namespace(|| "absorb folded U"), &mut ro)?;
+    U_secondary.absorb_in_ro(cs.namespace(|| "absorb folded U_secondary"), &mut ro)?;
+    let hash_U_bits = ro.squeeze(cs.namespace(|| "hash_folded_U bits"), NUM_CHALLENGE_BITS)?;
+    let hash_U = le_bits_to_num(cs.namespace(|| "hash_folded_U"), &hash_U_bits)?;
+    Ok(vec![hash_U])
   }
 
   fn non_deterministic_advice(&self) -> Vec<E::Scalar> {
@@ -375,15 +415,18 @@ where
       AllocatedNum<E::Scalar>,                               // pp_digest
       AllocatedEmulRelaxedR1CSInstance<Dual<E>>,             // U1
       AllocatedEmulRelaxedR1CSInstance<Dual<E>>,             // U2
-      PrimaryNIFSVerifierGadget<E>,                          // nifs_primary
       emulated::AllocatedEmulPoint<<Dual<E> as Engine>::GE>, // E_new
       emulated::AllocatedEmulPoint<<Dual<E> as Engine>::GE>, // W_new
+      AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>, // U1_secondary
+      AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>, // U2_secondary
+      NIFSVerifierGadget<E>,                                 // nifs
     ),
     SynthesisError,
   >
   where
     CS: ConstraintSystem<E::Scalar>,
   {
+    // Primary folding data
     let pp_digest = AllocatedNum::alloc(cs.namespace(|| "pp_digest"), || {
       Ok(self.pp_digest.unwrap_or(E::Scalar::ZERO))
     })?;
@@ -417,7 +460,82 @@ where
       self.params.limb_width,
       self.params.n_limbs,
     )?;
-    Ok((pp_digest, U1, U2, nifs_primary, E_new, W_new))
+
+    // First CycleFold data
+    let nifs_E1 = CycleFoldNIFSVerifierGadget::alloc(
+      cs.namespace(|| "nifs_E1"),
+      self.nifs.as_ref().map(|nifs| &nifs.nifs_E1),
+    )?;
+    let U1_secondary = AllocatedRelaxedR1CSInstance::alloc(
+      cs.namespace(|| "U1_secondary"),
+      self.U1_secondary.as_ref(),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    let l_u_cyclefold_E1 = AllocatedCycleFoldInstance::alloc(
+      cs.namespace(|| "l_u_cyclefold_E1"),
+      self.nifs.as_ref().map(|nifs| &nifs.l_u_cyclefold_E1),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+
+    // Second CycleFold data
+    let nifs_E2 = CycleFoldNIFSVerifierGadget::alloc(
+      cs.namespace(|| "nifs_E2"),
+      self.nifs.as_ref().map(|nifs| &nifs.nifs_E2),
+    )?;
+    let l_u_cyclefold_E2 = AllocatedCycleFoldInstance::alloc(
+      cs.namespace(|| "l_u_cyclefold_E2"),
+      self.nifs.as_ref().map(|nifs| &nifs.l_u_cyclefold_E2),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+
+    // Third CycleFold data
+    let nifs_W = CycleFoldNIFSVerifierGadget::alloc(
+      cs.namespace(|| "nifs_W"),
+      self.nifs.as_ref().map(|nifs| &nifs.nifs_W),
+    )?;
+    let l_u_cyclefold_W = AllocatedCycleFoldInstance::alloc(
+      cs.namespace(|| "l_u_cyclefold_W"),
+      self.nifs.as_ref().map(|nifs| &nifs.l_u_cyclefold_W),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+
+    // fourth CycleFold data
+    let U2_secondary = AllocatedRelaxedR1CSInstance::alloc(
+      cs.namespace(|| "U2_secondary"),
+      self.U2_secondary.as_ref(),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    let nifs_final_cyclefold = CycleFoldRelaxedNIFSVerifierGadget::alloc(
+      cs.namespace(|| "nifs_final_cyclefold"),
+      self.nifs.as_ref().map(|nifs| &nifs.nifs_final_cyclefold),
+    )?;
+
+    let nifs = NIFSVerifierGadget {
+      nifs_primary,
+      nifs_E1,
+      nifs_E2,
+      nifs_W,
+      nifs_final_cyclefold,
+      l_u_cyclefold_E1,
+      l_u_cyclefold_E2,
+      l_u_cyclefold_W,
+    };
+
+    Ok((
+      pp_digest,
+      U1,
+      U2,
+      E_new,
+      W_new,
+      U1_secondary,
+      U2_secondary,
+      nifs,
+    ))
   }
 }
 
