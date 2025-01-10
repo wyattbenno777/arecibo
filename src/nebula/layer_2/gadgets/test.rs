@@ -12,7 +12,6 @@ use crate::nebula::layer_2::utils::{absorb_U, absorb_U_bn};
 use crate::provider::PallasEngine;
 use crate::r1cs::RelaxedR1CSWitness;
 use crate::traits::commitment::CommitmentTrait;
-use crate::traits::AbsorbInROTrait;
 use crate::traits::ROCircuitTrait;
 use crate::traits::ROTrait;
 use crate::{
@@ -71,7 +70,7 @@ fn sim_node_nw(
   step_circuit: &impl StepCircuit<F>,
   num_nodes: usize,
 ) -> Result<Vec<RecursiveSNARK<E>>, NovaError> {
-  // Starting value for [`PowCircuit`]
+  // This is the initial input value for the [`PowCircuit`].
   let mut z0 = vec![F::from(42_u64)];
 
   // Network's output

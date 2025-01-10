@@ -1,5 +1,4 @@
 use super::{AllocatedPoint, BigNat};
-use crate::gadgets::alloc_zero;
 use crate::traits::commitment::CommitmentTrait;
 use crate::traits::ROCircuitTrait;
 use crate::{gadgets::f_to_nat, r1cs::RelaxedR1CSInstance, traits::Engine};
