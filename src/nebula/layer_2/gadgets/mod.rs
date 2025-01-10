@@ -8,16 +8,16 @@ use crate::traits::ROCircuitTrait;
 use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD},
   cyclefold::gadgets::AllocatedCycleFoldInstance,
-  gadgets::{AllocatedPoint, AllocatedRelaxedR1CSInstance},
+  gadgets::AllocatedPoint,
   traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
 };
-use bellpepper::gadgets::Assignment;
 use bellpepper_core::boolean::{AllocatedBit, Boolean};
 use bellpepper_core::num::AllocatedNum;
 use bellpepper_core::{ConstraintSystem, SynthesisError};
-use ff::Field;
 use itertools::Itertools;
+use r1cs::AllocatedRelaxedR1CSInstanceBn;
 
+mod r1cs;
 #[cfg(test)]
 mod test;
 
@@ -57,15 +57,15 @@ where
     n_limbs: usize,
     U1: &emulated::AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
     U2: &emulated::AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
-    U1_secondary: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
-    U2_secondary: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+    U1_secondary: &AllocatedRelaxedR1CSInstanceBn<Dual<E>, NIO_CYCLE_FOLD>,
+    U2_secondary: &AllocatedRelaxedR1CSInstanceBn<Dual<E>, NIO_CYCLE_FOLD>,
     pp_digest: &AllocatedNum<E::Scalar>,
     E_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
   ) -> Result<
     (
       emulated::AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
-      AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+      AllocatedRelaxedR1CSInstanceBn<Dual<E>, NIO_CYCLE_FOLD>,
     ),
     SynthesisError,
   >
@@ -205,15 +205,15 @@ where
     ro_consts: ROConstantsCircuit<Dual<E>>,
     limb_width: usize,
     n_limbs: usize,
-    U: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+    U: &AllocatedRelaxedR1CSInstanceBn<Dual<E>, NIO_CYCLE_FOLD>,
     u: &AllocatedCycleFoldInstance<Dual<E>>,
-  ) -> Result<AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>, SynthesisError>
+  ) -> Result<AllocatedRelaxedR1CSInstanceBn<Dual<E>, NIO_CYCLE_FOLD>, SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
   {
     let mut ro = <Dual<E> as Engine>::ROCircuit::new(
       ro_consts,
-      (3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS) + (3 + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (u) + T
+      (3 + 3 + BN_N_LIMBS + NIO_CYCLE_FOLD * BN_N_LIMBS) + (3 + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (u) + T
     );
     U.absorb_in_ro(
       cs.namespace(|| "absorb cyclefold running instance"),
@@ -234,18 +234,6 @@ where
     let rT = self.comm_T.scalar_mul(cs.namespace(|| "r * T"), &r_bits)?;
     let E_fold = U.E.add(cs.namespace(|| "self.E + r * T"), &rT)?;
 
-    // u_fold = u_r + r
-    let u_fold = AllocatedNum::alloc(cs.namespace(|| "u_fold"), || {
-      Ok(*U.u.get_value().get()? + r.get_value().get()?)
-    })?;
-    cs.enforce(
-      || "Check u_fold",
-      |lc| lc,
-      |lc| lc,
-      |lc| lc + u_fold.get_variable() - U.u.get_variable() - r.get_variable(),
-    );
-
-    // Fold the IO:
     // Analyze r into limbs
     let r_bn = BigNat::from_num(
       cs.namespace(|| "allocate r_bn"),
@@ -262,6 +250,13 @@ where
       n_limbs,
     )?;
 
+    // u_fold = u_r + r
+    let u_fold = U
+      .u
+      .add(&r_bn)?
+      .red_mod(cs.namespace(|| "reduce u_fold"), &m_bn)?;
+
+    // Fold the IO:
     let mut X_fold = vec![];
 
     // Calculate the folded io variables
@@ -275,7 +270,7 @@ where
       SynthesisError::IncompatibleLengthVector(format!("{} != {NIO_CYCLE_FOLD}", err.len()))
     })?;
 
-    Ok(AllocatedRelaxedR1CSInstance {
+    Ok(AllocatedRelaxedR1CSInstanceBn {
       W: W_fold,
       E: E_fold,
       u: u_fold,
@@ -316,15 +311,15 @@ where
     ro_consts: ROConstantsCircuit<Dual<E>>,
     limb_width: usize,
     n_limbs: usize,
-    U1: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
-    U2: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
-  ) -> Result<AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>, SynthesisError>
+    U1: &AllocatedRelaxedR1CSInstanceBn<Dual<E>, NIO_CYCLE_FOLD>,
+    U2: &AllocatedRelaxedR1CSInstanceBn<Dual<E>, NIO_CYCLE_FOLD>,
+  ) -> Result<AllocatedRelaxedR1CSInstanceBn<Dual<E>, NIO_CYCLE_FOLD>, SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
   {
     let mut ro = <Dual<E> as Engine>::ROCircuit::new(
       ro_consts,
-      2 * (3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // 2* (U) + T
+      2 * (3 + 3 + BN_N_LIMBS + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // 2* (U) + T
     );
     U1.absorb_in_ro(
       cs.namespace(|| "absorb cyclefold running instance"),
@@ -369,9 +364,13 @@ where
       .scalar_mul(cs.namespace(|| "r^2 * U2.E"), &r_squared_bits)?;
     let E_fold = E_fold_term_1.add(cs.namespace(|| "E_fold_term_1 + r^2 * U2.E"), &r2E)?;
 
-    // u_fold = u_r + r * u2
-    let term_2 = U2.u.mul(cs.namespace(|| "r * u2"), &r)?;
-    let u_fold = U1.u.add(cs.namespace(|| "u_r + r * u2"), &term_2)?;
+    // u_fold = U.u + r * u.u
+    let u_fold = {
+      let (_, r_u2) = U2.u.mult_mod(cs.namespace(|| "r * u2"), &r_bn, &m_bn)?;
+      U1.u
+        .add(&r_u2)?
+        .red_mod(cs.namespace(|| "reduce u_fold"), &m_bn)?
+    };
 
     // Fold the IO:
     let mut X_fold = vec![];
@@ -387,7 +386,7 @@ where
       SynthesisError::IncompatibleLengthVector(format!("{} != {NIO_CYCLE_FOLD}", err.len()))
     })?;
 
-    Ok(AllocatedRelaxedR1CSInstance {
+    Ok(AllocatedRelaxedR1CSInstanceBn {
       W: W_fold,
       E: E_fold,
       u: u_fold,

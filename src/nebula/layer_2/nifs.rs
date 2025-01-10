@@ -19,7 +19,7 @@ use crate::{
 use ff::Field;
 use serde::{Deserialize, Serialize};
 
-use super::utils::{absorb_U, scalar_to_bools};
+use super::utils::{absorb_U, absorb_U_bn, scalar_to_bools};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -342,9 +342,9 @@ where
   > {
     let mut ro = <Dual<E> as Engine>::RO::new(
       ro_consts.clone(),
-      45, // (3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS) + (3 + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (u) + T
+      (3 + 3 + BN_N_LIMBS + NIO_CYCLE_FOLD * BN_N_LIMBS) + (3 + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (u) + T
     );
-    U1.absorb_in_ro(&mut ro);
+    absorb_U_bn(U1, &mut ro);
     absorb_cyclefold_r1cs(U2, &mut ro);
     let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2)?;
     comm_T.absorb_in_ro(&mut ro);
@@ -363,9 +363,9 @@ where
   ) -> Result<RelaxedR1CSInstance<Dual<E>>, NovaError> {
     let mut ro = <Dual<E> as Engine>::RO::new(
       ro_consts.clone(),
-      45, // (3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS) + (3 + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (u) + T
+      (3 + 3 + BN_N_LIMBS + NIO_CYCLE_FOLD * BN_N_LIMBS) + (3 + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (u) + T
     );
-    U1.absorb_in_ro(&mut ro);
+    absorb_U_bn(U1, &mut ro);
     absorb_cyclefold_r1cs(U2, &mut ro);
     self.comm_T.absorb_in_ro(&mut ro);
     let r = ro.squeeze(NUM_CHALLENGE_BITS);
@@ -408,10 +408,10 @@ where
   > {
     let mut ro = <Dual<E> as Engine>::RO::new(
       ro_consts.clone(),
-      2 * (3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (U) + T
+      2 * (3 + 3 + BN_N_LIMBS + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (U) + T
     );
-    U1.absorb_in_ro(&mut ro);
-    U2.absorb_in_ro(&mut ro);
+    absorb_U_bn(U1, &mut ro);
+    absorb_U_bn(U2, &mut ro);
     let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2)?;
     comm_T.absorb_in_ro(&mut ro);
     let r = ro.squeeze(NUM_CHALLENGE_BITS);
@@ -429,10 +429,10 @@ where
   ) -> Result<RelaxedR1CSInstance<Dual<E>>, NovaError> {
     let mut ro = <Dual<E> as Engine>::RO::new(
       ro_consts.clone(),
-      2 * (3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (U) + T
+      2 * (3 + 3 + BN_N_LIMBS + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (U) + T
     );
-    U1.absorb_in_ro(&mut ro);
-    U2.absorb_in_ro(&mut ro);
+    absorb_U_bn(U1, &mut ro);
+    absorb_U_bn(U2, &mut ro);
     self.comm_T.absorb_in_ro(&mut ro);
     let r = ro.squeeze(NUM_CHALLENGE_BITS);
     let U = U1.fold_relaxed(U2, &self.comm_T, &r);

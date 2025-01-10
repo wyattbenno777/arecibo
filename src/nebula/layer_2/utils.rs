@@ -1,10 +1,14 @@
+use crate::gadgets::scalar_as_base;
+use crate::traits::AbsorbInROTrait;
 use crate::{
-  constants::NUM_CHALLENGE_BITS,
+  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_CHALLENGE_BITS},
   cyclefold::util::absorb_primary_commitment,
+  gadgets::{f_to_nat, nat_to_limbs},
   r1cs::RelaxedR1CSInstance,
   traits::{CurveCycleEquipped, Dual, Engine, ROTrait},
   Commitment,
 };
+use ff::Field;
 use ff::PrimeFieldBits;
 use serde::{Deserialize, Serialize};
 
@@ -46,4 +50,25 @@ where
     .take(NUM_CHALLENGE_BITS)
     .collect::<Option<Vec<_>>>()
     .map(|v| v.try_into().unwrap())
+}
+
+pub(crate) fn absorb_U_bn<E1>(U: &RelaxedR1CSInstance<E1>, ro: &mut E1::RO)
+where
+  E1: Engine,
+{
+  U.comm_W.absorb_in_ro(ro);
+  U.comm_E.absorb_in_ro(ro);
+
+  let u_limbs: Vec<E1::Scalar> = nat_to_limbs(&f_to_nat(&U.u), BN_LIMB_WIDTH, BN_N_LIMBS).unwrap();
+  for limb in u_limbs {
+    ro.absorb(scalar_as_base::<E1>(limb));
+  }
+
+  // absorb each element of self.X in bignum format
+  for x in &U.X {
+    let limbs: Vec<E1::Scalar> = nat_to_limbs(&f_to_nat(x), BN_LIMB_WIDTH, BN_N_LIMBS).unwrap();
+    for limb in limbs {
+      ro.absorb(scalar_as_base::<E1>(limb));
+    }
+  }
 }
