@@ -8,9 +8,10 @@ use crate::{
   traits::{CurveCycleEquipped, Dual, Engine, ROTrait},
   Commitment,
 };
-use ff::Field;
 use ff::PrimeFieldBits;
 use serde::{Deserialize, Serialize};
+
+use super::nifs::NIFS;
 
 pub(crate) fn absorb_U<E1>(U: &RelaxedR1CSInstance<E1>, ro: &mut impl ROTrait<E1::Scalar, E1::Base>)
 where
@@ -19,7 +20,6 @@ where
   absorb_primary_commitment::<E1, Dual<E1>>(&U.comm_W, ro);
   absorb_primary_commitment::<E1, Dual<E1>>(&U.comm_E, ro);
   ro.absorb(U.u);
-
   for x in &U.X {
     ro.absorb(*x);
   }
@@ -58,7 +58,6 @@ where
 {
   U.comm_W.absorb_in_ro(ro);
   U.comm_E.absorb_in_ro(ro);
-
   let u_limbs: Vec<E1::Scalar> = nat_to_limbs(&f_to_nat(&U.u), BN_LIMB_WIDTH, BN_N_LIMBS).unwrap();
   for limb in u_limbs {
     ro.absorb(scalar_as_base::<E1>(limb));
@@ -69,6 +68,48 @@ where
     let limbs: Vec<E1::Scalar> = nat_to_limbs(&f_to_nat(x), BN_LIMB_WIDTH, BN_N_LIMBS).unwrap();
     for limb in limbs {
       ro.absorb(scalar_as_base::<E1>(limb));
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct Layer2FoldingData<E>
+where
+  E: CurveCycleEquipped,
+{
+  pub(crate) pp_digest: Option<E::Scalar>,
+  pub(crate) nifs: Option<NIFS<E>>,
+  pub(crate) U1: Option<RelaxedR1CSInstance<E>>,
+  pub(crate) U2: Option<RelaxedR1CSInstance<E>>,
+  pub(crate) E_new: Option<Commitment<E>>,
+  pub(crate) W_new: Option<Commitment<E>>,
+  pub(crate) U1_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
+  pub(crate) U2_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
+}
+
+impl<E> Layer2FoldingData<E>
+where
+  E: CurveCycleEquipped,
+{
+  pub fn new(
+    pp_digest: Option<E::Scalar>,
+    nifs: Option<NIFS<E>>,
+    U1: Option<RelaxedR1CSInstance<E>>,
+    U2: Option<RelaxedR1CSInstance<E>>,
+    E_new: Option<Commitment<E>>,
+    W_new: Option<Commitment<E>>,
+    U1_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
+    U2_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
+  ) -> Self {
+    Self {
+      pp_digest,
+      nifs,
+      U1,
+      U2,
+      E_new,
+      W_new,
+      U1_secondary,
+      U2_secondary,
     }
   }
 }

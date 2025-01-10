@@ -8,7 +8,7 @@ use crate::constants::NUM_FE_IN_EMULATED_POINT;
 use crate::cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance;
 use crate::cyclefold::gadgets::AllocatedCycleFoldInstance;
 use crate::gadgets::scalar_as_base;
-use crate::nebula::layer_2::utils::{absorb_U, absorb_U_bn};
+use crate::nebula::layer_2::utils::{absorb_U, absorb_U_bn, Layer2FoldingData};
 use crate::provider::PallasEngine;
 use crate::r1cs::RelaxedR1CSWitness;
 use crate::traits::commitment::CommitmentTrait;
@@ -25,7 +25,6 @@ use crate::{
   },
   r1cs::RelaxedR1CSInstance,
   traits::{snark::default_ck_hint, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
-  Commitment,
 };
 use crate::{CommitmentKey, R1CSWithArity};
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
@@ -116,13 +115,6 @@ where
       pp_F.augmented_circuit_params,
       pp_F.ro_consts_circuit.clone(),
       None,
-      None,
-      None,
-      None,
-      None,
-      None,
-      None,
-      None,
     );
     let pp: PublicParams<E> =
       PublicParams::setup(&verifier_circuit, &*default_ck_hint(), &*default_ck_hint());
@@ -194,9 +186,7 @@ where
     )?;
     let E_new = new_r_U.comm_E;
     let W_new = new_r_U.comm_W;
-    let verifier_circuit: VerifierCircuit<E> = VerifierCircuit::new(
-      pp.augmented_circuit_params(),
-      pp.pp.ro_consts_circuit.clone(),
+    let folding_data = Layer2FoldingData::new(
       Some(pp.digest_F),
       Some(nifs),
       Some(r_U.clone()),
@@ -205,6 +195,11 @@ where
       Some(W_new),
       Some(r_U_cyclefold.clone()),
       Some(U2_secondary.clone()),
+    );
+    let verifier_circuit: VerifierCircuit<E> = VerifierCircuit::new(
+      pp.augmented_circuit_params(),
+      pp.pp.ro_consts_circuit.clone(),
+      Some(folding_data),
     );
     let z0 = {
       let mut ro = <Dual<E> as Engine>::RO::new(
@@ -258,9 +253,7 @@ where
     )?;
     let E_new = new_r_U.comm_E;
     let W_new = new_r_U.comm_W;
-    let verifier_circuit: VerifierCircuit<E> = VerifierCircuit::new(
-      pp.augmented_circuit_params(),
-      pp.pp.ro_consts_circuit.clone(),
+    let folding_data = Layer2FoldingData::new(
       Some(pp.digest_F),
       Some(nifs),
       Some(self.r_U.clone()),
@@ -269,6 +262,11 @@ where
       Some(W_new),
       Some(self.r_U_cyclefold.clone()),
       Some(U2_secondary.clone()),
+    );
+    let verifier_circuit: VerifierCircuit<E> = VerifierCircuit::new(
+      pp.augmented_circuit_params(),
+      pp.pp.ro_consts_circuit.clone(),
+      Some(folding_data),
     );
     self.rs.prove_step(&pp.pp, &verifier_circuit, self.IC_i)?;
     self.IC_i = self.rs.increment_commitment(&pp.pp, &verifier_circuit);
@@ -310,14 +308,7 @@ pub struct VerifierCircuit<E>
 where
   E: CurveCycleEquipped,
 {
-  pp_digest: Option<E::Scalar>,
-  nifs: Option<NIFS<E>>,
-  U1: Option<RelaxedR1CSInstance<E>>,
-  U2: Option<RelaxedR1CSInstance<E>>,
-  E_new: Option<Commitment<E>>,
-  W_new: Option<Commitment<E>>,
-  U1_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
-  U2_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
+  folding_data: Option<Layer2FoldingData<E>>,
   params: AugmentedCircuitParams,
   ro_consts: ROConstantsCircuit<Dual<E>>,
 }
@@ -336,7 +327,11 @@ where
     z: &[AllocatedNum<E::Scalar>],
   ) -> Result<Vec<AllocatedNum<E::Scalar>>, bellpepper_core::SynthesisError> {
     let (pp_digest, U1, U2, E_new, W_new, U1_secondary, U2_secondary, nifs) =
-      self.alloc_witness(cs.namespace(|| "alloc witness"))?;
+      VerifierCircuit::alloc_folding_data(
+        cs.namespace(|| "alloc folding data"),
+        &self.params,
+        &self.folding_data,
+      )?;
 
     // i/o hash check
     let mut ro = <Dual<E> as Engine>::ROCircuit::new(
@@ -394,32 +389,19 @@ where
   fn new(
     params: AugmentedCircuitParams,
     ro_consts: ROConstantsCircuit<Dual<E>>,
-    pp_digest: Option<E::Scalar>,
-    nifs: Option<NIFS<E>>,
-    U1: Option<RelaxedR1CSInstance<E>>,
-    U2: Option<RelaxedR1CSInstance<E>>,
-    E_new: Option<Commitment<E>>,
-    W_new: Option<Commitment<E>>,
-    U1_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
-    U2_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
+    folding_data: Option<Layer2FoldingData<E>>,
   ) -> Self {
     Self {
-      pp_digest,
-      nifs,
-      U1,
-      U2,
-      E_new,
-      W_new,
-      U1_secondary,
-      U2_secondary,
       params,
       ro_consts,
+      folding_data,
     }
   }
 
-  fn alloc_witness<CS>(
-    &self,
+  fn alloc_folding_data<CS>(
     mut cs: CS,
+    params: &AugmentedCircuitParams,
+    folding_data: &Option<Layer2FoldingData<E>>,
   ) -> Result<
     (
       AllocatedNum<E::Scalar>,                                 // pp_digest
@@ -438,93 +420,131 @@ where
   {
     // Primary folding data
     let pp_digest = AllocatedNum::alloc(cs.namespace(|| "pp_digest"), || {
-      Ok(self.pp_digest.unwrap_or(E::Scalar::ZERO))
+      Ok(
+        folding_data
+          .as_ref()
+          .and_then(|data| data.pp_digest)
+          .map_or(E::Scalar::ZERO, |pp_digest| pp_digest),
+      )
     })?;
     let U1 = AllocatedEmulRelaxedR1CSInstance::alloc(
       cs.namespace(|| "allocate U"),
-      self.U1.as_ref(),
-      self.params.limb_width,
-      self.params.n_limbs,
+      folding_data.as_ref().and_then(|data| data.U1.as_ref()),
+      params.limb_width,
+      params.n_limbs,
     )?;
     let U2 = AllocatedEmulRelaxedR1CSInstance::alloc(
       cs.namespace(|| "allocate U"),
-      self.U2.as_ref(),
-      self.params.limb_width,
-      self.params.n_limbs,
+      folding_data.as_ref().and_then(|data| data.U2.as_ref()),
+      params.limb_width,
+      params.n_limbs,
     )?;
     let nifs_primary = PrimaryNIFSVerifierGadget::alloc(
       cs.namespace(|| "primary_nifs"),
-      self.nifs.as_ref().map(|nifs| &nifs.nifs_primary),
-      self.params.limb_width,
-      self.params.n_limbs,
+      folding_data
+        .as_ref()
+        .and_then(|data| data.nifs.as_ref())
+        .map(|nifs| &nifs.nifs_primary),
+      params.limb_width,
+      params.n_limbs,
     )?;
     let E_new = emulated::AllocatedEmulPoint::alloc(
       cs.namespace(|| "E_new"),
-      self.E_new.map(|E_new| E_new.to_coordinates()),
-      self.params.limb_width,
-      self.params.n_limbs,
+      folding_data
+        .as_ref()
+        .and_then(|data| data.E_new)
+        .map(|E_new| E_new.to_coordinates()),
+      params.limb_width,
+      params.n_limbs,
     )?;
     let W_new = emulated::AllocatedEmulPoint::alloc(
       cs.namespace(|| "W_new"),
-      self.W_new.map(|W_new| W_new.to_coordinates()),
-      self.params.limb_width,
-      self.params.n_limbs,
+      folding_data
+        .as_ref()
+        .and_then(|data| data.W_new)
+        .map(|W_new| W_new.to_coordinates()),
+      params.limb_width,
+      params.n_limbs,
     )?;
 
     // First CycleFold data
     let nifs_E1 = CycleFoldNIFSVerifierGadget::alloc(
       cs.namespace(|| "nifs_E1"),
-      self.nifs.as_ref().map(|nifs| &nifs.nifs_E1),
+      folding_data
+        .as_ref()
+        .and_then(|data| data.nifs.as_ref())
+        .map(|nifs| &nifs.nifs_E1),
     )?;
     let U1_secondary = AllocatedRelaxedR1CSInstanceBn::alloc(
       cs.namespace(|| "U1_secondary"),
-      self.U1_secondary.as_ref(),
-      self.params.limb_width,
-      self.params.n_limbs,
+      folding_data
+        .as_ref()
+        .and_then(|data| data.U1_secondary.as_ref()),
+      params.limb_width,
+      params.n_limbs,
     )?;
     let l_u_cyclefold_E1 = AllocatedCycleFoldInstance::alloc(
       cs.namespace(|| "l_u_cyclefold_E1"),
-      self.nifs.as_ref().map(|nifs| &nifs.l_u_cyclefold_E1),
-      self.params.limb_width,
-      self.params.n_limbs,
+      folding_data
+        .as_ref()
+        .and_then(|data| data.nifs.as_ref())
+        .map(|nifs| &nifs.l_u_cyclefold_E1),
+      params.limb_width,
+      params.n_limbs,
     )?;
 
     // Second CycleFold data
     let nifs_E2 = CycleFoldNIFSVerifierGadget::alloc(
       cs.namespace(|| "nifs_E2"),
-      self.nifs.as_ref().map(|nifs| &nifs.nifs_E2),
+      folding_data
+        .as_ref()
+        .and_then(|data| data.nifs.as_ref())
+        .map(|nifs| &nifs.nifs_E2),
     )?;
     let l_u_cyclefold_E2 = AllocatedCycleFoldInstance::alloc(
       cs.namespace(|| "l_u_cyclefold_E2"),
-      self.nifs.as_ref().map(|nifs| &nifs.l_u_cyclefold_E2),
-      self.params.limb_width,
-      self.params.n_limbs,
+      folding_data
+        .as_ref()
+        .and_then(|data| data.nifs.as_ref())
+        .map(|nifs| &nifs.l_u_cyclefold_E2),
+      params.limb_width,
+      params.n_limbs,
     )?;
 
     // Third CycleFold data
     let nifs_W = CycleFoldNIFSVerifierGadget::alloc(
       cs.namespace(|| "nifs_W"),
-      self.nifs.as_ref().map(|nifs| &nifs.nifs_W),
+      folding_data
+        .as_ref()
+        .and_then(|data| data.nifs.as_ref())
+        .map(|nifs| &nifs.nifs_W),
     )?;
     let l_u_cyclefold_W = AllocatedCycleFoldInstance::alloc(
       cs.namespace(|| "l_u_cyclefold_W"),
-      self.nifs.as_ref().map(|nifs| &nifs.l_u_cyclefold_W),
-      self.params.limb_width,
-      self.params.n_limbs,
+      folding_data
+        .as_ref()
+        .and_then(|data| data.nifs.as_ref())
+        .map(|nifs| &nifs.l_u_cyclefold_W),
+      params.limb_width,
+      params.n_limbs,
     )?;
 
     // fourth CycleFold data
     let U2_secondary = AllocatedRelaxedR1CSInstanceBn::alloc(
       cs.namespace(|| "U2_secondary"),
-      self.U2_secondary.as_ref(),
-      self.params.limb_width,
-      self.params.n_limbs,
+      folding_data
+        .as_ref()
+        .and_then(|data| data.U2_secondary.as_ref()),
+      params.limb_width,
+      params.n_limbs,
     )?;
     let nifs_final_cyclefold = CycleFoldRelaxedNIFSVerifierGadget::alloc(
       cs.namespace(|| "nifs_final_cyclefold"),
-      self.nifs.as_ref().map(|nifs| &nifs.nifs_final_cyclefold),
+      folding_data
+        .as_ref()
+        .and_then(|data| data.nifs.as_ref())
+        .map(|nifs| &nifs.nifs_final_cyclefold),
     )?;
-
     let nifs = NIFSVerifierGadget {
       nifs_primary,
       nifs_E1,
@@ -535,7 +555,6 @@ where
       l_u_cyclefold_E2,
       l_u_cyclefold_W,
     };
-
     Ok((
       pp_digest,
       U1,
