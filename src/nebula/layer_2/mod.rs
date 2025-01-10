@@ -2,7 +2,8 @@
 
 pub mod aggregation;
 pub mod sharding;
+pub mod traits;
 
 mod gadgets;
 mod nifs;
-mod utils;
+pub(crate) mod utils;

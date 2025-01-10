@@ -115,6 +115,7 @@ where
       pp_F.augmented_circuit_params,
       pp_F.ro_consts_circuit.clone(),
       None,
+      None,
     );
     let pp: PublicParams<E> =
       PublicParams::setup(&verifier_circuit, &*default_ck_hint(), &*default_ck_hint());
@@ -193,13 +194,13 @@ where
       Some(U2.clone()),
       Some(E_new),
       Some(W_new),
-      Some(r_U_cyclefold.clone()),
       Some(U2_secondary.clone()),
     );
     let verifier_circuit: VerifierCircuit<E> = VerifierCircuit::new(
       pp.augmented_circuit_params(),
       pp.pp.ro_consts_circuit.clone(),
       Some(folding_data),
+      Some(r_U_cyclefold.clone()),
     );
     let z0 = {
       let mut ro = <Dual<E> as Engine>::RO::new(
@@ -260,13 +261,13 @@ where
       Some(U2.clone()),
       Some(E_new),
       Some(W_new),
-      Some(self.r_U_cyclefold.clone()),
       Some(U2_secondary.clone()),
     );
     let verifier_circuit: VerifierCircuit<E> = VerifierCircuit::new(
       pp.augmented_circuit_params(),
       pp.pp.ro_consts_circuit.clone(),
       Some(folding_data),
+      Some(self.r_U_cyclefold.clone()),
     );
     self.rs.prove_step(&pp.pp, &verifier_circuit, self.IC_i)?;
     self.IC_i = self.rs.increment_commitment(&pp.pp, &verifier_circuit);
@@ -309,6 +310,7 @@ where
   E: CurveCycleEquipped,
 {
   folding_data: Option<Layer2FoldingData<E>>,
+  U1_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
   params: AugmentedCircuitParams,
   ro_consts: ROConstantsCircuit<Dual<E>>,
 }
@@ -326,7 +328,8 @@ where
     cs: &mut CS,
     z: &[AllocatedNum<E::Scalar>],
   ) -> Result<Vec<AllocatedNum<E::Scalar>>, bellpepper_core::SynthesisError> {
-    let (pp_digest, U1, U2, E_new, W_new, U1_secondary, U2_secondary, nifs) =
+    let U1_secondary = self.alloc_cyclefold_running_instance(cs.namespace(|| "U1_secondary"))?;
+    let (pp_digest, U1, U2, E_new, W_new, U2_secondary, nifs) =
       VerifierCircuit::alloc_folding_data(
         cs.namespace(|| "alloc folding data"),
         &self.params,
@@ -390,14 +393,30 @@ where
     params: AugmentedCircuitParams,
     ro_consts: ROConstantsCircuit<Dual<E>>,
     folding_data: Option<Layer2FoldingData<E>>,
+    U1_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
   ) -> Self {
     Self {
       params,
       ro_consts,
       folding_data,
+      U1_secondary,
     }
   }
 
+  fn alloc_cyclefold_running_instance<CS>(
+    &self,
+    mut cs: CS,
+  ) -> Result<AllocatedRelaxedR1CSInstanceBn<Dual<E>, NIO_CYCLE_FOLD>, SynthesisError>
+  where
+    CS: ConstraintSystem<E::Scalar>,
+  {
+    AllocatedRelaxedR1CSInstanceBn::alloc(
+      cs.namespace(|| "U1_secondary"),
+      self.U1_secondary.as_ref(),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )
+  }
   fn alloc_folding_data<CS>(
     mut cs: CS,
     params: &AugmentedCircuitParams,
@@ -409,7 +428,6 @@ where
       AllocatedEmulRelaxedR1CSInstance<Dual<E>>,               // U2
       emulated::AllocatedEmulPoint<<Dual<E> as Engine>::GE>,   // E_new
       emulated::AllocatedEmulPoint<<Dual<E> as Engine>::GE>,   // W_new
-      AllocatedRelaxedR1CSInstanceBn<Dual<E>, NIO_CYCLE_FOLD>, // U1_secondary
       AllocatedRelaxedR1CSInstanceBn<Dual<E>, NIO_CYCLE_FOLD>, // U2_secondary
       NIFSVerifierGadget<E>,                                   // nifs
     ),
@@ -474,14 +492,6 @@ where
         .as_ref()
         .and_then(|data| data.nifs.as_ref())
         .map(|nifs| &nifs.nifs_E1),
-    )?;
-    let U1_secondary = AllocatedRelaxedR1CSInstanceBn::alloc(
-      cs.namespace(|| "U1_secondary"),
-      folding_data
-        .as_ref()
-        .and_then(|data| data.U1_secondary.as_ref()),
-      params.limb_width,
-      params.n_limbs,
     )?;
     let l_u_cyclefold_E1 = AllocatedCycleFoldInstance::alloc(
       cs.namespace(|| "l_u_cyclefold_E1"),
@@ -555,16 +565,7 @@ where
       l_u_cyclefold_E2,
       l_u_cyclefold_W,
     };
-    Ok((
-      pp_digest,
-      U1,
-      U2,
-      E_new,
-      W_new,
-      U1_secondary,
-      U2_secondary,
-      nifs,
-    ))
+    Ok((pp_digest, U1, U2, E_new, W_new, U2_secondary, nifs))
   }
 }
 

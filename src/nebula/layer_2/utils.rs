@@ -83,7 +83,6 @@ where
   pub(crate) U2: Option<RelaxedR1CSInstance<E>>,
   pub(crate) E_new: Option<Commitment<E>>,
   pub(crate) W_new: Option<Commitment<E>>,
-  pub(crate) U1_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
   pub(crate) U2_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
 }
 
@@ -98,7 +97,6 @@ where
     U2: Option<RelaxedR1CSInstance<E>>,
     E_new: Option<Commitment<E>>,
     W_new: Option<Commitment<E>>,
-    U1_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
     U2_secondary: Option<RelaxedR1CSInstance<Dual<E>>>,
   ) -> Self {
     Self {
@@ -108,7 +106,6 @@ where
       U2,
       E_new,
       W_new,
-      U1_secondary,
       U2_secondary,
     }
   }

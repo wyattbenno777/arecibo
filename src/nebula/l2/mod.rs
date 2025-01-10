@@ -72,7 +72,7 @@ where
     PP1: Layer1PP<E>,
   {
     let (pp_F, pp_ops, pp_scan) = node_pp.into_parts();
-    let params = pp_F.augmented_circuit_params.clone();
+    let params = pp_F.augmented_circuit_params;
     let final_circuit = FinalCircuit::<E>::new(&params, pp_F.ro_consts_circuit.clone(), None);
     let (circuit_shape_F, ck_F, digest_F) = pp_F.into_shape_ck_digest();
     let (circuit_shape_ops, ck_ops, digest_ops) = pp_ops.into_shape_ck_digest();
@@ -89,7 +89,6 @@ where
       }
       ck
     };
-
     let pp = PublicParams::setup(&final_circuit, &*default_ck_hint(), &*default_ck_hint());
     Self {
       pp,

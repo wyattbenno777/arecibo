@@ -17,7 +17,7 @@ use bellpepper_core::{ConstraintSystem, SynthesisError};
 use itertools::Itertools;
 use r1cs::AllocatedRelaxedR1CSInstanceBn;
 
-mod r1cs;
+pub mod r1cs;
 #[cfg(test)]
 mod test;
 
