@@ -394,19 +394,3 @@ where
     })
   }
 }
-
-fn scalar_to_bits<E: Engine, CS: ConstraintSystem<E::Scalar>>(
-  mut cs: CS,
-  scalar: &AllocatedNum<E::Scalar>,
-) -> Result<Vec<AllocatedBit>, SynthesisError> {
-  Ok(
-    scalar
-      .to_bits_le_strict(cs.namespace(|| "poseidon hash to boolean"))?
-      .iter()
-      .map(|boolean| match boolean {
-        Boolean::Is(ref x) => x.clone(),
-        _ => panic!("Wrong type of input. We should have never reached there"),
-      })
-      .collect::<Vec<AllocatedBit>>(),
-  )
-}

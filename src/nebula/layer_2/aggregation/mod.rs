@@ -50,6 +50,9 @@ where
     let aug_params = pp_F.augmented_circuit_params;
     let ro_consts = pp_F.ro_consts_circuit.clone();
 
+    // Get Layer 1 circuit shapes, commitment keys and pp.digests.
+    // We need circuit shapes to and commitment keys to construct the default R1CS instance's and witness's.
+    // And we use the digests in out NIFS.
     let (circuit_shape_F, ck_F, digest_F) = pp_F.into_shape_ck_digest();
     let (circuit_shape_ops, ck_ops, digest_ops) = pp_ops.into_shape_ck_digest();
     let (circuit_shape_scan, ck_scan, digest_scan) = pp_scan.into_shape_ck_digest();
