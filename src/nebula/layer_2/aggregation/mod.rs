@@ -23,7 +23,7 @@ use verifier_circuit::VerifierCircuit;
 
 use super::nifs::NIFS;
 use super::utils::Layer2FoldingData;
-use crate::nebula::traits::{Layer1PP, Layer1RSTrait};
+use crate::nebula::traits::{Layer1PPTrait, Layer1RSTrait};
 
 mod verifier_circuit;
 
@@ -50,7 +50,7 @@ where
 {
   /// Produce the setup material for the Aggregation layer
   #[tracing::instrument(level = "info", name = "AggregationPublicParams::setup", skip_all)]
-  pub fn setup(node_pp: impl Layer1PP<E>) -> Self {
+  pub fn setup(node_pp: impl Layer1PPTrait<E>) -> Self {
     // Get already setup public params from layer 1
     let (pp_F, pp_ops, pp_scan) = node_pp.into_parts();
 
@@ -475,7 +475,7 @@ where
 
 #[cfg(test)]
 mod test {
-  use super::{AggregationPublicParams, AggregationRecursiveSNARK, Layer1PP, Layer1RSTrait};
+  use super::{AggregationPublicParams, AggregationRecursiveSNARK, Layer1PPTrait, Layer1RSTrait};
   use crate::nebula::audit_rs::{AuditPublicParams, AuditRecursiveSNARK, AuditStepCircuit};
   use crate::nebula::rs::{PublicParams, RecursiveSNARK};
   use crate::traits::snark::default_ck_hint;
@@ -515,7 +515,7 @@ mod test {
     pp3: AuditPublicParams<E1>,
   }
 
-  impl Layer1PP<E1> for NodePP {
+  impl Layer1PPTrait<E1> for NodePP {
     fn into_parts(self) -> (PublicParams<E1>, PublicParams<E1>, AuditPublicParams<E1>) {
       (self.pp1, self.pp2, self.pp3)
     }

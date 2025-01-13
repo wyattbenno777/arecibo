@@ -24,7 +24,7 @@ where
 }
 
 /// Defines how a Layer 1 Nebula PublicParams should be structured
-pub trait Layer1PP<E: CurveCycleEquipped> {
+pub trait Layer1PPTrait<E: CurveCycleEquipped> {
   /// Splits the PublicParams into three parts (F, ops, scan)
   fn into_parts(self) -> (PublicParams<E>, PublicParams<E>, AuditPublicParams<E>);
 }
