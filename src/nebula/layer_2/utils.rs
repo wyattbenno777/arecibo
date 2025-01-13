@@ -33,12 +33,6 @@ pub(crate) struct RelaxedFoldingData<E: Engine> {
   pub T: Commitment<E>,
 }
 
-impl<E: Engine> RelaxedFoldingData<E> {
-  pub fn new(U1: RelaxedR1CSInstance<E>, U2: RelaxedR1CSInstance<E>, T: Commitment<E>) -> Self {
-    Self { U1, U2, T }
-  }
-}
-
 pub fn scalar_to_bools<E>(scalar: E::Scalar) -> Option<[bool; NUM_CHALLENGE_BITS]>
 where
   E: Engine,

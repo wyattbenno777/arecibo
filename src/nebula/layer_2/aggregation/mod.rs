@@ -22,8 +22,8 @@ use serde::{Deserialize, Serialize};
 use verifier_circuit::VerifierCircuit;
 
 use super::nifs::NIFS;
-use super::traits::{Layer1PP, Layer1RSTrait};
 use super::utils::Layer2FoldingData;
+use crate::nebula::traits::{Layer1PP, Layer1RSTrait};
 
 mod verifier_circuit;
 

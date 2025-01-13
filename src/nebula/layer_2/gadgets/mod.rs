@@ -11,7 +11,6 @@ use crate::{
   gadgets::AllocatedPoint,
   traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
 };
-use bellpepper_core::boolean::{AllocatedBit, Boolean};
 use bellpepper_core::num::AllocatedNum;
 use bellpepper_core::{ConstraintSystem, SynthesisError};
 use itertools::Itertools;
