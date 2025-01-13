@@ -1,5 +1,4 @@
 //! CycleFold for Nova
-#![allow(clippy::upper_case_acronyms)]
 use crate::bellpepper::r1cs::NovaWitness;
 use crate::bellpepper::solver::SatisfyingAssignment;
 use crate::constants::NUM_CHALLENGE_BITS;

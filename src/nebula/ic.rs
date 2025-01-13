@@ -41,7 +41,6 @@ where
   ) -> E1::Scalar {
     let comm_w_input = E1::CE::commit(ck, &w_input);
     let mut ro = <Dual<E1> as Engine>::RO::new(ro_consts.clone(), 1 + NUM_FE_IN_EMULATED_POINT); // prev_comm + comm_omega
-
     ro.absorb(prev_comm);
     absorb_primary_commitment::<E1, Dual<E1>>(&comm_w_input, &mut ro);
     scalar_as_base::<Dual<E1>>(ro.squeeze(NUM_HASH_BITS))
@@ -54,7 +53,6 @@ where
     comm_w_input: Commitment<E1>, // commitment to non-deterministic witness ω
   ) -> E1::Scalar {
     let mut ro = <Dual<E1> as Engine>::RO::new(ro_consts.clone(), 1 + NUM_FE_IN_EMULATED_POINT); // prev_comm + comm_omega
-
     ro.absorb(prev_comm);
     absorb_primary_commitment::<E1, Dual<E1>>(&comm_w_input, &mut ro);
     scalar_as_base::<Dual<E1>>(ro.squeeze(NUM_HASH_BITS))
