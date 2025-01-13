@@ -7,7 +7,7 @@
   rust_2018_idioms,
   missing_docs
 )]
-#![allow(non_snake_case)]
+#![allow(non_snake_case, clippy::upper_case_acronyms)]
 // #![forbid(unsafe_code)] // Commented for development with `Abomonation`
 
 // private modules
