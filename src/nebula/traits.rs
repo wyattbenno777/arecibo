@@ -90,3 +90,14 @@ pub trait Layer1PPTrait<E: CurveCycleEquipped> {
     &self.F().ck_cyclefold
   }
 }
+
+/// Get the scan commitments from the statement the Layer 1 proof is proving
+pub trait MemoryCommitmentsTraits<E>
+where
+  E: CurveCycleEquipped,
+{
+  /// Get commitment to C_is
+  fn C_IS(&self) -> E::Scalar;
+  /// commitment to C_fs
+  fn C_FS(&self) -> E::Scalar;
+}

@@ -25,7 +25,7 @@ use verifier_circuit::VerifierCircuit;
 
 use super::nifs::NIFS;
 use super::utils::Layer2FoldingData;
-use crate::nebula::traits::{Layer1PPTrait, Layer1RSTrait};
+use crate::nebula::traits::{Layer1PPTrait, Layer1RSTrait, MemoryCommitmentsTraits};
 
 mod verifier_circuit;
 
@@ -156,6 +156,7 @@ where
   pub fn new(
     pp: &AggregationPublicParams<E>,
     layer1_rs: &impl Layer1RSTrait<E>,
+    _U: &impl MemoryCommitmentsTraits<E>,
   ) -> Result<Self, NovaError> {
     let (r_U_cyclefold, r_W_cyclefold) = pp.default_cyclefold_instance();
 
@@ -309,6 +310,7 @@ where
     &mut self,
     pp: &AggregationPublicParams<E>,
     layer1_rs: &impl Layer1RSTrait<E>,
+    _U: &impl MemoryCommitmentsTraits<E>,
   ) -> Result<(), NovaError> {
     if self.i == 0 {
       self.i = 1;
@@ -480,7 +482,9 @@ mod test {
   use super::{AggregationPublicParams, AggregationRecursiveSNARK, Layer1PPTrait, Layer1RSTrait};
   use crate::nebula::audit_rs::{AuditPublicParams, AuditRecursiveSNARK, AuditStepCircuit};
   use crate::nebula::rs::{PublicParams, RecursiveSNARK};
+  use crate::nebula::traits::MemoryCommitmentsTraits;
   use crate::traits::snark::default_ck_hint;
+  use crate::traits::CurveCycleEquipped;
   use crate::{nebula::rs::StepCircuit, provider::Bn256EngineIPA, traits::Engine};
   use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
   use ff::Field;
@@ -488,6 +492,21 @@ mod test {
 
   type E1 = Bn256EngineIPA;
   type F = <E1 as Engine>::Scalar;
+
+  type TestMemoryComms<F> = (F, F);
+
+  impl<E> MemoryCommitmentsTraits<E> for TestMemoryComms<E::Scalar>
+  where
+    E: CurveCycleEquipped,
+  {
+    fn C_FS(&self) -> <E>::Scalar {
+      self.1
+    }
+
+    fn C_IS(&self) -> <E>::Scalar {
+      self.0
+    }
+  }
 
   #[test]
   fn test_ivc_folding() {
@@ -500,11 +519,11 @@ mod test {
   fn aggregation_node(node_pp: NodePP, nodes_rs: &[NodeRS]) {
     let aggregation_pp = AggregationPublicParams::<E1>::setup(node_pp);
     let mut aggregation_engine =
-      AggregationRecursiveSNARK::new(&aggregation_pp, &nodes_rs[0]).unwrap();
+      AggregationRecursiveSNARK::new(&aggregation_pp, &nodes_rs[0], &(F::ZERO, F::ZERO)).unwrap();
 
     for node_rs in nodes_rs.iter() {
       aggregation_engine
-        .prove_step(&aggregation_pp, node_rs)
+        .prove_step(&aggregation_pp, node_rs, &(F::ZERO, F::ZERO))
         .unwrap();
     }
 
