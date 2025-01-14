@@ -1,7 +1,10 @@
 //! Defines behavior of Layer 1 Nebula proofs
 
+use std::sync::Arc;
+
 use crate::r1cs::R1CSShape;
 use crate::traits::commitment::Len;
+use crate::traits::Dual;
 use crate::{
   nebula::{
     audit_rs::{AuditPublicParams, AuditRecursiveSNARK},
@@ -41,7 +44,7 @@ pub trait Layer1PPTrait<E: CurveCycleEquipped> {
   fn scan(&self) -> &AuditPublicParams<E>;
 
   /// Get the biggest commitmentkey
-  fn biggest_ck<'a>(&'a self) -> &'a CommitmentKey<E>
+  fn biggest_ck<'a>(&'a self) -> &'a Arc<CommitmentKey<E>>
   where
     E: 'a,
   {
@@ -65,5 +68,25 @@ pub trait Layer1PPTrait<E: CurveCycleEquipped> {
       &self.ops().circuit_shape_primary.r1cs_shape,
       &self.scan().circuit_shape_primary.r1cs_shape,
     ]
+  }
+
+  /// Get the secondary R1CS shapes
+  fn secondary_r1cs_shapes<'a>(&'a self) -> Vec<&'a R1CSShape<Dual<E>>>
+  where
+    E: 'a,
+  {
+    vec![
+      &self.F().circuit_shape_cyclefold.r1cs_shape,
+      &self.ops().circuit_shape_cyclefold.r1cs_shape,
+      &self.scan().circuit_shape_cyclefold.r1cs_shape,
+    ]
+  }
+
+  /// Get the secondary ck
+  fn ck_secondary<'a>(&'a self) -> &'a Arc<CommitmentKey<Dual<E>>>
+  where
+    E: 'a,
+  {
+    &self.F().ck_cyclefold
   }
 }

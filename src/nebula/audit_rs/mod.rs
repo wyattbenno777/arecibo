@@ -2,6 +2,8 @@
 //!
 //! Main change is it handles carrying two commitments, one for IS and the other for FS
 
+use std::sync::Arc;
+
 use super::augmented_circuit::AugmentedCircuitParams;
 use super::ic::IC;
 use super::nifs::{PrimaryNIFS, NIFS};
@@ -22,8 +24,6 @@ use crate::{
   traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},
   CommitmentKey, DigestComputer, R1CSWithArity, ROConstants, SimpleDigestible,
 };
-use abomonation::Abomonation;
-use abomonation_derive::Abomonation;
 use augmented_circuit::{AugmentedCircuit, AugmentedCircuitInputs};
 use bellpepper_core::num::AllocatedNum;
 use bellpepper_core::{ConstraintSystem, SynthesisError};
@@ -35,14 +35,8 @@ use serde::{Deserialize, Serialize};
 mod augmented_circuit;
 
 /// The public parameters used in the CycleFold recursive SNARK proof and verification
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Abomonation)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(bound = "")]
-#[abomonation_bounds(
-where
-  E1: CurveCycleEquipped,
-  <E1::Scalar as PrimeField>::Repr: Abomonation,
-  <<Dual<E1> as Engine>::Scalar as PrimeField>::Repr: Abomonation,
-)]
 pub struct AuditPublicParams<E1>
 where
   E1: CurveCycleEquipped,
@@ -53,16 +47,15 @@ where
   /// RO constants for primary circuit
   pub ro_consts_circuit: ROConstantsCircuit<Dual<E1>>,
   /// Commitment key for primary circuit
-  pub ck_primary: CommitmentKey<E1>,
+  pub ck_primary: Arc<CommitmentKey<E1>>,
   /// R1CS shape we are arguing about
   pub circuit_shape_primary: R1CSWithArity<E1>,
   /// Parameters of big nats in circuit
   pub augmented_circuit_params: AugmentedCircuitParams,
   /// secondary commitment key
-  pub ck_cyclefold: CommitmentKey<Dual<E1>>,
+  pub ck_cyclefold: Arc<CommitmentKey<Dual<E1>>>,
   /// R1CS shape of cyclefold circuit
   pub circuit_shape_cyclefold: R1CSWithArity<Dual<E1>>,
-  #[abomonation_skip]
   #[serde(skip, default = "OnceCell::new")]
   digest: OnceCell<E1::Scalar>,
 }
@@ -99,6 +92,7 @@ where
     let mut cs: ShapeCS<E1> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
     let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape_and_key(ck_hint_primary);
+    let ck_primary = Arc::new(ck_primary);
     let circuit_shape_primary = R1CSWithArity::new(r1cs_shape_primary, F_arity_primary);
 
     // Get the structure for the CycleFold circuit and corresponding commitment key
@@ -106,6 +100,7 @@ where
     let circuit_cyclefold: CycleFoldCircuit<E1> = CycleFoldCircuit::default();
     let _ = circuit_cyclefold.synthesize(&mut cs);
     let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape_and_key(ck_hint_cyclefold);
+    let ck_cyclefold = Arc::new(ck_cyclefold);
     let circuit_shape_cyclefold = R1CSWithArity::new(r1cs_shape_cyclefold, 0);
 
     Self {
@@ -131,7 +126,7 @@ where
   }
 
   /// Return reference to commitment key
-  pub fn ck(&self) -> &CommitmentKey<E1> {
+  pub fn ck(&self) -> &Arc<CommitmentKey<E1>> {
     &self.ck_primary
   }
 
@@ -152,7 +147,7 @@ where
   }
 
   /// Break up into shape, ck and digest for layer 2
-  pub fn into_shape_ck_digest(self) -> (R1CSWithArity<E1>, CommitmentKey<E1>, E1::Scalar) {
+  pub fn into_shape_ck_digest(self) -> (R1CSWithArity<E1>, Arc<CommitmentKey<E1>>, E1::Scalar) {
     let digest = self.digest();
     (self.circuit_shape_primary, self.ck_primary, digest)
   }
@@ -173,9 +168,9 @@ where
 
   // primary circuit data
   r_W_primary: RelaxedR1CSWitness<E1>,
-  r_U_primary: RelaxedR1CSInstance<E1>,
+  pub(crate) r_U_primary: RelaxedR1CSInstance<E1>,
   l_w_primary: R1CSWitness<E1>,
-  l_u_primary: R1CSInstance<E1>,
+  pub(crate) l_u_primary: R1CSInstance<E1>,
 
   // Number of recursive steps proven
   i: usize,
@@ -188,7 +183,7 @@ where
 
   // cyclefold circuit data
   r_W_cyclefold: RelaxedR1CSWitness<Dual<E1>>,
-  r_U_cyclefold: RelaxedR1CSInstance<Dual<E1>>,
+  pub(in crate::nebula) r_U_cyclefold: RelaxedR1CSInstance<Dual<E1>>,
 
   // outputs
   zi: Vec<E1::Scalar>,
@@ -214,7 +209,7 @@ where
 
     // Get default running primary instance and witness pair
     let r1cs_primary = &pp.circuit_shape_primary.r1cs_shape;
-    let r_U_primary = RelaxedR1CSInstance::default(&pp.ck_primary, r1cs_primary);
+    let r_U_primary = RelaxedR1CSInstance::default(&*pp.ck_primary, r1cs_primary);
     let r_W_primary = RelaxedR1CSWitness::default(r1cs_primary);
 
     // Base case for F'
@@ -252,7 +247,7 @@ where
 
     // Get the running CycleFold instance and witness pair
     let r1cs_cyclefold = &pp.circuit_shape_cyclefold.r1cs_shape;
-    let r_U_cyclefold = RelaxedR1CSInstance::default(&pp.ck_cyclefold, r1cs_cyclefold);
+    let r_U_cyclefold = RelaxedR1CSInstance::default(&*pp.ck_cyclefold, r1cs_cyclefold);
     let r_W_cyclefold = RelaxedR1CSWitness::default(r1cs_cyclefold);
 
     Ok(Self {
@@ -583,7 +578,7 @@ where
     NovaError,
   > {
     let (nifs, (U, W), _) = PrimaryNIFS::prove(
-      &pp.ck_primary,
+      &*pp.ck_primary,
       &pp.ro_consts,
       &pp.digest(),
       &pp.circuit_shape_primary.r1cs_shape,

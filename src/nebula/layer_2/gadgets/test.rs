@@ -124,7 +124,7 @@ where
       pp,
       circuit_shape_F,
       digest_F,
-      ck,
+      ck: (*ck).clone(),
     }
   }
 

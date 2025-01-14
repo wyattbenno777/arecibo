@@ -6,10 +6,34 @@ use super::{
 };
 use crate::{
   errors::NovaError,
+  r1cs::{R1CSInstance, RelaxedR1CSInstance},
   traits::{snark::BatchedRelaxedR1CSSNARKTrait, CurveCycleEquipped, Dual},
 };
 use serde::{Deserialize, Serialize};
-use std::marker::PhantomData;
+
+/// A type that holds the prover key for [`CompressedSNARK`]
+#[derive(Debug)]
+pub struct ProverKey<E, S1, S2>
+where
+  E: CurveCycleEquipped,
+  S1: BatchedRelaxedR1CSSNARKTrait<E>,
+  S2: BatchedRelaxedR1CSSNARKTrait<Dual<E>>,
+{
+  primary: S1::ProverKey,
+  secondary: S2::ProverKey,
+}
+
+/// A type that holds the prover key for [`CompressedSNARK`]
+#[derive(Debug)]
+pub struct VerifierKey<E, S1, S2>
+where
+  E: CurveCycleEquipped,
+  S1: BatchedRelaxedR1CSSNARKTrait<E>,
+  S2: BatchedRelaxedR1CSSNARKTrait<Dual<E>>,
+{
+  primary: S1::VerifierKey,
+  secondary: S2::VerifierKey,
+}
 
 /// A SNARK that proves the knowledge of a valid Nebula proof
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -25,19 +49,9 @@ where
   nifs_F: PrimaryNIFS<E>,
   nifs_ops: PrimaryNIFS<E>,
   nifs_scan: PrimaryNIFS<E>,
-}
-
-/// A type that holds the prover key for [`CompressedSNARK`]
-#[derive(Debug)]
-pub struct ProverKey<E, S1, S2>
-where
-  E: CurveCycleEquipped,
-  S1: BatchedRelaxedR1CSSNARKTrait<E>,
-  S2: BatchedRelaxedR1CSSNARKTrait<Dual<E>>,
-{
-  _engine: PhantomData<E>,
-  primary: S1::ProverKey,
-  secondary: S2::ProverKey,
+  r_U: Vec<RelaxedR1CSInstance<E>>,
+  l_u: Vec<R1CSInstance<E>>,
+  r_U_secondary: Vec<RelaxedR1CSInstance<Dual<E>>>,
 }
 
 impl<E, S1, S2> CompressedSNARK<E, S1, S2>
@@ -46,12 +60,48 @@ where
   S1: BatchedRelaxedR1CSSNARKTrait<E>,
   S2: BatchedRelaxedR1CSSNARKTrait<Dual<E>>,
 {
+  /// Creates prover and verifier keys for [`CompressedSNARK`]
+  pub fn setup(
+    pp: &impl Layer1PPTrait<E>,
+  ) -> Result<(ProverKey<E, S1, S2>, VerifierKey<E, S1, S2>), NovaError> {
+    let (pk_primary, vk_primary) = S1::setup(pp.biggest_ck().clone(), pp.primary_r1cs_shapes())?;
+
+    let (pk_secondary, vk_secondary) =
+      S2::setup(pp.ck_secondary().clone(), pp.secondary_r1cs_shapes())?;
+
+    let prover_key = ProverKey {
+      primary: pk_primary,
+      secondary: pk_secondary,
+    };
+    let verifier_key = VerifierKey {
+      primary: vk_primary,
+      secondary: vk_secondary,
+    };
+
+    Ok((prover_key, verifier_key))
+  }
+
   /// Create a new [`CompressedSNARK`]
   pub fn prove(
     pp: &impl Layer1PPTrait<E>,
     pk: &ProverKey<E, S1, S2>,
     rs: &impl Layer1RSTrait<E>,
   ) -> Result<Self, NovaError> {
+    let r_U = vec![
+      rs.F().r_U_primary.clone(),
+      rs.ops().r_U_primary.clone(),
+      rs.scan().r_U_primary.clone(),
+    ];
+    let l_u = vec![
+      rs.F().l_u_primary.clone(),
+      rs.ops().l_u_primary.clone(),
+      rs.scan().l_u_primary.clone(),
+    ];
+    let r_U_secondary = vec![
+      rs.F().r_U_cyclefold.clone(),
+      rs.ops().r_U_cyclefold.clone(),
+      rs.scan().r_U_cyclefold.clone(),
+    ];
     // Primary SNARK
     //
     // Fold's (U, W, u, w) into (U', W') and runs the folded instance witness pair though Spartan
@@ -72,6 +122,7 @@ where
     //
     // Run the CycleFold instances through Spartan
     let snark_secondary = {
+      // TODO: refactor by folding these cyclefold relaxed R1CS instance witness pairs into one relaxed R1CS instance witness pair
       let (U_F_secondary, W_F_secondary) = rs.F().secondary_rs_part();
       let (U_ops_secondary, W_ops_secondary) = rs.ops().secondary_rs_part();
       let (U_scan_secondary, W_scan_secondary) = rs.scan().secondary_rs_part();
@@ -85,15 +136,10 @@ where
         W_ops_secondary.clone(),
         W_scan_secondary.clone(),
       ];
-      let secondary_shapes = vec![
-        &pp.F().circuit_shape_cyclefold.r1cs_shape,
-        &pp.ops().circuit_shape_cyclefold.r1cs_shape,
-        &pp.scan().circuit_shape_cyclefold.r1cs_shape,
-      ];
       S2::prove(
-        &pp.F().ck_cyclefold,
+        pp.ck_secondary(),
         &pk.secondary,
-        secondary_shapes,
+        pp.secondary_r1cs_shapes(),
         &U_secondary,
         &W_secondary,
       )?
@@ -105,6 +151,41 @@ where
       nifs_F,
       nifs_ops,
       nifs_scan,
+      r_U,
+      l_u,
+      r_U_secondary,
     })
+  }
+
+  /// Verify the correctness of the [`CompressedSNARK`]
+  pub fn verify(
+    &self,
+    pp: &impl Layer1PPTrait<E>,
+    vk: &VerifierKey<E, S1, S2>,
+  ) -> Result<(), NovaError> {
+    let U_F = self.nifs_F.verify(
+      &pp.F().ro_consts,
+      &pp.F().digest(),
+      &self.r_U[0],
+      &self.l_u[0],
+    );
+    let U_ops = self.nifs_ops.verify(
+      &pp.ops().ro_consts,
+      &pp.ops().digest(),
+      &self.r_U[1],
+      &self.l_u[1],
+    );
+    let U_scan = self.nifs_scan.verify(
+      &pp.scan().ro_consts,
+      &pp.scan().digest(),
+      &self.r_U[2],
+      &self.l_u[2],
+    );
+    let U = vec![U_F, U_ops, U_scan];
+    self.snark_primary.verify(&vk.primary, &U)?;
+    self
+      .snark_secondary
+      .verify(&vk.secondary, &self.r_U_secondary)?;
+    Ok(())
   }
 }

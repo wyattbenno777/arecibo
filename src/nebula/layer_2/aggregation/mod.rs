@@ -1,5 +1,7 @@
 //! Module containing components to enable aggregation of IVC proofs.
 
+use std::sync::Arc;
+
 use crate::constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT};
 use crate::errors::NovaError;
 use crate::gadgets::scalar_as_base;
@@ -41,7 +43,7 @@ where
   digest_F: E::Scalar,
   digest_ops: E::Scalar,
   digest_scan: E::Scalar,
-  ck: CommitmentKey<E>,
+  ck: Arc<CommitmentKey<E>>,
 }
 
 impl<E> AggregationPublicParams<E>
@@ -161,7 +163,7 @@ where
      * ********************************  F fold ********************************
      */
     let F_shape = &pp.circuit_shape_F.r1cs_shape;
-    let r_U_F = RelaxedR1CSInstance::default(&pp.ck, F_shape);
+    let r_U_F = RelaxedR1CSInstance::default(&*pp.ck, F_shape);
     let r_W_F = RelaxedR1CSWitness::default(F_shape);
     let (U2_F, W2_F, U2_secondary_F, W2_secondary_F) = layer1_rs.F().primary_secondary_U_W();
     let (nifs_F, (new_r_U_F, new_r_W_F), (r_U_cyclefold_temp1, r_W_cyclefold_temp1)) = NIFS::prove(
@@ -193,7 +195,7 @@ where
      * ********************************  ops fold ********************************
      */
     let shape_ops = &pp.circuit_shape_ops.r1cs_shape;
-    let r_U_ops = RelaxedR1CSInstance::default(&pp.ck, shape_ops);
+    let r_U_ops = RelaxedR1CSInstance::default(&*pp.ck, shape_ops);
     let r_W_ops = RelaxedR1CSWitness::default(shape_ops);
     let (U2_ops, W2_ops, U2_secondary_ops, W2_secondary_ops) =
       layer1_rs.ops().primary_secondary_U_W();
@@ -227,7 +229,7 @@ where
      * ********************************  scan fold ********************************
      */
     let shape_scan = &pp.circuit_shape_scan.r1cs_shape;
-    let r_U_scan = RelaxedR1CSInstance::default(&pp.ck, shape_scan);
+    let r_U_scan = RelaxedR1CSInstance::default(&*pp.ck, shape_scan);
     let r_W_scan = RelaxedR1CSWitness::default(shape_scan);
     let (U2_scan, W2_scan, U2_secondary_scan, W2_secondary_scan) =
       layer1_rs.scan().primary_secondary_U_W();

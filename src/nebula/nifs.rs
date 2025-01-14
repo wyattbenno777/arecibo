@@ -275,7 +275,6 @@ where
     absorb_primary_r1cs::<E, Dual<E>>(U2, &mut ro);
     absorb_primary_commitment::<E, Dual<E>>(&self.comm_T, &mut ro);
     let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
-    let U = U1.fold(U2, &self.comm_T, &r);
-    U
+    U1.fold(U2, &self.comm_T, &r)
   }
 }
