@@ -147,18 +147,18 @@ where
   E: CurveCycleEquipped,
 {
   // F
-  pub(in crate::nebula) r_W_F: RelaxedR1CSWitness<E>,
-  pub(in crate::nebula) r_U_F: RelaxedR1CSInstance<E>,
+  r_W_F: RelaxedR1CSWitness<E>,
+  r_U_F: RelaxedR1CSInstance<E>,
   // ops
-  pub(in crate::nebula) r_W_ops: RelaxedR1CSWitness<E>,
-  pub(in crate::nebula) r_U_ops: RelaxedR1CSInstance<E>,
+  r_W_ops: RelaxedR1CSWitness<E>,
+  r_U_ops: RelaxedR1CSInstance<E>,
   // scan
-  pub(in crate::nebula) r_W_scan: RelaxedR1CSWitness<E>,
-  pub(in crate::nebula) r_U_scan: RelaxedR1CSInstance<E>,
+  r_W_scan: RelaxedR1CSWitness<E>,
+  r_U_scan: RelaxedR1CSInstance<E>,
   // secondary
-  pub(in crate::nebula) r_W_cyclefold: RelaxedR1CSWitness<Dual<E>>,
-  pub(in crate::nebula) r_U_cyclefold: RelaxedR1CSInstance<Dual<E>>,
-  pub(in crate::nebula) rs: RecursiveSNARK<E>,
+  r_W_cyclefold: RelaxedR1CSWitness<Dual<E>>,
+  r_U_cyclefold: RelaxedR1CSInstance<Dual<E>>,
+  rs: RecursiveSNARK<E>,
   IC_i: E::Scalar,
   i: usize,
   z0: Vec<E::Scalar>,

@@ -1,6 +1,6 @@
 //! Applies Spartan on top of the Layer 2 proofs.
 
-use super::{AggregationPublicParams, AggregationRecursiveSNARK};
+use super::{ShardingPublicParams, ShardingRecursiveSNARK};
 use crate::{
   errors::NovaError,
   nebula::nifs::PrimaryNIFS,
@@ -61,7 +61,7 @@ where
 {
   /// Creates prover and verifier keys for [`CompressedSNARK`]
   pub fn setup(
-    pp: &AggregationPublicParams<E>,
+    pp: &ShardingPublicParams<E>,
   ) -> Result<(ProverKey<E, S1, S2>, VerifierKey<E, S1, S2>), NovaError> {
     let (pk_primary, vk_primary) = S1::setup(pp.ck.clone(), pp.primary_r1cs_shapes())?;
     let (pk_secondary, vk_secondary) =
@@ -80,9 +80,9 @@ where
 
   /// Create a new [`CompressedSNARK`]
   pub fn prove(
-    pp: &AggregationPublicParams<E>,
+    pp: &ShardingPublicParams<E>,
     pk: &ProverKey<E, S1, S2>,
-    rs: &AggregationRecursiveSNARK<E>,
+    rs: &ShardingRecursiveSNARK<E>,
   ) -> Result<Self, NovaError> {
     let r_U_verifier = rs.rs.r_U_primary.clone();
     let l_u_verifier = rs.rs.l_u_primary.clone();
@@ -136,7 +136,7 @@ where
   /// Verify the correctness of the [`CompressedSNARK`]
   pub fn verify(
     &self,
-    pp: &AggregationPublicParams<E>,
+    pp: &ShardingPublicParams<E>,
     vk: &VerifierKey<E, S1, S2>,
   ) -> Result<(), NovaError> {
     let U_verifier = self.nifs_verifier.verify(

@@ -1,13 +1,14 @@
 //! Module containing components to enable sharding of IVC proofs.
 
-use std::sync::Arc;
-
+use super::nifs::NIFS;
+use super::utils::Layer2FoldingData;
 use crate::constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT};
 use crate::errors::NovaError;
 use crate::gadgets::scalar_as_base;
 use crate::nebula::augmented_circuit::AugmentedCircuitParams;
 use crate::nebula::layer_2::utils::absorb_U;
 use crate::nebula::layer_2::utils::absorb_U_bn;
+use crate::nebula::traits::{Layer1PPTrait, Layer1RSTrait, MemoryCommitmentsTraits};
 use crate::r1cs::{R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness};
 use crate::traits::commitment::Len;
 use crate::traits::ROTrait;
@@ -19,14 +20,11 @@ use crate::{
   R1CSWithArity,
 };
 use ff::Field;
-
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use verifier_circuit::VerifierCircuit;
 
-use super::nifs::NIFS;
-use super::utils::Layer2FoldingData;
-use crate::nebula::traits::{Layer1PPTrait, Layer1RSTrait, MemoryCommitmentsTraits};
-
+pub mod compression;
 mod verifier_circuit;
 
 /// Defines the public parameters for the Sharding layer
@@ -121,6 +119,22 @@ where
       RelaxedR1CSInstance::default(self.ck_cyclefold(), self.r1cs_shape_cyclefold()),
       RelaxedR1CSWitness::default(self.r1cs_shape_cyclefold()),
     )
+  }
+
+  fn primary_r1cs_shapes(&self) -> Vec<&R1CSShape<E>> {
+    vec![
+      &self.circuit_shape_F.r1cs_shape,
+      &self.circuit_shape_ops.r1cs_shape,
+      &self.circuit_shape_scan.r1cs_shape,
+      &self.pp.circuit_shape_primary.r1cs_shape,
+    ]
+  }
+
+  fn secondary_r1cs_shapes(&self) -> Vec<&R1CSShape<Dual<E>>> {
+    vec![
+      &self.r1cs_shape_cyclefold(),
+      &self.pp.circuit_shape_cyclefold.r1cs_shape,
+    ]
   }
 }
 
