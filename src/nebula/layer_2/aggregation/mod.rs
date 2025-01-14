@@ -519,6 +519,18 @@ mod test {
     fn into_parts(self) -> (PublicParams<E1>, PublicParams<E1>, AuditPublicParams<E1>) {
       (self.pp1, self.pp2, self.pp3)
     }
+
+    fn F(&self) -> &PublicParams<E1> {
+      &self.pp1
+    }
+
+    fn ops(&self) -> &PublicParams<E1> {
+      &self.pp2
+    }
+
+    fn scan(&self) -> &AuditPublicParams<E1> {
+      &self.pp3
+    }
   }
 
   struct NodeRS {

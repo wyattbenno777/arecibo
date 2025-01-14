@@ -4,7 +4,7 @@
 
 use super::augmented_circuit::AugmentedCircuitParams;
 use super::ic::IC;
-use super::nifs::NIFS;
+use super::nifs::{PrimaryNIFS, NIFS};
 use crate::cyclefold::util::{absorb_primary_relaxed_r1cs, FoldingData};
 use crate::traits::commitment::CommitmentEngineTrait;
 use crate::Commitment;
@@ -328,7 +328,7 @@ where
     let data_p = FoldingData::new(
       self.r_U_primary.clone(),
       self.l_u_primary.clone(),
-      nifs.comm_T,
+      nifs.nifs_primary.comm_T,
     );
     let data_c_E = FoldingData::new(
       self.r_U_cyclefold.clone(),
@@ -543,6 +543,16 @@ where
     (&self.r_U_primary, &self.r_W_primary)
   }
 
+  /// Get the secondary curve part of the running instance
+  pub fn secondary_rs_part(
+    &self,
+  ) -> (
+    &RelaxedR1CSInstance<Dual<E1>>,
+    &RelaxedR1CSWitness<Dual<E1>>,
+  ) {
+    (&self.r_U_cyclefold, &self.r_W_cyclefold)
+  }
+
   /// Get primary & secondayr relaxed instance witness pair
   pub fn primary_secondary_U_W(
     &self,
@@ -558,6 +568,29 @@ where
       &self.r_U_cyclefold,
       &self.r_W_cyclefold,
     )
+  }
+
+  /// Do NIFS.P on the IVC proof before we send it of for compression
+  pub(crate) fn fold_ivc_compression_step(
+    &self,
+    pp: &AuditPublicParams<E1>,
+  ) -> Result<
+    (
+      RelaxedR1CSInstance<E1>,
+      RelaxedR1CSWitness<E1>,
+      PrimaryNIFS<E1>,
+    ),
+    NovaError,
+  > {
+    let (nifs, (U, W), _) = PrimaryNIFS::prove(
+      &pp.ck_primary,
+      &pp.ro_consts,
+      &pp.digest(),
+      &pp.circuit_shape_primary.r1cs_shape,
+      (&self.r_U_primary, &self.r_W_primary),
+      (&self.l_u_primary, &self.l_w_primary),
+    )?;
+    Ok((U, W, nifs))
   }
 }
 
