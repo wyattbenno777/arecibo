@@ -102,6 +102,7 @@ where
       rs.ops().r_U_cyclefold.clone(),
       rs.scan().r_U_cyclefold.clone(),
     ];
+
     // Primary SNARK
     //
     // Fold's (U, W, u, w) into (U', W') and runs the folded instance witness pair though Spartan
