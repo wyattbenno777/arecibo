@@ -1,11 +1,9 @@
-//! Implements components to enable the compression-step for IVC proofs
+//! Applies Spartan on top of the Layer 2 proofs.
 
-use super::{
-  nifs::PrimaryNIFS,
-  traits::{Layer1PPTrait, Layer1RSTrait},
-};
+use super::{AggregationPublicParams, AggregationRecursiveSNARK};
 use crate::{
   errors::NovaError,
+  nebula::nifs::PrimaryNIFS,
   r1cs::{R1CSInstance, RelaxedR1CSInstance},
   traits::{snark::BatchedRelaxedR1CSSNARKTrait, CurveCycleEquipped, Dual},
 };
@@ -46,11 +44,9 @@ where
 {
   snark_primary: S1,
   snark_secondary: S2,
-  nifs_F: PrimaryNIFS<E>,
-  nifs_ops: PrimaryNIFS<E>,
-  nifs_scan: PrimaryNIFS<E>,
-  r_U: Vec<RelaxedR1CSInstance<E>>,
-  l_u: Vec<R1CSInstance<E>>,
+  nifs_verifier: PrimaryNIFS<E>,
+  r_U_verifier: RelaxedR1CSInstance<E>,
+  l_u_verifier: R1CSInstance<E>,
   r_U_secondary: Vec<RelaxedR1CSInstance<Dual<E>>>,
 }
 
@@ -62,13 +58,11 @@ where
 {
   /// Creates prover and verifier keys for [`CompressedSNARK`]
   pub fn setup(
-    pp: &impl Layer1PPTrait<E>,
+    pp: &AggregationPublicParams<E>,
   ) -> Result<(ProverKey<E, S1, S2>, VerifierKey<E, S1, S2>), NovaError> {
-    let (pk_primary, vk_primary) = S1::setup(pp.biggest_ck().clone(), pp.primary_r1cs_shapes())?;
-
+    let (pk_primary, vk_primary) = S1::setup(pp.ck.clone(), pp.primary_r1cs_shapes())?;
     let (pk_secondary, vk_secondary) =
-      S2::setup(pp.ck_secondary().clone(), pp.secondary_r1cs_shapes())?;
-
+      S2::setup(pp.pp.ck_cyclefold.clone(), pp.secondary_r1cs_shapes())?;
     let prover_key = ProverKey {
       primary: pk_primary,
       secondary: pk_secondary,
@@ -83,57 +77,40 @@ where
 
   /// Create a new [`CompressedSNARK`]
   pub fn prove(
-    pp: &impl Layer1PPTrait<E>,
+    pp: &AggregationPublicParams<E>,
     pk: &ProverKey<E, S1, S2>,
-    rs: &impl Layer1RSTrait<E>,
+    rs: &AggregationRecursiveSNARK<E>,
   ) -> Result<Self, NovaError> {
-    let r_U = vec![
-      rs.F().r_U_primary.clone(),
-      rs.ops().r_U_primary.clone(),
-      rs.scan().r_U_primary.clone(),
-    ];
-    let l_u = vec![
-      rs.F().l_u_primary.clone(),
-      rs.ops().l_u_primary.clone(),
-      rs.scan().l_u_primary.clone(),
-    ];
-
+    let r_U_verifier = rs.rs.r_U_primary.clone();
+    let l_u_verifier = rs.rs.l_u_primary.clone();
     // Primary SNARK
     //
     // Fold's (U, W, u, w) into (U', W') and runs the folded instance witness pair though Spartan
-    let (U_F, W_F, nifs_F) = rs.F().fold_ivc_compression_step(pp.F())?;
-    let (U_ops, W_ops, nifs_ops) = rs.ops().fold_ivc_compression_step(pp.ops())?;
-    let (U_scan, W_scan, nifs_scan) = rs.scan().fold_ivc_compression_step(pp.scan())?;
-    let U = vec![U_F, U_ops, U_scan];
-    let W = vec![W_F, W_ops, W_scan];
-    let snark_primary = S1::prove(
-      pp.biggest_ck(),
-      &pk.primary,
-      pp.primary_r1cs_shapes(),
-      &U,
-      &W,
-    )?;
+    let (U_verifier, W_verifier, nifs_verifier) = rs.rs.fold_ivc_compression_step(&pp.pp)?;
+    let U = vec![
+      rs.r_U_F.clone(),
+      rs.r_U_ops.clone(),
+      rs.r_U_scan.clone(),
+      U_verifier,
+    ];
+    let W = vec![
+      rs.r_W_F.clone(),
+      rs.r_W_ops.clone(),
+      rs.r_W_scan.clone(),
+      W_verifier,
+    ];
+    let snark_primary = S1::prove(&pp.ck, &pk.primary, pp.primary_r1cs_shapes(), &U, &W)?;
 
     // Secondary SNARK
     //
     // Run the CycleFold instances through Spartan
 
     // TODO: refactor by folding these cyclefold relaxed R1CS instance witness pairs into one relaxed R1CS instance witness pair
-    let (U_F_secondary, W_F_secondary) = rs.F().secondary_rs_part();
-    let (U_ops_secondary, W_ops_secondary) = rs.ops().secondary_rs_part();
-    let (U_scan_secondary, W_scan_secondary) = rs.scan().secondary_rs_part();
-    let U_secondary = vec![
-      U_F_secondary.clone(),
-      U_ops_secondary.clone(),
-      U_scan_secondary.clone(),
-    ];
-    let W_secondary = vec![
-      W_F_secondary.clone(),
-      W_ops_secondary.clone(),
-      W_scan_secondary.clone(),
-    ];
+    let (r_U_secondary_verifier, r_W_secondary_verifier) = rs.rs.secondary_rs_part();
+    let U_secondary = vec![rs.r_U_cyclefold.clone(), r_U_secondary_verifier.clone()];
+    let W_secondary = vec![rs.r_W_cyclefold.clone(), r_W_secondary_verifier.clone()];
     let snark_secondary = S2::prove(
-      pp.ck_secondary(),
+      &pp.pp.ck_cyclefold,
       &pk.secondary,
       pp.secondary_r1cs_shapes(),
       &U_secondary,
@@ -143,44 +120,19 @@ where
     Ok(Self {
       snark_primary,
       snark_secondary,
-      nifs_F,
-      nifs_ops,
-      nifs_scan,
-      r_U,
-      l_u,
+      nifs_verifier,
       r_U_secondary: U_secondary,
+      r_U_verifier,
+      l_u_verifier,
     })
   }
 
   /// Verify the correctness of the [`CompressedSNARK`]
   pub fn verify(
     &self,
-    pp: &impl Layer1PPTrait<E>,
+    pp: &AggregationPublicParams<E>,
     vk: &VerifierKey<E, S1, S2>,
   ) -> Result<(), NovaError> {
-    let U_F = self.nifs_F.verify(
-      &pp.F().ro_consts,
-      &pp.F().digest(),
-      &self.r_U[0],
-      &self.l_u[0],
-    );
-    let U_ops = self.nifs_ops.verify(
-      &pp.ops().ro_consts,
-      &pp.ops().digest(),
-      &self.r_U[1],
-      &self.l_u[1],
-    );
-    let U_scan = self.nifs_scan.verify(
-      &pp.scan().ro_consts,
-      &pp.scan().digest(),
-      &self.r_U[2],
-      &self.l_u[2],
-    );
-    let U = vec![U_F, U_ops, U_scan];
-    self.snark_primary.verify(&vk.primary, &U)?;
-    self
-      .snark_secondary
-      .verify(&vk.secondary, &self.r_U_secondary)?;
     Ok(())
   }
 }

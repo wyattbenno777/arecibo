@@ -27,6 +27,7 @@ use super::nifs::NIFS;
 use super::utils::Layer2FoldingData;
 use crate::nebula::traits::{Layer1PPTrait, Layer1RSTrait, MemoryCommitmentsTraits};
 
+pub mod compression;
 mod verifier_circuit;
 
 /// Defines the public parameters for the Aggregation layer
@@ -122,6 +123,22 @@ where
       RelaxedR1CSWitness::default(self.r1cs_shape_cyclefold()),
     )
   }
+
+  fn primary_r1cs_shapes(&self) -> Vec<&R1CSShape<E>> {
+    vec![
+      &self.circuit_shape_F.r1cs_shape,
+      &self.circuit_shape_ops.r1cs_shape,
+      &self.circuit_shape_scan.r1cs_shape,
+      &self.pp.circuit_shape_primary.r1cs_shape,
+    ]
+  }
+
+  fn secondary_r1cs_shapes(&self) -> Vec<&R1CSShape<Dual<E>>> {
+    vec![
+      &self.r1cs_shape_cyclefold(),
+      &self.pp.circuit_shape_cyclefold.r1cs_shape,
+    ]
+  }
 }
 
 /// Layer 2 Recursive SNARK
@@ -130,18 +147,18 @@ where
   E: CurveCycleEquipped,
 {
   // F
-  r_W_F: RelaxedR1CSWitness<E>,
-  r_U_F: RelaxedR1CSInstance<E>,
+  pub(in crate::nebula) r_W_F: RelaxedR1CSWitness<E>,
+  pub(in crate::nebula) r_U_F: RelaxedR1CSInstance<E>,
   // ops
-  r_W_ops: RelaxedR1CSWitness<E>,
-  r_U_ops: RelaxedR1CSInstance<E>,
+  pub(in crate::nebula) r_W_ops: RelaxedR1CSWitness<E>,
+  pub(in crate::nebula) r_U_ops: RelaxedR1CSInstance<E>,
   // scan
-  r_W_scan: RelaxedR1CSWitness<E>,
-  r_U_scan: RelaxedR1CSInstance<E>,
+  pub(in crate::nebula) r_W_scan: RelaxedR1CSWitness<E>,
+  pub(in crate::nebula) r_U_scan: RelaxedR1CSInstance<E>,
   // secondary
-  r_W_cyclefold: RelaxedR1CSWitness<Dual<E>>,
-  r_U_cyclefold: RelaxedR1CSInstance<Dual<E>>,
-  rs: RecursiveSNARK<E>,
+  pub(in crate::nebula) r_W_cyclefold: RelaxedR1CSWitness<Dual<E>>,
+  pub(in crate::nebula) r_U_cyclefold: RelaxedR1CSInstance<Dual<E>>,
+  pub(in crate::nebula) rs: RecursiveSNARK<E>,
   IC_i: E::Scalar,
   i: usize,
   z0: Vec<E::Scalar>,
