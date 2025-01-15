@@ -139,6 +139,8 @@ where
 }
 
 /// Layer 2 Recursive SNARK
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct ShardingRecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
