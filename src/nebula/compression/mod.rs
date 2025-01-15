@@ -12,7 +12,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 
 /// A type that holds the prover key for [`CompressedSNARK`]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProverKey<E, S1, S2>
 where
   E: CurveCycleEquipped,
@@ -24,7 +24,7 @@ where
 }
 
 /// A type that holds the prover key for [`CompressedSNARK`]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VerifierKey<E, S1, S2>
 where
   E: CurveCycleEquipped,
