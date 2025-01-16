@@ -46,7 +46,7 @@ where
   fn arity(&self) -> usize {
     2
   }
-
+  // TODO: complete all the checks in specified in Nebula 4.4.3
   fn synthesize<CS: bellpepper_core::ConstraintSystem<E::Scalar>>(
     &self,
     cs: &mut CS,
