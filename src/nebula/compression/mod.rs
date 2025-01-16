@@ -273,7 +273,7 @@ where
       let (hash_primary, hash_cyclefold) = {
         let mut hasher_p = <Dual<E> as Engine>::RO::new(
           pp.F().ro_consts.clone(),
-          3 + 2 * pp.F().F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3, // (digest, num_steps, prev_IC) + 2 * arity "(z0, zi)" + U
+          3 + 2 * pp.ops().F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3, // (digest, num_steps, prev_IC) + 2 * arity "(z0, zi)" + U
         );
         hasher_p.absorb(pp.ops().digest());
         hasher_p.absorb(E::Scalar::from(self.num_steps_ops as u64));
@@ -323,7 +323,7 @@ where
       let (hash_primary, hash_cyclefold) = {
         let mut hasher_p = <Dual<E> as Engine>::RO::new(
           pp.F().ro_consts.clone(),
-          4 + 2 * pp.F().F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3, // (digest, num_steps, prev_IC) + 2 * arity "(z0, zi)" + U
+          4 + 2 * pp.scan().F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3, // (digest, num_steps, prev_IC) + 2 * arity "(z0, zi)" + U
         );
         hasher_p.absorb(pp.scan().digest());
         hasher_p.absorb(E::Scalar::from(self.num_steps_scan as u64));

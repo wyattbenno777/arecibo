@@ -41,7 +41,8 @@ pub struct AuditPublicParams<E1>
 where
   E1: CurveCycleEquipped,
 {
-  F_arity_primary: usize,
+  /// Arity of step circuit
+  pub F_arity_primary: usize,
   /// RO constants for primary circuit
   pub ro_consts: ROConstants<Dual<E1>>,
   /// RO constants for primary circuit
