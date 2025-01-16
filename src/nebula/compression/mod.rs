@@ -52,6 +52,7 @@ where
   r_U: Vec<RelaxedR1CSInstance<E>>,
   l_u: Vec<R1CSInstance<E>>,
   r_U_secondary: Vec<RelaxedR1CSInstance<Dual<E>>>,
+  nebula_instance: NebulaInstance<E>,
 }
 
 impl<E, S1, S2> CompressedSNARK<E, S1, S2>
@@ -86,6 +87,7 @@ where
     pp: &impl Layer1PPTrait<E>,
     pk: &ProverKey<E, S1, S2>,
     rs: &impl Layer1RSTrait<E>,
+    nebula_instance: NebulaInstance<E>,
   ) -> Result<Self, NovaError> {
     let r_U = vec![
       rs.F().r_U_primary.clone(),
@@ -149,6 +151,7 @@ where
       r_U,
       l_u,
       r_U_secondary: U_secondary,
+      nebula_instance,
     })
   }
 
