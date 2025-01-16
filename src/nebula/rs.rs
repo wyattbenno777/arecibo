@@ -36,7 +36,8 @@ pub struct PublicParams<E1>
 where
   E1: CurveCycleEquipped,
 {
-  F_arity_primary: usize,
+  /// The arity of the step circuit
+  pub F_arity_primary: usize,
   /// RO constants for primary circuit
   pub ro_consts: ROConstants<Dual<E1>>,
   /// RO constants for primary circuit
@@ -171,10 +172,10 @@ where
   i: usize,
 
   // incremental commitment of previous invokation of step circuit
-  prev_IC: E1::Scalar,
+  pub(in crate::nebula) prev_IC: E1::Scalar,
 
   // commitment to non-deterministic advice
-  comm_omega_prev: Commitment<E1>, // supposed to be contained in self.l_u_primary // corresponds to comm_W in self.l_u_primary
+  pub(in crate::nebula) comm_omega_prev: Commitment<E1>, // supposed to be contained in self.l_u_primary // corresponds to comm_W in self.l_u_primary
 
   // cyclefold circuit data
   r_W_cyclefold: RelaxedR1CSWitness<Dual<E1>>,
@@ -413,7 +414,7 @@ where
     let (hash_primary, hash_cyclefold) = {
       let mut hasher_p = <Dual<E1> as Engine>::RO::new(
         pp.ro_consts.clone(),
-        3 + 2 * pp.F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3,
+        3 + 2 * pp.F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3, // (digest, num_steps, prev_IC) + 2 * arity "(z0, zi)" + U
       );
       hasher_p.absorb(pp.digest());
       hasher_p.absorb(E1::Scalar::from(num_steps as u64));

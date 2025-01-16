@@ -176,10 +176,10 @@ where
   i: usize,
 
   // incremental commitment to memory advice
-  prev_IC: (E1::Scalar, E1::Scalar),
+  pub(in crate::nebula) prev_IC: (E1::Scalar, E1::Scalar),
 
   // commitment to non-deterministic advice
-  comm_omega_prev: (Commitment<E1>, Commitment<E1>), // supposed to be contained in self.l_u_primary // corresponds to comm_W in self.l_u_primary
+  pub(in crate::nebula) comm_omega_prev: (Commitment<E1>, Commitment<E1>), // supposed to be contained in self.l_u_primary // corresponds to comm_W in self.l_u_primary
 
   // cyclefold circuit data
   r_W_cyclefold: RelaxedR1CSWitness<Dual<E1>>,
