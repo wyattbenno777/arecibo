@@ -184,3 +184,23 @@ where
     Ok(())
   }
 }
+
+/// Public i/o for WASM execution proving
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct NebulaInstance<E>
+where
+  E: CurveCycleEquipped,
+{
+  // execution instance
+  execution_z0: Vec<E::Scalar>,
+  IC_i: E::Scalar,
+
+  // ops instance
+  ops_z0: Vec<E::Scalar>,
+  ops_IC_i: E::Scalar,
+
+  // scan instance
+  scan_z0: Vec<E::Scalar>,
+  scan_IC_i: (E::Scalar, E::Scalar),
+}
