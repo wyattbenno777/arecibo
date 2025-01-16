@@ -55,10 +55,15 @@ unzip-n = "0.1.2"
 poseidon_sponge = { git = "https://github.com/Forpee/poseidon_sponge", branch = "main" }
 serde_json = { version = "1.0" }
 
+# Onchain verifier
+askama = { version = "0.12.0", features = ["config"], default-features = false }
+revm = {version="3.5.0", default-features=false, features=["std"]}
+
 [target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
 # grumpkin-msm has been patched to support MSMs for the pasta curve cycle
 # see: https://github.com/lurk-lab/grumpkin-msm/pull/3
-grumpkin-msm = { git = "https://github.com/lurk-lab/grumpkin-msm", branch = "dev" }
+grumpkin-msm = { git = "https://github.com/lurk-lab/grumpkin-msm", branch = "mont_t-abs" }
+
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2.0", default-features = false, features = ["js"] }
