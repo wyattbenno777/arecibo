@@ -209,6 +209,7 @@ impl<E> NebulaInstance<E>
 where
   E: CurveCycleEquipped,
 {
+  /// Create a new [`NebulaInstance`]
   pub fn new(
     execution_z0: Vec<E::Scalar>,
     IC_i: E::Scalar,
