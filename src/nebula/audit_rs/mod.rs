@@ -186,7 +186,7 @@ where
   pub(in crate::nebula) r_U_cyclefold: RelaxedR1CSInstance<Dual<E1>>,
 
   // outputs
-  zi: Vec<E1::Scalar>,
+  pub(in crate::nebula) zi: Vec<E1::Scalar>,
 }
 
 impl<E1> AuditRecursiveSNARK<E1>

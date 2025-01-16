@@ -4,11 +4,13 @@ use super::{
   nifs::PrimaryNIFS,
   traits::{Layer1PPTrait, Layer1RSTrait},
 };
+use crate::traits::TranscriptEngineTrait;
 use crate::{
   errors::NovaError,
   r1cs::{R1CSInstance, RelaxedR1CSInstance},
   traits::{snark::BatchedRelaxedR1CSSNARKTrait, CurveCycleEquipped, Dual},
 };
+use ff::Field;
 use serde::{Deserialize, Serialize};
 
 /// A type that holds the prover key for [`CompressedSNARK`]
@@ -53,6 +55,8 @@ where
   l_u: Vec<R1CSInstance<E>>,
   r_U_secondary: Vec<RelaxedR1CSInstance<Dual<E>>>,
   nebula_instance: NebulaInstance<E>,
+  scan_zi: Vec<E::Scalar>,
+  ops_zi: Vec<E::Scalar>,
 }
 
 impl<E, S1, S2> CompressedSNARK<E, S1, S2>
@@ -152,6 +156,8 @@ where
       l_u,
       r_U_secondary: U_secondary,
       nebula_instance,
+      scan_zi: rs.scan().zi.clone(),
+      ops_zi: rs.ops().zi.clone(),
     })
   }
 
@@ -161,6 +167,56 @@ where
     pp: &impl Layer1PPTrait<E>,
     vk: &VerifierKey<E, S1, S2>,
   ) -> Result<(), NovaError> {
+    // 1. check h_IS = h_RS = h_WS = h_FS = 1 // initial values are correct
+    let (init_h_is, init_h_rs, init_h_ws, init_h_fs) = {
+      (
+        self.nebula_instance.scan_z0[2],
+        self.nebula_instance.ops_z0[3],
+        self.nebula_instance.ops_z0[4],
+        self.nebula_instance.scan_z0[3],
+      )
+    };
+    if init_h_is != E::Scalar::ONE
+      || init_h_rs != E::Scalar::ONE
+      || init_h_ws != E::Scalar::ONE
+      || init_h_fs != E::Scalar::ONE
+    {
+      return Err(NovaError::ProofVerifyError);
+    }
+
+    // 2. check Cn′ = Cn // commitments carried in both Πops and ΠF are the same
+    if self.nebula_instance.IC_i != self.nebula_instance.ops_IC_i {
+      return Err(NovaError::ProofVerifyError);
+    }
+
+    // 3. check γ and γ are derived by hashing C and C′′.
+    // Get alpha and gamma
+    let mut keccak = E::TE::new(b"compute MCC challenges");
+    keccak.absorb(b"C_n", &self.nebula_instance.IC_i);
+    keccak.absorb(b"IC_IS", &self.nebula_instance.scan_IC_i.0);
+    keccak.absorb(b"IC_FS", &self.nebula_instance.scan_IC_i.1);
+    let gamma = keccak.squeeze(b"gamma")?;
+    let alpha = keccak.squeeze(b"alpha")?;
+
+    if self.nebula_instance.ops_z0[0] != gamma || self.nebula_instance.ops_z0[1] != alpha {
+      return Err(NovaError::ProofVerifyError);
+    }
+
+    // 4. check h_IS' · h_WS' = h_RS' · h_FS'.
+
+    // Inputs for multiset check
+    let (h_is, h_rs, h_ws, h_fs) = {
+      (
+        self.scan_zi[2],
+        self.ops_zi[3],
+        self.ops_zi[4],
+        self.scan_zi[3],
+      )
+    };
+    if h_is * h_ws != h_rs * h_fs {
+      return Err(NovaError::ProofVerifyError);
+    }
+
     let U_F = self.nifs_F.verify(
       &pp.F().ro_consts,
       &pp.F().digest(),

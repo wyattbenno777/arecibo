@@ -178,10 +178,10 @@ where
 
   // cyclefold circuit data
   r_W_cyclefold: RelaxedR1CSWitness<Dual<E1>>,
-  pub(crate) r_U_cyclefold: RelaxedR1CSInstance<Dual<E1>>,
+  pub(in crate::nebula) r_U_cyclefold: RelaxedR1CSInstance<Dual<E1>>,
 
   // outputs
-  zi: Vec<E1::Scalar>,
+  pub(in crate::nebula) zi: Vec<E1::Scalar>,
 }
 
 impl<E1> RecursiveSNARK<E1>
