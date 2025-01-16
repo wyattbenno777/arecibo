@@ -8,14 +8,14 @@ use crate::gadgets::scalar_as_base;
 use crate::nebula::augmented_circuit::AugmentedCircuitParams;
 use crate::nebula::layer_2::utils::absorb_U;
 use crate::nebula::layer_2::utils::absorb_U_bn;
-use crate::r1cs::{R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness};
+use crate::r1cs::{CommitmentKeyHint, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness};
 use crate::traits::commitment::Len;
 use crate::traits::ROTrait;
 use crate::traits::{Dual, Engine};
 use crate::CommitmentKey;
 use crate::{
   nebula::rs::{PublicParams, RecursiveSNARK},
-  traits::{snark::default_ck_hint, CurveCycleEquipped},
+  traits::CurveCycleEquipped,
   R1CSWithArity,
 };
 use ff::Field;
@@ -53,7 +53,11 @@ where
 {
   /// Produce the setup material for the Aggregation layer
   #[tracing::instrument(level = "info", name = "AggregationPublicParams::setup", skip_all)]
-  pub fn setup(node_pp: impl Layer1PPTrait<E>) -> Self {
+  pub fn setup(
+    node_pp: impl Layer1PPTrait<E>,
+    ck_hint_primary: &CommitmentKeyHint<E>,
+    ck_hint_cyclefold: &CommitmentKeyHint<Dual<E>>,
+  ) -> Self {
     // Get already setup public params from layer 1
     let (pp_F, pp_ops, pp_scan) = node_pp.into_parts();
 
@@ -84,7 +88,7 @@ where
     let verifier_circuit: VerifierCircuit<E> =
       VerifierCircuit::new(aug_params, ro_consts, None, None, None, None);
     let pp: PublicParams<E> =
-      PublicParams::setup(&verifier_circuit, &*default_ck_hint(), &*default_ck_hint());
+      PublicParams::setup(&verifier_circuit, ck_hint_primary, ck_hint_cyclefold);
 
     Self {
       pp,
@@ -536,7 +540,8 @@ mod test {
   }
 
   fn aggregation_node(node_pp: NodePP, nodes_rs: &[NodeRS]) {
-    let aggregation_pp = AggregationPublicParams::<E1>::setup(node_pp);
+    let aggregation_pp =
+      AggregationPublicParams::<E1>::setup(node_pp, &*default_ck_hint(), &*default_ck_hint());
     let mut aggregation_engine =
       AggregationRecursiveSNARK::new(&aggregation_pp, &nodes_rs[0], &(F::ZERO, F::ZERO)).unwrap();
 
