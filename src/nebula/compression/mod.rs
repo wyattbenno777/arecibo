@@ -204,3 +204,26 @@ where
   scan_z0: Vec<E::Scalar>,
   scan_IC_i: (E::Scalar, E::Scalar),
 }
+
+impl<E> NebulaInstance<E>
+where
+  E: CurveCycleEquipped,
+{
+  fn new(
+    execution_z0: Vec<E::Scalar>,
+    IC_i: E::Scalar,
+    ops_z0: Vec<E::Scalar>,
+    ops_IC_i: E::Scalar,
+    scan_z0: Vec<E::Scalar>,
+    scan_IC_i: (E::Scalar, E::Scalar),
+  ) -> Self {
+    Self {
+      execution_z0,
+      IC_i,
+      ops_z0,
+      ops_IC_i,
+      scan_z0,
+      scan_IC_i,
+    }
+  }
+}
