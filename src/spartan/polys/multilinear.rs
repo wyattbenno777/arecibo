@@ -163,12 +163,6 @@ impl<Scalar: PrimeField> SparsePolynomial<Scalar> {
   }
 }
 
-impl<Scalar: PrimeField> SparsePolynomial<Scalar> {
-  pub fn new_zk(num_vars: usize, Z: Vec<Scalar>) -> Self {
-      Self { num_vars, Z }
-  }
-}
-
 /// Adds another multilinear polynomial to `self`.
 /// Assumes the two polynomials have the same number of variables.
 impl<Scalar: PrimeField> Add for MultilinearPolynomial<Scalar> {

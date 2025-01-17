@@ -3,7 +3,6 @@
 // public modules to be used as an evaluation engine with Spartan
 pub mod hyperkzg;
 pub mod ipa_pc;
-pub mod zk_ipa_pc;
 
 pub mod non_hiding_zeromorph;
 
@@ -14,7 +13,7 @@ pub mod pedersen;
 pub(crate) mod poseidon;
 pub(crate) mod secp_secq;
 pub(crate) mod traits;
-pub mod zk_pedersen;
+
 // a non-hiding variant of {kzg, zeromorph}
 mod kzg_commitment;
 pub(crate) mod util;
@@ -30,7 +29,6 @@ use crate::{
     pedersen::CommitmentEngine as PedersenCommitmentEngine,
     poseidon::{PoseidonRO, PoseidonROCircuit},
     secp_secq::{secp256k1, secq256k1},
-    zk_pedersen::CommitmentEngine as ZKPedersenCommitmentEngine,
   },
   traits::{CurveCycleEquipped, Engine},
 };
@@ -62,20 +60,6 @@ impl Engine for Bn256EngineIPA {
   type CE = PedersenCommitmentEngine<Self>;
 }
 
-/// An implementation of the Nova `Engine` trait with BN254 curve and Pedersen commitment scheme with zero-knowledge.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Bn256EngineZKPedersen;
-
-impl Engine for Bn256EngineZKPedersen {
-  type Base = bn256::Base;
-  type Scalar = bn256::Scalar;
-  type GE = bn256::Point;
-  type RO = PoseidonRO<Self::Base, Self::Scalar>;
-  type ROCircuit = PoseidonROCircuit<Self::Base>;
-  type TE = Keccak256Transcript<Self>;
-  type CE = ZKPedersenCommitmentEngine<Self>;
-}
-
 impl Engine for GrumpkinEngine {
   type Base = grumpkin::Base;
   type Scalar = grumpkin::Scalar;
@@ -84,16 +68,6 @@ impl Engine for GrumpkinEngine {
   type ROCircuit = PoseidonROCircuit<Self::Base>;
   type TE = Keccak256Transcript<Self>;
   type CE = PedersenCommitmentEngine<Self>;
-}
-
-impl Engine for ZKGrumpkinEngine {
-  type Base = grumpkin::Base;
-  type Scalar = grumpkin::Scalar;
-  type GE = grumpkin::Point;
-  type RO = PoseidonRO<Self::Base, Self::Scalar>;
-  type ROCircuit = PoseidonROCircuit<Self::Base>;
-  type TE = Keccak256Transcript<Self>;
-  type CE = ZKPedersenCommitmentEngine<Self>;
 }
 
 /// An implementation of the Nova `Engine` trait with BN254 curve and Zeromorph commitment scheme
@@ -125,10 +99,6 @@ impl Engine for Bn256EngineKZG {
 
 impl CurveCycleEquipped for Bn256EngineIPA {
   type Secondary = GrumpkinEngine;
-}
-
-impl CurveCycleEquipped for Bn256EngineZKPedersen {
-  type Secondary = ZKGrumpkinEngine;
 }
 
 impl CurveCycleEquipped for Bn256EngineKZG {

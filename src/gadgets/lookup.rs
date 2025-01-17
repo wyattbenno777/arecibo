@@ -175,7 +175,7 @@ impl<E: Engine> LookupTrace<E> {
 
   /// commit rw_trace to lookup
   #[allow(clippy::too_many_arguments)]
-  pub fn commit<E2: Engine, CS: ConstraintSystem<<E as Engine>::Scalar>>(
+  pub fn commit<E2, CS: ConstraintSystem<<E as Engine>::Scalar>>(
     &mut self,
     mut cs: CS,
     ro_const: ROConstantsCircuit<E2>,

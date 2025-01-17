@@ -8,25 +8,24 @@
 
 pub mod batched;
 pub mod batched_ppsnark;
-pub mod batched_zkppsnark;
-pub mod ipa_batched_ppsnark;
-pub mod verify_circuit;
-pub mod tiny_batched_ppsnark;
+// pub mod batched_zkppsnark;
+// pub mod ipa_batched_ppsnark;
+// pub mod verify_circuit;
+// pub mod tiny_batched_ppsnark;
+// pub mod lookup_ppsnark;
 #[macro_use]
 mod macros;
-pub mod lookup_ppsnark;
 pub(crate) mod math;
 pub mod polys;
 pub mod ppsnark;
 pub mod snark;
 mod sumcheck;
-pub mod zkppsnark;
+// pub mod zkppsnark;
 
-pub mod nizk;
-pub mod zksnark;
-mod zksumcheck;
+// pub mod nizk;
+// pub mod zksnark;
+// mod zksumcheck;
 
-use serde::{Deserialize, Serialize};
 use crate::{
   r1cs::{R1CSShape, SparseMatrix},
   traits::Engine,
@@ -37,6 +36,7 @@ use itertools::Itertools as _;
 use rayon::{iter::IntoParallelRefIterator, prelude::*};
 use rayon_scan::ScanParallelIterator as _;
 use ref_cast::RefCast;
+use serde::{Deserialize, Serialize};
 
 // Creates a vector of the first `n` powers of `s`.
 /// Creates a vector of the first `n` powers of `s`.
@@ -49,8 +49,7 @@ pub fn powers<F: Field>(s: &F, n: usize) -> Vec<F> {
 
 /// A type that holds a witness to a polynomial evaluation instance
 #[repr(transparent)]
-#[derive(Debug, RefCast)]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, RefCast, Clone, Serialize, Deserialize)]
 struct PolyEvalWitness<E: Engine> {
   p: Vec<E::Scalar>, // polynomial
 }
