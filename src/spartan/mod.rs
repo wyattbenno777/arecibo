@@ -8,11 +8,6 @@
 
 pub mod batched;
 pub mod batched_ppsnark;
-// pub mod batched_zkppsnark;
-// pub mod ipa_batched_ppsnark;
-// pub mod verify_circuit;
-// pub mod tiny_batched_ppsnark;
-// pub mod lookup_ppsnark;
 #[macro_use]
 mod macros;
 pub(crate) mod math;
@@ -20,11 +15,6 @@ pub mod polys;
 pub mod ppsnark;
 pub mod snark;
 mod sumcheck;
-// pub mod zkppsnark;
-
-// pub mod nizk;
-// pub mod zksnark;
-// mod zksumcheck;
 
 use crate::{
   r1cs::{R1CSShape, SparseMatrix},
