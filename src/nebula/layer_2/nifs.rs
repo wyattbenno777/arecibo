@@ -6,7 +6,7 @@ use crate::constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS};
 use crate::cyclefold::circuit::CycleFoldCircuit;
 use crate::cyclefold::util::{absorb_cyclefold_r1cs, absorb_primary_commitment};
 use crate::gadgets::scalar_as_base;
-use crate::nebula::nifs::PrimaryRelaxedNIFS;
+use crate::nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryRelaxedNIFS};
 use crate::r1cs::R1CSWitness;
 use crate::traits::AbsorbInROTrait;
 use crate::traits::{CurveCycleEquipped, ROTrait};
@@ -234,53 +234,6 @@ where
     let r = ro.squeeze(NUM_CHALLENGE_BITS);
     let U = U1.fold(U2, &comm_T, &r);
     let W = W1.fold(W2, &T, &<Dual<E> as Engine>::Scalar::ZERO, &r)?;
-    Ok((Self { comm_T }, (U, W), r))
-  }
-}
-
-/// NIFS for folding two Cyclefold [`RelaxedR1CSInstance`] and [`RelaxedR1CSWitness`] instances
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(bound = "")]
-pub struct CycleFoldRelaxedNIFS<E>
-where
-  E: CurveCycleEquipped,
-{
-  pub(crate) comm_T: Commitment<Dual<E>>,
-}
-
-impl<E> CycleFoldRelaxedNIFS<E>
-where
-  E: CurveCycleEquipped,
-{
-  /// Prover algorithm for folding two CycleFold [`RelaxedR1CSInstance`] and [`RelaxedR1CSWitness`] instances
-  #[tracing::instrument(skip_all, name = "CycleFoldRelaxedNIFS::prove", level = "debug")]
-  pub fn prove(
-    ck: &CommitmentKey<Dual<E>>,
-    ro_consts: &ROConstants<Dual<E>>,
-    S: &R1CSShape<Dual<E>>,
-    U1: &RelaxedR1CSInstance<Dual<E>>,
-    W1: &RelaxedR1CSWitness<Dual<E>>,
-    U2: &RelaxedR1CSInstance<Dual<E>>,
-    W2: &RelaxedR1CSWitness<Dual<E>>,
-  ) -> Result<
-    (
-      Self,
-      (RelaxedR1CSInstance<Dual<E>>, RelaxedR1CSWitness<Dual<E>>),
-      <Dual<E> as Engine>::Scalar,
-    ),
-    NovaError,
-  > {
-    let mut ro = <Dual<E> as Engine>::RO::new(
-      ro_consts.clone(),
-      2 * (3 + 3 + BN_N_LIMBS + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (U) + T
-    );
-    absorb_U_bn(U1, &mut ro);
-    absorb_U_bn(U2, &mut ro);
-    let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2, &<Dual<E> as Engine>::Scalar::ZERO)?;
-    comm_T.absorb_in_ro(&mut ro);
-    let r = ro.squeeze(NUM_CHALLENGE_BITS);
-    let U = U1.fold_relaxed(U2, &comm_T, &r);
-    let W = W1.fold_relaxed(W2, &T, &<Dual<E> as Engine>::Scalar::ZERO, &r)?;
     Ok((Self { comm_T }, (U, W), r))
   }
 }

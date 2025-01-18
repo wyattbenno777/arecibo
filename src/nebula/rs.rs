@@ -1,12 +1,13 @@
 //! This module implements a SNARK that proves the correct execution of an incremental computation
 use std::sync::Arc;
 
-use crate::cyclefold::util::{absorb_primary_relaxed_r1cs, FoldingData};
-use crate::traits::commitment::CommitmentEngineTrait;
-
 use super::augmented_circuit::{AugmentedCircuit, AugmentedCircuitInputs, AugmentedCircuitParams};
 use super::ic::IC;
 use super::nifs::{PrimaryNIFS, PrimaryRelaxedNIFS, NIFS};
+use super::traits::impl_rs_fields_trait;
+use crate::cyclefold::util::{absorb_primary_relaxed_r1cs, FoldingData};
+use crate::nebula::traits::RecursiveSNARKFieldsTrait;
+use crate::traits::commitment::CommitmentEngineTrait;
 use crate::Commitment;
 use crate::{
   bellpepper::{
@@ -637,6 +638,8 @@ pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
     E::CE::commit(ck, &self.non_deterministic_advice(), &E::Scalar::ZERO)
   }
 }
+
+impl_rs_fields_trait!(RecursiveSNARK);
 
 #[cfg(test)]
 mod test {

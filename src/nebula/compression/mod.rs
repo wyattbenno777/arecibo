@@ -2,14 +2,13 @@
 
 use super::{
   ic::IC,
-  nifs::{PrimaryNIFS, PrimaryRelaxedNIFS},
+  nifs::{CycleFoldRelaxedNIFS, PrimaryNIFS, PrimaryRelaxedNIFS},
   traits::{Layer1PPTrait, Layer1RSTrait},
 };
-use crate::traits::commitment::CommitmentEngineTrait;
 use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
   gadgets::scalar_as_base,
-  traits::{Engine, TranscriptEngineTrait},
+  traits::{snark::RelaxedR1CSSNARKTrait, Engine, TranscriptEngineTrait},
   DerandKey,
 };
 use crate::{cyclefold::util::absorb_primary_relaxed_r1cs, traits::ROTrait};
@@ -18,6 +17,7 @@ use crate::{
   r1cs::{R1CSInstance, RelaxedR1CSInstance},
   traits::{snark::BatchedRelaxedR1CSSNARKTrait, CurveCycleEquipped, Dual},
 };
+use crate::{r1cs::RelaxedR1CSWitness, traits::commitment::CommitmentEngineTrait};
 use crate::{traits::AbsorbInROTrait, Commitment};
 use ff::Field;
 use serde::{Deserialize, Serialize};
@@ -27,7 +27,7 @@ pub struct ProverKey<E, S1, S2>
 where
   E: CurveCycleEquipped,
   S1: BatchedRelaxedR1CSSNARKTrait<E>,
-  S2: BatchedRelaxedR1CSSNARKTrait<Dual<E>>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E>>,
 {
   primary: S1::ProverKey,
   secondary: S2::ProverKey,
@@ -39,7 +39,7 @@ pub struct VerifierKey<E, S1, S2>
 where
   E: CurveCycleEquipped,
   S1: BatchedRelaxedR1CSSNARKTrait<E>,
-  S2: BatchedRelaxedR1CSSNARKTrait<Dual<E>>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E>>,
 {
   primary: S1::VerifierKey,
   secondary: S2::VerifierKey,
@@ -54,7 +54,7 @@ pub struct CompressedSNARK<E, S1, S2>
 where
   E: CurveCycleEquipped,
   S1: BatchedRelaxedR1CSSNARKTrait<E>,
-  S2: BatchedRelaxedR1CSSNARKTrait<Dual<E>>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E>>,
 {
   snark_primary: S1,
   snark_secondary: S2,
@@ -68,49 +68,49 @@ where
   F_zi: Vec<E::Scalar>,
   scan_zi: Vec<E::Scalar>,
   ops_zi: Vec<E::Scalar>,
+
   // F data
   num_steps_F: usize,
-  r_U_primary_F: RelaxedR1CSInstance<E>,
   prev_IC_F: E::Scalar,
-  l_u_primary_F: R1CSInstance<E>,
   comm_omega_prev_F: Commitment<E>,
   nifs_random_F: PrimaryRelaxedNIFS<E>,
   wit_blind_F: E::Scalar,
   err_blind_F: E::Scalar,
-  wit_blind_F_secondary: <Dual<E> as Engine>::Scalar,
-  err_blind_F_secondary: <Dual<E> as Engine>::Scalar,
   U_random_F: RelaxedR1CSInstance<E>,
+
   // ops data
   num_steps_ops: usize,
-  r_U_primary_ops: RelaxedR1CSInstance<E>,
   prev_IC_ops: E::Scalar,
-  l_u_primary_ops: R1CSInstance<E>,
   comm_omega_prev_ops: Commitment<E>,
   nifs_random_ops: PrimaryRelaxedNIFS<E>,
   wit_blind_ops: E::Scalar,
   err_blind_ops: E::Scalar,
-  wit_blind_ops_secondary: <Dual<E> as Engine>::Scalar,
-  err_blind_ops_secondary: <Dual<E> as Engine>::Scalar,
   U_random_ops: RelaxedR1CSInstance<E>,
+
   // scan data
   num_steps_scan: usize,
-  r_U_primary_scan: RelaxedR1CSInstance<E>,
   prev_IC_scan: (E::Scalar, E::Scalar),
-  l_u_primary_scan: R1CSInstance<E>,
   comm_omega_prev_scan: (Commitment<E>, Commitment<E>),
   nifs_random_scan: PrimaryRelaxedNIFS<E>,
   wit_blind_scan: E::Scalar,
   err_blind_scan: E::Scalar,
-  wit_blind_scan_secondary: <Dual<E> as Engine>::Scalar,
-  err_blind_scan_secondary: <Dual<E> as Engine>::Scalar,
   U_random_scan: RelaxedR1CSInstance<E>,
+
+  // CycleFold data
+  nifs_1_secondary: CycleFoldRelaxedNIFS<E>,
+  nifs_2_secondary: CycleFoldRelaxedNIFS<E>,
+  nifs_final_secondary: CycleFoldRelaxedNIFS<E>,
+  U_random_secondary: RelaxedR1CSInstance<Dual<E>>,
+  derandom_U_secondary: RelaxedR1CSInstance<Dual<E>>,
+  wit_blind_secondary: <Dual<E> as Engine>::Scalar,
+  err_blind_secondary: <Dual<E> as Engine>::Scalar,
 }
 
 impl<E, S1, S2> CompressedSNARK<E, S1, S2>
 where
   E: CurveCycleEquipped,
   S1: BatchedRelaxedR1CSSNARKTrait<E>,
-  S2: BatchedRelaxedR1CSSNARKTrait<Dual<E>>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E>>,
 {
   /// Creates prover and verifier keys for [`CompressedSNARK`]
   pub fn setup(
@@ -118,7 +118,7 @@ where
   ) -> Result<(ProverKey<E, S1, S2>, VerifierKey<E, S1, S2>), NovaError> {
     let (pk_primary, vk_primary) = S1::setup(pp.biggest_ck().clone(), pp.primary_r1cs_shapes())?;
     let (pk_secondary, vk_secondary) =
-      S2::setup(pp.ck_secondary().clone(), pp.secondary_r1cs_shapes())?;
+      S2::setup(pp.ck_secondary().clone(), pp.cyclefold_r1cs_shape())?;
     let prover_key = ProverKey {
       primary: pk_primary,
       secondary: pk_secondary,
@@ -139,16 +139,8 @@ where
     rs: &impl Layer1RSTrait<E>,
     nebula_instance: NebulaInstance<E>,
   ) -> Result<Self, NovaError> {
-    let r_U = vec![
-      rs.F().r_U_primary.clone(),
-      rs.ops().r_U_primary.clone(),
-      rs.scan().r_U_primary.clone(),
-    ];
-    let l_u = vec![
-      rs.F().l_u_primary.clone(),
-      rs.ops().l_u_primary.clone(),
-      rs.scan().l_u_primary.clone(),
-    ];
+    let r_U = rs.r_U_clone();
+    let l_u = rs.l_u_clone();
 
     // Primary SNARK
     //
@@ -179,48 +171,24 @@ where
     // Secondary SNARK
     //
     // Run the CycleFold instances through Spartan
+    let U_secondary = rs.r_U_secondary_clone();
+    let (
+      nifs_1_secondary,
+      nifs_2_secondary,
+      nifs_final_secondary,
+      derandom_U_secondary,
+      derandom_W_secondary,
+      U_random_secondary,
+      wit_blind_secondary,
+      err_blind_secondary,
+    ) = rs.fold_cyclefold_derandom(pp)?;
 
-    let U_secondary = vec![
-      rs.F().r_U_cyclefold.clone(),
-      rs.ops().r_U_cyclefold.clone(),
-      rs.scan().r_U_cyclefold.clone(),
-    ];
-
-    // TODO: Fold these cyclefold relaxed R1CS instance witness pairs into one relaxed R1CS instance witness pair
-    let (
-      U_F_secondary_derandom,
-      W_F_secondary_derandom,
-      wit_blind_F_secondary,
-      err_blind_F_secondary,
-    ) = rs.F().secondary_rs_part_derandomized(pp.F());
-    let (
-      U_ops_secondary_derandom,
-      W_ops_secondary_derandom,
-      wit_blind_ops_secondary,
-      err_blind_ops_secondary,
-    ) = rs.ops().secondary_rs_part_derandomized(pp.ops());
-    let (
-      U_scan_secondary_derandom,
-      W_scan_secondary_derandom,
-      wit_blind_scan_secondary,
-      err_blind_scan_secondary,
-    ) = rs.scan().secondary_rs_part_derandomized(pp.scan());
-    let U_secondary_derandom = vec![
-      U_F_secondary_derandom.clone(),
-      U_ops_secondary_derandom.clone(),
-      U_scan_secondary_derandom.clone(),
-    ];
-    let W_secondary_derandom = vec![
-      W_F_secondary_derandom.clone(),
-      W_ops_secondary_derandom.clone(),
-      W_scan_secondary_derandom.clone(),
-    ];
     let snark_secondary = S2::prove(
       pp.ck_secondary(),
       &pk.secondary,
-      pp.secondary_r1cs_shapes(),
-      &U_secondary_derandom,
-      &W_secondary_derandom,
+      pp.cyclefold_r1cs_shape(),
+      &derandom_U_secondary,
+      &derandom_W_secondary,
     )?;
 
     Ok(Self {
@@ -239,42 +207,39 @@ where
 
       // F data
       num_steps_F: rs.F().num_steps(),
-      r_U_primary_F: rs.F().r_U_primary.clone(),
       prev_IC_F: rs.F().prev_IC,
-      l_u_primary_F: rs.F().l_u_primary.clone(),
       comm_omega_prev_F: rs.F().comm_omega_prev,
       nifs_random_F,
       wit_blind_F,
       err_blind_F,
-      wit_blind_F_secondary,
-      err_blind_F_secondary,
       U_random_F,
 
       // ops data
       num_steps_ops: rs.ops().num_steps(),
-      r_U_primary_ops: rs.ops().r_U_primary.clone(),
       prev_IC_ops: rs.ops().prev_IC,
-      l_u_primary_ops: rs.ops().l_u_primary.clone(),
       comm_omega_prev_ops: rs.ops().comm_omega_prev,
       nifs_random_ops,
       wit_blind_ops,
       err_blind_ops,
-      wit_blind_ops_secondary,
-      err_blind_ops_secondary,
       U_random_ops,
 
       // scan data
       num_steps_scan: rs.scan().num_steps(),
-      r_U_primary_scan: rs.scan().r_U_primary.clone(),
       prev_IC_scan: rs.scan().prev_IC,
-      l_u_primary_scan: rs.scan().l_u_primary.clone(),
       comm_omega_prev_scan: rs.scan().comm_omega_prev,
       nifs_random_scan,
       wit_blind_scan,
       err_blind_scan,
-      wit_blind_scan_secondary,
-      err_blind_scan_secondary,
       U_random_scan,
+
+      // CycleFold data
+      nifs_1_secondary,
+      nifs_2_secondary,
+      nifs_final_secondary,
+      derandom_U_secondary,
+      wit_blind_secondary,
+      err_blind_secondary,
+      U_random_secondary,
     })
   }
 
@@ -302,7 +267,7 @@ where
         for e in &self.F_zi {
           hasher_p.absorb(*e);
         }
-        absorb_primary_relaxed_r1cs::<E, Dual<E>>(&self.r_U_primary_F, &mut hasher_p);
+        absorb_primary_relaxed_r1cs::<E, Dual<E>>(&self.r_U[0], &mut hasher_p);
         hasher_p.absorb(self.prev_IC_F);
         let hash_primary = hasher_p.squeeze(NUM_HASH_BITS);
         let mut hasher_c = <Dual<E> as Engine>::RO::new(
@@ -317,8 +282,8 @@ where
       };
 
       // Verify the hashes equal the public IO for the final primary instance
-      if scalar_as_base::<Dual<E>>(hash_primary) != self.l_u_primary_F.X[0]
-        || scalar_as_base::<Dual<E>>(hash_cyclefold) != self.l_u_primary_F.X[1]
+      if scalar_as_base::<Dual<E>>(hash_primary) != self.l_u[0].X[0]
+        || scalar_as_base::<Dual<E>>(hash_cyclefold) != self.l_u[0].X[1]
       {
         return Err(NovaError::ProofVerifyError);
       }
@@ -347,7 +312,7 @@ where
         for e in &self.ops_zi {
           hasher_p.absorb(*e);
         }
-        absorb_primary_relaxed_r1cs::<E, Dual<E>>(&self.r_U_primary_ops, &mut hasher_p);
+        absorb_primary_relaxed_r1cs::<E, Dual<E>>(&self.r_U[1], &mut hasher_p);
         hasher_p.absorb(self.prev_IC_ops);
         let hash_primary = hasher_p.squeeze(NUM_HASH_BITS);
         let mut hasher_c = <Dual<E> as Engine>::RO::new(
@@ -362,8 +327,8 @@ where
       };
 
       // Verify the hashes equal the public IO for the final primary instance
-      if scalar_as_base::<Dual<E>>(hash_primary) != self.l_u_primary_ops.X[0]
-        || scalar_as_base::<Dual<E>>(hash_cyclefold) != self.l_u_primary_ops.X[1]
+      if scalar_as_base::<Dual<E>>(hash_primary) != self.l_u[1].X[0]
+        || scalar_as_base::<Dual<E>>(hash_cyclefold) != self.l_u[1].X[1]
       {
         return Err(NovaError::ProofVerifyError);
       }
@@ -395,7 +360,7 @@ where
         for e in &self.scan_zi {
           hasher_p.absorb(*e);
         }
-        absorb_primary_relaxed_r1cs::<E, Dual<E>>(&self.r_U_primary_scan, &mut hasher_p);
+        absorb_primary_relaxed_r1cs::<E, Dual<E>>(&self.r_U[2], &mut hasher_p);
         hasher_p.absorb(self.prev_IC_scan.0);
         hasher_p.absorb(self.prev_IC_scan.1);
         let hash_primary = hasher_p.squeeze(NUM_HASH_BITS);
@@ -411,8 +376,8 @@ where
       };
 
       // Verify the hashes equal the public IO for the final primary instance
-      if scalar_as_base::<Dual<E>>(hash_primary) != self.l_u_primary_scan.X[0]
-        || scalar_as_base::<Dual<E>>(hash_cyclefold) != self.l_u_primary_scan.X[1]
+      if scalar_as_base::<Dual<E>>(hash_primary) != self.l_u[2].X[0]
+        || scalar_as_base::<Dual<E>>(hash_cyclefold) != self.l_u[2].X[1]
       {
         return Err(NovaError::ProofVerifyError);
       }
@@ -485,6 +450,7 @@ where
       return Err(NovaError::ProofVerifyError);
     }
 
+    // Verify Primary SNARK
     let U_F_f = self.nifs_F.verify(
       &pp.F().ro_consts,
       &pp.F().digest(),
@@ -521,39 +487,32 @@ where
       &U_scan_f,
       &self.U_random_scan,
     );
-
     let U_F_derandom = U_F.derandomize(&vk.dk_primary, &self.wit_blind_F, &self.err_blind_F);
     let U_ops_derandom =
       U_ops.derandomize(&vk.dk_primary, &self.wit_blind_ops, &self.err_blind_ops);
     let U_scan_derandom =
       U_scan.derandomize(&vk.dk_primary, &self.wit_blind_scan, &self.err_blind_scan);
-
     let U = vec![U_F_derandom, U_ops_derandom, U_scan_derandom];
     self.snark_primary.verify(&vk.primary, &U)?;
 
-    let U_F_secondary_derandom = self.r_U_secondary[0].derandomize(
-      &vk.dk_secondary,
-      &self.wit_blind_F_secondary,
-      &self.err_blind_F_secondary,
+    // Verify secondary SNARK
+    let U_temp_1 = self.nifs_1_secondary.verify(
+      pp.ro_consts(),
+      &self.r_U_secondary[0],
+      &self.r_U_secondary[1],
     );
-    let U_ops_secondary_derandom = self.r_U_secondary[1].derandomize(
+    let U_temp_2 = self
+      .nifs_2_secondary
+      .verify(pp.ro_consts(), &U_temp_1, &self.r_U_secondary[2]);
+    let U = self
+      .nifs_final_secondary
+      .verify(pp.ro_consts(), &U_temp_2, &self.U_random_secondary);
+    let derandom_U = U.derandomize(
       &vk.dk_secondary,
-      &self.wit_blind_ops_secondary,
-      &self.err_blind_ops_secondary,
+      &self.wit_blind_secondary,
+      &self.err_blind_secondary,
     );
-    let U_scan_secondary_derandom = self.r_U_secondary[2].derandomize(
-      &vk.dk_secondary,
-      &self.wit_blind_scan_secondary,
-      &self.err_blind_scan_secondary,
-    );
-    let U_secondary_derandom = vec![
-      U_F_secondary_derandom,
-      U_ops_secondary_derandom,
-      U_scan_secondary_derandom,
-    ];
-    self
-      .snark_secondary
-      .verify(&vk.secondary, &U_secondary_derandom)?;
+    self.snark_secondary.verify(&vk.secondary, &derandom_U)?;
     Ok(())
   }
 }

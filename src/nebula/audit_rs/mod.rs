@@ -7,8 +7,9 @@ use std::sync::Arc;
 use super::augmented_circuit::AugmentedCircuitParams;
 use super::ic::IC;
 use super::nifs::{PrimaryNIFS, PrimaryRelaxedNIFS, NIFS};
-use super::rs::PublicParams;
+use super::traits::impl_rs_fields_trait;
 use crate::cyclefold::util::{absorb_primary_relaxed_r1cs, FoldingData};
+use crate::nebula::traits::RecursiveSNARKFieldsTrait;
 use crate::traits::commitment::CommitmentEngineTrait;
 use crate::Commitment;
 use crate::{
@@ -632,6 +633,8 @@ where
     ))
   }
 }
+
+impl_rs_fields_trait!(AuditRecursiveSNARK);
 
 /// A helper trait for a step of the incremental computation (i.e., circuit for F)
 pub trait AuditStepCircuit<F: PrimeField>: Send + Sync + Clone {

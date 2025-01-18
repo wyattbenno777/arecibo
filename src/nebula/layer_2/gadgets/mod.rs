@@ -1,8 +1,8 @@
-use super::nifs::{CycleFoldNIFS, CycleFoldRelaxedNIFS};
+use super::nifs::CycleFoldNIFS;
 use crate::constants::NUM_CHALLENGE_BITS;
 use crate::cyclefold::gadgets::emulated::{self, AllocatedEmulPoint};
 use crate::gadgets::{alloc_bignat_constant, le_bits_to_num, BigNat, Num};
-use crate::nebula::nifs::PrimaryRelaxedNIFS;
+use crate::nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryRelaxedNIFS};
 use crate::traits::commitment::CommitmentTrait;
 use crate::traits::Group;
 use crate::traits::ROCircuitTrait;
