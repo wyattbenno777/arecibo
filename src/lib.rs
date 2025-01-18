@@ -29,6 +29,8 @@ mod cyclefold;
 pub mod nebula;
 // pub mod supernova;
 
+pub mod onchain;
+
 use once_cell::sync::OnceCell;
 use traits::{CurveCycleEquipped, Dual};
 
