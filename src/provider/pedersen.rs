@@ -224,7 +224,7 @@ where
   type Commitment = Commitment<E>;
 
   fn setup(label: &'static [u8], n: usize) -> Self::CommitmentKey {
-    let gens = E::GE::from_label(label, n.next_power_of_two());
+    let gens = E::GE::from_label(label, n.next_power_of_two() + 1);
     let (h, ck) = gens.split_first().unwrap();
 
     Self::CommitmentKey {
