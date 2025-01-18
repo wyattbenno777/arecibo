@@ -99,10 +99,8 @@ where
     pp: &impl Layer1PPTrait<E>,
   ) -> Result<(ProverKey<E, S1, S2>, VerifierKey<E, S1, S2>), NovaError> {
     let (pk_primary, vk_primary) = S1::setup(pp.biggest_ck().clone(), pp.primary_r1cs_shapes())?;
-
     let (pk_secondary, vk_secondary) =
       S2::setup(pp.ck_secondary().clone(), pp.secondary_r1cs_shapes())?;
-
     let prover_key = ProverKey {
       primary: pk_primary,
       secondary: pk_secondary,
@@ -111,7 +109,6 @@ where
       primary: vk_primary,
       secondary: vk_secondary,
     };
-
     Ok((prover_key, verifier_key))
   }
 
@@ -153,7 +150,7 @@ where
     //
     // Run the CycleFold instances through Spartan
 
-    // TODO: refactor by folding these cyclefold relaxed R1CS instance witness pairs into one relaxed R1CS instance witness pair
+    // TODO: Fold these cyclefold relaxed R1CS instance witness pairs into one relaxed R1CS instance witness pair
     let (U_F_secondary, W_F_secondary) = rs.F().secondary_rs_part();
     let (U_ops_secondary, W_ops_secondary) = rs.ops().secondary_rs_part();
     let (U_scan_secondary, W_scan_secondary) = rs.scan().secondary_rs_part();
@@ -239,7 +236,6 @@ where
         absorb_primary_relaxed_r1cs::<E, Dual<E>>(&self.r_U_primary_F, &mut hasher_p);
         hasher_p.absorb(self.prev_IC_F);
         let hash_primary = hasher_p.squeeze(NUM_HASH_BITS);
-
         let mut hasher_c = <Dual<E> as Engine>::RO::new(
           pp.F().ro_consts.clone(),
           1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
@@ -248,7 +244,6 @@ where
         hasher_c.absorb(E::Scalar::from(self.num_steps_F as u64));
         self.r_U_cyclefold_F.absorb_in_ro(&mut hasher_c);
         let hash_cyclefold = hasher_c.squeeze(NUM_HASH_BITS);
-
         (hash_primary, hash_cyclefold)
       };
 
@@ -286,7 +281,6 @@ where
         absorb_primary_relaxed_r1cs::<E, Dual<E>>(&self.r_U_primary_ops, &mut hasher_p);
         hasher_p.absorb(self.prev_IC_ops);
         let hash_primary = hasher_p.squeeze(NUM_HASH_BITS);
-
         let mut hasher_c = <Dual<E> as Engine>::RO::new(
           pp.F().ro_consts.clone(),
           1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
@@ -295,7 +289,6 @@ where
         hasher_c.absorb(E::Scalar::from(self.num_steps_ops as u64));
         self.r_U_cyclefold_ops.absorb_in_ro(&mut hasher_c);
         let hash_cyclefold = hasher_c.squeeze(NUM_HASH_BITS);
-
         (hash_primary, hash_cyclefold)
       };
 
@@ -337,7 +330,6 @@ where
         hasher_p.absorb(self.prev_IC_scan.0);
         hasher_p.absorb(self.prev_IC_scan.1);
         let hash_primary = hasher_p.squeeze(NUM_HASH_BITS);
-
         let mut hasher_c = <Dual<E> as Engine>::RO::new(
           pp.F().ro_consts.clone(),
           1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
@@ -346,7 +338,6 @@ where
         hasher_c.absorb(E::Scalar::from(self.num_steps_scan as u64));
         self.r_U_cyclefold_scan.absorb_in_ro(&mut hasher_c);
         let hash_cyclefold = hasher_c.squeeze(NUM_HASH_BITS);
-
         (hash_primary, hash_cyclefold)
       };
 
