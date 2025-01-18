@@ -7,6 +7,7 @@ use std::sync::Arc;
 use super::augmented_circuit::AugmentedCircuitParams;
 use super::ic::IC;
 use super::nifs::{PrimaryNIFS, NIFS};
+use super::rs::PublicParams;
 use crate::cyclefold::util::{absorb_primary_relaxed_r1cs, FoldingData};
 use crate::traits::commitment::CommitmentEngineTrait;
 use crate::Commitment;
@@ -547,6 +548,25 @@ where
     &RelaxedR1CSWitness<Dual<E1>>,
   ) {
     (&self.r_U_cyclefold, &self.r_W_cyclefold)
+  }
+
+  /// Get the secondary curve part of the running instance
+  pub fn secondary_rs_part_derandomized(
+    &self,
+    pp: &AuditPublicParams<E1>,
+  ) -> (
+    RelaxedR1CSInstance<Dual<E1>>,
+    RelaxedR1CSWitness<Dual<E1>>,
+    <Dual<E1> as Engine>::Scalar,
+    <Dual<E1> as Engine>::Scalar,
+  ) {
+    let (derandom_W, wit_blind, err_blind) = self.r_W_cyclefold.derandomize();
+    let derandom_U = self.r_U_cyclefold.derandomize(
+      &<Dual<E1> as Engine>::CE::derand_key(&pp.ck_cyclefold),
+      &wit_blind,
+      &err_blind,
+    );
+    (derandom_U, derandom_W, wit_blind, err_blind)
   }
 
   /// Get primary & secondayr relaxed instance witness pair

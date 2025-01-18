@@ -5,10 +5,12 @@ use super::{
   nifs::PrimaryNIFS,
   traits::{Layer1PPTrait, Layer1RSTrait},
 };
+use crate::traits::commitment::CommitmentEngineTrait;
 use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
   gadgets::scalar_as_base,
   traits::{Engine, TranscriptEngineTrait},
+  DerandKey,
 };
 use crate::{cyclefold::util::absorb_primary_relaxed_r1cs, traits::ROTrait};
 use crate::{
@@ -19,7 +21,6 @@ use crate::{
 use crate::{traits::AbsorbInROTrait, Commitment};
 use ff::Field;
 use serde::{Deserialize, Serialize};
-
 /// A type that holds the prover key for [`CompressedSNARK`]
 #[derive(Debug, Clone)]
 pub struct ProverKey<E, S1, S2>
@@ -42,6 +43,8 @@ where
 {
   primary: S1::VerifierKey,
   secondary: S2::VerifierKey,
+  dk_primary: DerandKey<E>,
+  dk_secondary: DerandKey<Dual<E>>,
 }
 
 /// A SNARK that proves the knowledge of a valid Nebula proof
@@ -70,22 +73,31 @@ where
   r_U_primary_F: RelaxedR1CSInstance<E>,
   prev_IC_F: E::Scalar,
   l_u_primary_F: R1CSInstance<E>,
-  r_U_cyclefold_F: RelaxedR1CSInstance<Dual<E>>,
   comm_omega_prev_F: Commitment<E>,
+  wit_blind_F: E::Scalar,
+  err_blind_F: E::Scalar,
+  wit_blind_F_secondary: <Dual<E> as Engine>::Scalar,
+  err_blind_F_secondary: <Dual<E> as Engine>::Scalar,
   // ops data
   num_steps_ops: usize,
   r_U_primary_ops: RelaxedR1CSInstance<E>,
   prev_IC_ops: E::Scalar,
   l_u_primary_ops: R1CSInstance<E>,
-  r_U_cyclefold_ops: RelaxedR1CSInstance<Dual<E>>,
   comm_omega_prev_ops: Commitment<E>,
+  wit_blind_ops: E::Scalar,
+  err_blind_ops: E::Scalar,
+  wit_blind_ops_secondary: <Dual<E> as Engine>::Scalar,
+  err_blind_ops_secondary: <Dual<E> as Engine>::Scalar,
   // scan data
   num_steps_scan: usize,
   r_U_primary_scan: RelaxedR1CSInstance<E>,
   prev_IC_scan: (E::Scalar, E::Scalar),
   l_u_primary_scan: R1CSInstance<E>,
-  r_U_cyclefold_scan: RelaxedR1CSInstance<Dual<E>>,
   comm_omega_prev_scan: (Commitment<E>, Commitment<E>),
+  wit_blind_scan: E::Scalar,
+  err_blind_scan: E::Scalar,
+  wit_blind_scan_secondary: <Dual<E> as Engine>::Scalar,
+  err_blind_scan_secondary: <Dual<E> as Engine>::Scalar,
 }
 
 impl<E, S1, S2> CompressedSNARK<E, S1, S2>
@@ -108,6 +120,8 @@ where
     let verifier_key = VerifierKey {
       primary: vk_primary,
       secondary: vk_secondary,
+      dk_primary: E::CE::derand_key(&pp.biggest_ck()),
+      dk_secondary: <Dual<E> as Engine>::CE::derand_key(&pp.ck_secondary()),
     };
     Ok((prover_key, verifier_key))
   }
@@ -133,9 +147,11 @@ where
     // Primary SNARK
     //
     // Fold's (U, W, u, w) into (U', W') and runs the folded instance witness pair though Spartan
-    let (U_F, W_F, nifs_F, _, _) = rs.F().fold_ivc_compression_step(pp.F())?;
-    let (U_ops, W_ops, nifs_ops, _, _) = rs.ops().fold_ivc_compression_step(pp.ops())?;
-    let (U_scan, W_scan, nifs_scan, _, _) = rs.scan().fold_ivc_compression_step(pp.scan())?;
+    let (U_F, W_F, nifs_F, wit_blind_F, err_blind_F) = rs.F().fold_ivc_compression_step(pp.F())?;
+    let (U_ops, W_ops, nifs_ops, wit_blind_ops, err_blind_ops) =
+      rs.ops().fold_ivc_compression_step(pp.ops())?;
+    let (U_scan, W_scan, nifs_scan, wit_blind_scan, err_blind_scan) =
+      rs.scan().fold_ivc_compression_step(pp.scan())?;
     let U = vec![U_F, U_ops, U_scan];
     let W = vec![W_F, W_ops, W_scan];
     let snark_primary = S1::prove(
@@ -150,26 +166,47 @@ where
     //
     // Run the CycleFold instances through Spartan
 
-    // TODO: Fold these cyclefold relaxed R1CS instance witness pairs into one relaxed R1CS instance witness pair
-    let (U_F_secondary, W_F_secondary) = rs.F().secondary_rs_part();
-    let (U_ops_secondary, W_ops_secondary) = rs.ops().secondary_rs_part();
-    let (U_scan_secondary, W_scan_secondary) = rs.scan().secondary_rs_part();
     let U_secondary = vec![
-      U_F_secondary.clone(),
-      U_ops_secondary.clone(),
-      U_scan_secondary.clone(),
+      rs.F().r_U_cyclefold.clone(),
+      rs.ops().r_U_cyclefold.clone(),
+      rs.scan().r_U_cyclefold.clone(),
     ];
-    let W_secondary = vec![
-      W_F_secondary.clone(),
-      W_ops_secondary.clone(),
-      W_scan_secondary.clone(),
+
+    // TODO: Fold these cyclefold relaxed R1CS instance witness pairs into one relaxed R1CS instance witness pair
+    let (
+      U_F_secondary_derandom,
+      W_F_secondary_derandom,
+      wit_blind_F_secondary,
+      err_blind_F_secondary,
+    ) = rs.F().secondary_rs_part_derandomized(pp.F());
+    let (
+      U_ops_secondary_derandom,
+      W_ops_secondary_derandom,
+      wit_blind_ops_secondary,
+      err_blind_ops_secondary,
+    ) = rs.ops().secondary_rs_part_derandomized(pp.ops());
+    let (
+      U_scan_secondary_derandom,
+      W_scan_secondary_derandom,
+      wit_blind_scan_secondary,
+      err_blind_scan_secondary,
+    ) = rs.scan().secondary_rs_part_derandomized(pp.scan());
+    let U_secondary_derandom = vec![
+      U_F_secondary_derandom.clone(),
+      U_ops_secondary_derandom.clone(),
+      U_scan_secondary_derandom.clone(),
+    ];
+    let W_secondary_derandom = vec![
+      W_F_secondary_derandom.clone(),
+      W_ops_secondary_derandom.clone(),
+      W_scan_secondary_derandom.clone(),
     ];
     let snark_secondary = S2::prove(
       pp.ck_secondary(),
       &pk.secondary,
       pp.secondary_r1cs_shapes(),
-      &U_secondary,
-      &W_secondary,
+      &U_secondary_derandom,
+      &W_secondary_derandom,
     )?;
 
     Ok(Self {
@@ -185,27 +222,36 @@ where
       F_zi: rs.F().zi.clone(),
       scan_zi: rs.scan().zi.clone(),
       ops_zi: rs.ops().zi.clone(),
+      wit_blind_F,
+      err_blind_F,
+      wit_blind_F_secondary,
+      err_blind_F_secondary,
       // F data
       num_steps_F: rs.F().num_steps(),
       r_U_primary_F: rs.F().r_U_primary.clone(),
       prev_IC_F: rs.F().prev_IC,
       l_u_primary_F: rs.F().l_u_primary.clone(),
-      r_U_cyclefold_F: U_F_secondary.clone(),
       comm_omega_prev_F: rs.F().comm_omega_prev,
+      wit_blind_ops,
+      err_blind_ops,
+      wit_blind_ops_secondary,
+      err_blind_ops_secondary,
       // ops data
       num_steps_ops: rs.ops().num_steps(),
       r_U_primary_ops: rs.ops().r_U_primary.clone(),
       prev_IC_ops: rs.ops().prev_IC,
       l_u_primary_ops: rs.ops().l_u_primary.clone(),
-      r_U_cyclefold_ops: U_ops_secondary.clone(),
       comm_omega_prev_ops: rs.ops().comm_omega_prev,
       // scan data
       num_steps_scan: rs.scan().num_steps(),
       r_U_primary_scan: rs.scan().r_U_primary.clone(),
       prev_IC_scan: rs.scan().prev_IC,
       l_u_primary_scan: rs.scan().l_u_primary.clone(),
-      r_U_cyclefold_scan: U_scan_secondary.clone(),
       comm_omega_prev_scan: rs.scan().comm_omega_prev,
+      wit_blind_scan,
+      err_blind_scan,
+      wit_blind_scan_secondary,
+      err_blind_scan_secondary,
     })
   }
 
@@ -242,7 +288,7 @@ where
         );
         hasher_c.absorb(pp.F().digest());
         hasher_c.absorb(E::Scalar::from(self.num_steps_F as u64));
-        self.r_U_cyclefold_F.absorb_in_ro(&mut hasher_c);
+        self.r_U_secondary[0].absorb_in_ro(&mut hasher_c);
         let hash_cyclefold = hasher_c.squeeze(NUM_HASH_BITS);
         (hash_primary, hash_cyclefold)
       };
@@ -287,7 +333,7 @@ where
         );
         hasher_c.absorb(pp.ops().digest());
         hasher_c.absorb(E::Scalar::from(self.num_steps_ops as u64));
-        self.r_U_cyclefold_ops.absorb_in_ro(&mut hasher_c);
+        self.r_U_secondary[1].absorb_in_ro(&mut hasher_c);
         let hash_cyclefold = hasher_c.squeeze(NUM_HASH_BITS);
         (hash_primary, hash_cyclefold)
       };
@@ -336,7 +382,7 @@ where
         );
         hasher_c.absorb(pp.scan().digest());
         hasher_c.absorb(E::Scalar::from(self.num_steps_scan as u64));
-        self.r_U_cyclefold_scan.absorb_in_ro(&mut hasher_c);
+        self.r_U_secondary[2].absorb_in_ro(&mut hasher_c);
         let hash_cyclefold = hasher_c.squeeze(NUM_HASH_BITS);
         (hash_primary, hash_cyclefold)
       };
@@ -434,11 +480,39 @@ where
       &self.r_U[2],
       &self.l_u[2],
     );
-    let U = vec![U_F, U_ops, U_scan];
+
+    let U_F_derandom = U_F.derandomize(&vk.dk_primary, &self.wit_blind_F, &self.err_blind_F);
+    let U_ops_derandom =
+      U_ops.derandomize(&vk.dk_primary, &self.wit_blind_ops, &self.err_blind_ops);
+    let U_scan_derandom =
+      U_scan.derandomize(&vk.dk_primary, &self.wit_blind_scan, &self.err_blind_scan);
+
+    let U = vec![U_F_derandom, U_ops_derandom, U_scan_derandom];
     self.snark_primary.verify(&vk.primary, &U)?;
+
+    let U_F_secondary_derandom = self.r_U_secondary[0].derandomize(
+      &vk.dk_secondary,
+      &self.wit_blind_F_secondary,
+      &self.err_blind_F_secondary,
+    );
+    let U_ops_secondary_derandom = self.r_U_secondary[1].derandomize(
+      &vk.dk_secondary,
+      &self.wit_blind_ops_secondary,
+      &self.err_blind_ops_secondary,
+    );
+    let U_scan_secondary_derandom = self.r_U_secondary[2].derandomize(
+      &vk.dk_secondary,
+      &self.wit_blind_scan_secondary,
+      &self.err_blind_scan_secondary,
+    );
+    let U_secondary_derandom = vec![
+      U_F_secondary_derandom,
+      U_ops_secondary_derandom,
+      U_scan_secondary_derandom,
+    ];
     self
       .snark_secondary
-      .verify(&vk.secondary, &self.r_U_secondary)?;
+      .verify(&vk.secondary, &U_secondary_derandom)?;
     Ok(())
   }
 }
