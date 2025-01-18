@@ -575,6 +575,8 @@ where
       RelaxedR1CSInstance<E1>,
       RelaxedR1CSWitness<E1>,
       PrimaryNIFS<E1>,
+      E1::Scalar,
+      E1::Scalar,
     ),
     NovaError,
   > {
@@ -586,7 +588,9 @@ where
       (&self.r_U_primary, &self.r_W_primary),
       (&self.l_u_primary, &self.l_w_primary),
     )?;
-    Ok((U, W, nifs))
+    let (derandom_W, wit_blind, err_blind) = W.derandomize();
+    let derandom_U = U.derandomize(&E1::CE::derand_key(&pp.ck_primary), &wit_blind, &err_blind);
+    Ok((derandom_U, derandom_W, nifs, wit_blind, err_blind))
   }
 }
 

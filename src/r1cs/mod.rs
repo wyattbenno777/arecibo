@@ -10,7 +10,7 @@ use crate::{
   traits::{
     commitment::CommitmentEngineTrait, AbsorbInROTrait, Engine, ROTrait, TranscriptReprTrait,
   },
-  zip_with, Commitment, CommitmentKey, CE,
+  zip_with, Commitment, CommitmentKey, DerandKey, CE,
 };
 use abomonation::Abomonation;
 use abomonation_derive::Abomonation;
@@ -806,6 +806,20 @@ impl<E: Engine> RelaxedR1CSWitness<E> {
       r_E: self.r_E,
     }
   }
+
+  /// Derandomizes the `R1CSWitness` using a `DerandKey`
+  pub fn derandomize(&self) -> (Self, E::Scalar, E::Scalar) {
+    (
+      RelaxedR1CSWitness {
+        W: self.W.clone(),
+        r_W: E::Scalar::ZERO,
+        E: self.E.clone(),
+        r_E: E::Scalar::ZERO,
+      },
+      self.r_W,
+      self.r_E,
+    )
+  }
 }
 
 impl<E: Engine> RelaxedR1CSInstance<E> {
@@ -899,6 +913,21 @@ impl<E: Engine> RelaxedR1CSInstance<E> {
     self.comm_W = self.comm_W + *comm_W_2 * *r;
     self.comm_E = self.comm_E + *comm_T * *r;
     self.u += *r;
+  }
+
+  /// Derandomizes the `RelaxedR1CSInstance` using a `DerandKey`
+  pub fn derandomize(
+    &self,
+    dk: &DerandKey<E>,
+    r_W: &E::Scalar,
+    r_E: &E::Scalar,
+  ) -> RelaxedR1CSInstance<E> {
+    RelaxedR1CSInstance {
+      comm_W: CE::<E>::derandomize(dk, &self.comm_W, r_W),
+      comm_E: CE::<E>::derandomize(dk, &self.comm_E, r_E),
+      X: self.X.clone(),
+      u: self.u,
+    }
   }
 }
 

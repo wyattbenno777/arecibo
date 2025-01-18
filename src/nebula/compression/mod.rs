@@ -133,9 +133,9 @@ where
     // Primary SNARK
     //
     // Fold's (U, W, u, w) into (U', W') and runs the folded instance witness pair though Spartan
-    let (U_F, W_F, nifs_F) = rs.F().fold_ivc_compression_step(pp.F())?;
-    let (U_ops, W_ops, nifs_ops) = rs.ops().fold_ivc_compression_step(pp.ops())?;
-    let (U_scan, W_scan, nifs_scan) = rs.scan().fold_ivc_compression_step(pp.scan())?;
+    let (U_F, W_F, nifs_F, _, _) = rs.F().fold_ivc_compression_step(pp.F())?;
+    let (U_ops, W_ops, nifs_ops, _, _) = rs.ops().fold_ivc_compression_step(pp.ops())?;
+    let (U_scan, W_scan, nifs_scan, _, _) = rs.scan().fold_ivc_compression_step(pp.scan())?;
     let U = vec![U_F, U_ops, U_scan];
     let W = vec![W_F, W_ops, W_scan];
     let snark_primary = S1::prove(

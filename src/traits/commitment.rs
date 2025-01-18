@@ -83,6 +83,8 @@ pub trait CommitmentEngineTrait<E: Engine>: Clone + Send + Sync {
     + Serialize
     + for<'de> Deserialize<'de>
     + Abomonation;
+  /// Holds the type of the derandomization key
+  type DerandKey: Clone + Debug + Send + Sync + Serialize + for<'de> Deserialize<'de>;
 
   /// Holds the type of the commitment
   type Commitment: CommitmentTrait<E>;
@@ -90,6 +92,16 @@ pub trait CommitmentEngineTrait<E: Engine>: Clone + Send + Sync {
   /// Samples a new commitment key of a specified size
   fn setup(label: &'static [u8], n: usize) -> Self::CommitmentKey;
 
+  /// Extracts the blinding generator
+  fn derand_key(ck: &Self::CommitmentKey) -> Self::DerandKey;
+
   /// Commits to the provided vector using the provided generators
   fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment;
+
+  /// Remove given blind from commitment
+  fn derandomize(
+    dk: &Self::DerandKey,
+    commit: &Self::Commitment,
+    r: &E::Scalar,
+  ) -> Self::Commitment;
 }

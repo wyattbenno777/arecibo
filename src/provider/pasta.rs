@@ -74,6 +74,10 @@ macro_rules! impl_traits {
         cpu_best_msm(bases, scalars)
       }
 
+      fn group(p: &Self::AffineExt) -> Self {
+        $name::Point::from(*p)
+      }
+
       fn from_label(label: &'static [u8], n: usize) -> Vec<Self::Affine> {
         let mut shake = Shake256::default();
         shake.update(label);

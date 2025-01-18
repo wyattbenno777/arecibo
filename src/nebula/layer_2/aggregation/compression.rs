@@ -89,7 +89,7 @@ where
     // Primary SNARK
     //
     // Fold's (U, W, u, w) into (U', W') and runs the folded instance witness pair though Spartan
-    let (U_verifier, W_verifier, nifs_verifier) = rs.rs.fold_ivc_compression_step(&pp.pp)?;
+    let (U_verifier, W_verifier, nifs_verifier, _, _) = rs.rs.fold_ivc_compression_step(&pp.pp)?;
     let U = vec![
       rs.r_U_F.clone(),
       rs.r_U_ops.clone(),

@@ -209,6 +209,15 @@ where
   }
 }
 
+/// A type that holds blinding generator
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DerandKey<E: Engine>
+where
+  E::GE: DlogGroup,
+{
+  h: <E::GE as PrimeCurve>::Affine,
+}
+
 /// Provides a commitment engine
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommitmentEngine<E> {
@@ -222,6 +231,7 @@ where
 {
   type CommitmentKey = CommitmentKey<E>;
   type Commitment = Commitment<E>;
+  type DerandKey = DerandKey<E>;
 
   fn setup(label: &'static [u8], n: usize) -> Self::CommitmentKey {
     let gens = E::GE::from_label(label, n.next_power_of_two() + 1);
@@ -230,6 +240,13 @@ where
     Self::CommitmentKey {
       ck: ck.to_vec(),
       h: Some(*h),
+    }
+  }
+
+  fn derand_key(ck: &Self::CommitmentKey) -> Self::DerandKey {
+    assert!(ck.h.is_some());
+    Self::DerandKey {
+      h: *ck.h.as_ref().unwrap(),
     }
   }
 
@@ -250,6 +267,16 @@ where
       Commitment {
         comm: E::GE::vartime_multiscalar_mul(v, &ck.ck[..v.len()]),
       }
+    }
+  }
+
+  fn derandomize(
+    dk: &Self::DerandKey,
+    commit: &Self::Commitment,
+    r: &E::Scalar,
+  ) -> Self::Commitment {
+    Commitment {
+      comm: commit.comm - <E::GE as DlogGroup>::group(&dk.h) * r,
     }
   }
 }
