@@ -34,6 +34,8 @@ where
   // Look for the static assertions in provider macros for a justification
   #[abomonate_with(Vec<[u64; 8]>)]
   pub(crate) ck: Vec<<E::GE as PrimeCurve>::Affine>,
+  #[abomonate_with(Vec<[u64; 8]>)]
+  pub(crate) h: Option<<E::GE as PrimeCurve>::Affine>,
 }
 
 impl<E> Len for CommitmentKey<E>
@@ -92,7 +94,7 @@ where
     };
     Ok(Self { comm })
   }
-  
+
   fn reinterpret_as_generator(&self) -> <<E as Engine>::GE as PrimeCurve>::Affine {
     self.comm.to_affine()
   }
@@ -222,15 +224,32 @@ where
   type Commitment = Commitment<E>;
 
   fn setup(label: &'static [u8], n: usize) -> Self::CommitmentKey {
+    let gens = E::GE::from_label(label, n.next_power_of_two());
+    let (h, ck) = gens.split_first().unwrap();
+
     Self::CommitmentKey {
-      ck: E::GE::from_label(label, n.next_power_of_two()),
+      ck: ck.to_vec(),
+      h: Some(h.clone()),
     }
   }
 
-  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar]) -> Self::Commitment {
+  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment {
     assert!(ck.ck.len() >= v.len());
-    Commitment {
-      comm: E::GE::vartime_multiscalar_mul(v, &ck.ck[..v.len()]),
+    if ck.h.is_some() {
+      let mut scalars: Vec<E::Scalar> = v.to_vec();
+      scalars.push(*r);
+      let mut bases = ck.ck[..v.len()].to_vec();
+      bases.push(ck.h.as_ref().unwrap().clone());
+
+      Commitment {
+        comm: E::GE::vartime_multiscalar_mul(&scalars, &bases),
+      }
+    } else {
+      assert_eq!(*r, E::Scalar::ZERO);
+
+      Commitment {
+        comm: E::GE::vartime_multiscalar_mul(v, &ck.ck[..v.len()]),
+      }
     }
   }
 }
@@ -268,21 +287,29 @@ where
   E: Engine<CE = CommitmentEngine<E>>,
   E::GE: DlogGroup<ScalarExt = E::Scalar>,
 {
-  fn split_at(mut self, n: usize) -> (Self, Self) {
-    let right = self.ck.split_off(n);
-    (self, Self { ck: right })
+  fn split_at(self, n: usize) -> (Self, Self) {
+    (
+      CommitmentKey {
+        ck: self.ck[0..n].to_vec(),
+        h: self.h.clone(),
+      },
+      CommitmentKey {
+        ck: self.ck[n..].to_vec(),
+        h: self.h.clone(),
+      },
+    )
   }
 
   fn combine(&self, other: &Self) -> Self {
     let ck = {
-      self
-        .ck
-        .iter()
-        .cloned()
-        .chain(other.ck.iter().cloned())
-        .collect::<Vec<_>>()
+      let mut c = self.ck.clone();
+      c.extend(other.ck.clone());
+      c
     };
-    Self { ck }
+    CommitmentKey {
+      ck,
+      h: self.h.clone(),
+    }
   }
 
   // combines the left and right halves of `self` using `w1` and `w2` as the weights
@@ -295,7 +322,10 @@ where
     let mut ck_affine = vec![<E::GE as PrimeCurve>::Affine::identity(); L.ck.len()];
     E::GE::batch_normalize(&ck_curve, &mut ck_affine);
 
-    Self { ck: ck_affine }
+    Self {
+      ck: ck_affine,
+      h: L.h.clone(),
+    }
   }
 
   /// Scales each element in `self` by `r`
@@ -312,6 +342,6 @@ where
       .collect::<Result<Vec<E::GE>, NovaError>>()?;
     let mut ck = vec![<E::GE as PrimeCurve>::Affine::identity(); d.len()];
     E::GE::batch_normalize(&d, &mut ck);
-    Ok(Self { ck })
+    Ok(Self { ck, h: None })
   }
 }

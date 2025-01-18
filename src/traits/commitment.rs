@@ -91,5 +91,5 @@ pub trait CommitmentEngineTrait<E: Engine>: Clone + Send + Sync {
   fn setup(label: &'static [u8], n: usize) -> Self::CommitmentKey;
 
   /// Commits to the provided vector using the provided generators
-  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar]) -> Self::Commitment;
+  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment;
 }

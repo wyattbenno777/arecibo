@@ -247,14 +247,14 @@ impl<E: Engine> MemorySumcheckInstance<E> {
     ) = rayon::join(
       || {
         rayon::join(
-          || E::CE::commit(ck, &t_plus_r_inv_row),
-          || E::CE::commit(ck, &w_plus_r_inv_row),
+          || E::CE::commit(ck, &t_plus_r_inv_row, &E::Scalar::ZERO),
+          || E::CE::commit(ck, &w_plus_r_inv_row, &E::Scalar::ZERO),
         )
       },
       || {
         rayon::join(
-          || E::CE::commit(ck, &t_plus_r_inv_col),
-          || E::CE::commit(ck, &w_plus_r_inv_col),
+          || E::CE::commit(ck, &t_plus_r_inv_col, &E::Scalar::ZERO),
+          || E::CE::commit(ck, &w_plus_r_inv_col, &E::Scalar::ZERO),
         )
       },
     );
