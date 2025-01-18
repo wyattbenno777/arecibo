@@ -229,7 +229,7 @@ where
 
     Self::CommitmentKey {
       ck: ck.to_vec(),
-      h: Some(h.clone()),
+      h: Some(*h),
     }
   }
 
@@ -239,7 +239,7 @@ where
       let mut scalars: Vec<E::Scalar> = v.to_vec();
       scalars.push(*r);
       let mut bases = ck.ck[..v.len()].to_vec();
-      bases.push(ck.h.as_ref().unwrap().clone());
+      bases.push(*ck.h.as_ref().unwrap());
 
       Commitment {
         comm: E::GE::vartime_multiscalar_mul(&scalars, &bases),

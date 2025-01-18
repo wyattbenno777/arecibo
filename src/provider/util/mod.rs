@@ -113,7 +113,6 @@ pub mod test_utils {
   use ff::Field;
   use rand::rngs::StdRng;
   use rand_core::{CryptoRng, RngCore};
-  use std::f32::consts::E;
   use std::sync::Arc;
 
   /// Returns a random polynomial, a point and calculate its evaluation.
