@@ -2,7 +2,7 @@
 
 use super::{
   ic::IC,
-  nifs::PrimaryNIFS,
+  nifs::{PrimaryNIFS, PrimaryRelaxedNIFS},
   traits::{Layer1PPTrait, Layer1RSTrait},
 };
 use crate::traits::commitment::CommitmentEngineTrait;
@@ -74,30 +74,36 @@ where
   prev_IC_F: E::Scalar,
   l_u_primary_F: R1CSInstance<E>,
   comm_omega_prev_F: Commitment<E>,
+  nifs_random_F: PrimaryRelaxedNIFS<E>,
   wit_blind_F: E::Scalar,
   err_blind_F: E::Scalar,
   wit_blind_F_secondary: <Dual<E> as Engine>::Scalar,
   err_blind_F_secondary: <Dual<E> as Engine>::Scalar,
+  U_random_F: RelaxedR1CSInstance<E>,
   // ops data
   num_steps_ops: usize,
   r_U_primary_ops: RelaxedR1CSInstance<E>,
   prev_IC_ops: E::Scalar,
   l_u_primary_ops: R1CSInstance<E>,
   comm_omega_prev_ops: Commitment<E>,
+  nifs_random_ops: PrimaryRelaxedNIFS<E>,
   wit_blind_ops: E::Scalar,
   err_blind_ops: E::Scalar,
   wit_blind_ops_secondary: <Dual<E> as Engine>::Scalar,
   err_blind_ops_secondary: <Dual<E> as Engine>::Scalar,
+  U_random_ops: RelaxedR1CSInstance<E>,
   // scan data
   num_steps_scan: usize,
   r_U_primary_scan: RelaxedR1CSInstance<E>,
   prev_IC_scan: (E::Scalar, E::Scalar),
   l_u_primary_scan: R1CSInstance<E>,
   comm_omega_prev_scan: (Commitment<E>, Commitment<E>),
+  nifs_random_scan: PrimaryRelaxedNIFS<E>,
   wit_blind_scan: E::Scalar,
   err_blind_scan: E::Scalar,
   wit_blind_scan_secondary: <Dual<E> as Engine>::Scalar,
   err_blind_scan_secondary: <Dual<E> as Engine>::Scalar,
+  U_random_scan: RelaxedR1CSInstance<E>,
 }
 
 impl<E, S1, S2> CompressedSNARK<E, S1, S2>
@@ -120,8 +126,8 @@ where
     let verifier_key = VerifierKey {
       primary: vk_primary,
       secondary: vk_secondary,
-      dk_primary: E::CE::derand_key(&pp.biggest_ck()),
-      dk_secondary: <Dual<E> as Engine>::CE::derand_key(&pp.ck_secondary()),
+      dk_primary: E::CE::derand_key(pp.biggest_ck()),
+      dk_secondary: <Dual<E> as Engine>::CE::derand_key(pp.ck_secondary()),
     };
     Ok((prover_key, verifier_key))
   }
@@ -147,11 +153,19 @@ where
     // Primary SNARK
     //
     // Fold's (U, W, u, w) into (U', W') and runs the folded instance witness pair though Spartan
-    let (U_F, W_F, nifs_F, wit_blind_F, err_blind_F) = rs.F().fold_ivc_compression_step(pp.F())?;
-    let (U_ops, W_ops, nifs_ops, wit_blind_ops, err_blind_ops) =
+    let (U_F, W_F, nifs_F, nifs_random_F, wit_blind_F, err_blind_F, U_random_F) =
+      rs.F().fold_ivc_compression_step(pp.F())?;
+    let (U_ops, W_ops, nifs_ops, nifs_random_ops, wit_blind_ops, err_blind_ops, U_random_ops) =
       rs.ops().fold_ivc_compression_step(pp.ops())?;
-    let (U_scan, W_scan, nifs_scan, wit_blind_scan, err_blind_scan) =
-      rs.scan().fold_ivc_compression_step(pp.scan())?;
+    let (
+      U_scan,
+      W_scan,
+      nifs_scan,
+      nifs_random_scan,
+      wit_blind_scan,
+      err_blind_scan,
+      U_random_scan,
+    ) = rs.scan().fold_ivc_compression_step(pp.scan())?;
     let U = vec![U_F, U_ops, U_scan];
     let W = vec![W_F, W_ops, W_scan];
     let snark_primary = S1::prove(
@@ -222,36 +236,45 @@ where
       F_zi: rs.F().zi.clone(),
       scan_zi: rs.scan().zi.clone(),
       ops_zi: rs.ops().zi.clone(),
-      wit_blind_F,
-      err_blind_F,
-      wit_blind_F_secondary,
-      err_blind_F_secondary,
+
       // F data
       num_steps_F: rs.F().num_steps(),
       r_U_primary_F: rs.F().r_U_primary.clone(),
       prev_IC_F: rs.F().prev_IC,
       l_u_primary_F: rs.F().l_u_primary.clone(),
       comm_omega_prev_F: rs.F().comm_omega_prev,
-      wit_blind_ops,
-      err_blind_ops,
-      wit_blind_ops_secondary,
-      err_blind_ops_secondary,
+      nifs_random_F,
+      wit_blind_F,
+      err_blind_F,
+      wit_blind_F_secondary,
+      err_blind_F_secondary,
+      U_random_F,
+
       // ops data
       num_steps_ops: rs.ops().num_steps(),
       r_U_primary_ops: rs.ops().r_U_primary.clone(),
       prev_IC_ops: rs.ops().prev_IC,
       l_u_primary_ops: rs.ops().l_u_primary.clone(),
       comm_omega_prev_ops: rs.ops().comm_omega_prev,
+      nifs_random_ops,
+      wit_blind_ops,
+      err_blind_ops,
+      wit_blind_ops_secondary,
+      err_blind_ops_secondary,
+      U_random_ops,
+
       // scan data
       num_steps_scan: rs.scan().num_steps(),
       r_U_primary_scan: rs.scan().r_U_primary.clone(),
       prev_IC_scan: rs.scan().prev_IC,
       l_u_primary_scan: rs.scan().l_u_primary.clone(),
       comm_omega_prev_scan: rs.scan().comm_omega_prev,
+      nifs_random_scan,
       wit_blind_scan,
       err_blind_scan,
       wit_blind_scan_secondary,
       err_blind_scan_secondary,
+      U_random_scan,
     })
   }
 
@@ -462,23 +485,41 @@ where
       return Err(NovaError::ProofVerifyError);
     }
 
-    let U_F = self.nifs_F.verify(
+    let U_F_f = self.nifs_F.verify(
       &pp.F().ro_consts,
       &pp.F().digest(),
       &self.r_U[0],
       &self.l_u[0],
     );
-    let U_ops = self.nifs_ops.verify(
+    let U_ops_f = self.nifs_ops.verify(
       &pp.ops().ro_consts,
       &pp.ops().digest(),
       &self.r_U[1],
       &self.l_u[1],
     );
-    let U_scan = self.nifs_scan.verify(
+    let U_scan_f = self.nifs_scan.verify(
       &pp.scan().ro_consts,
       &pp.scan().digest(),
       &self.r_U[2],
       &self.l_u[2],
+    );
+    let U_F = self.nifs_random_F.verify(
+      &pp.F().ro_consts,
+      &pp.F().digest(),
+      &U_F_f,
+      &self.U_random_F,
+    );
+    let U_ops = self.nifs_random_ops.verify(
+      &pp.ops().ro_consts,
+      &pp.ops().digest(),
+      &U_ops_f,
+      &self.U_random_ops,
+    );
+    let U_scan = self.nifs_random_scan.verify(
+      &pp.scan().ro_consts,
+      &pp.scan().digest(),
+      &U_scan_f,
+      &self.U_random_scan,
     );
 
     let U_F_derandom = U_F.derandomize(&vk.dk_primary, &self.wit_blind_F, &self.err_blind_F);

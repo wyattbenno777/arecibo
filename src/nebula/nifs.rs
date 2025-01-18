@@ -21,6 +21,8 @@ use ff::PrimeFieldBits;
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 
+use super::layer_2::utils::absorb_U;
+
 /// A SNARK for incremental computation
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -283,5 +285,73 @@ where
     absorb_primary_commitment::<E, Dual<E>>(&self.comm_T, &mut ro);
     let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
     U1.fold(U2, &self.comm_T, &r)
+  }
+}
+
+/// NIFS for folding the primary relaxed r1cs instance and witness
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct PrimaryRelaxedNIFS<E1>
+where
+  E1: CurveCycleEquipped,
+{
+  pub(crate) comm_T: Commitment<E1>,
+}
+
+impl<E> PrimaryRelaxedNIFS<E>
+where
+  E: CurveCycleEquipped,
+{
+  #[tracing::instrument(skip_all, name = "PrimaryRelaxedNIFS::prove", level = "debug")]
+  pub fn prove(
+    ck: &CommitmentKey<E>,
+    ro_consts: &ROConstants<Dual<E>>,
+    pp_digest: &E::Scalar,
+    S: &R1CSShape<E>,
+    (U1, W1): (&RelaxedR1CSInstance<E>, &RelaxedR1CSWitness<E>),
+    (U2, W2): (&RelaxedR1CSInstance<E>, &RelaxedR1CSWitness<E>),
+  ) -> Result<
+    (
+      Self,
+      (RelaxedR1CSInstance<E>, RelaxedR1CSWitness<E>),
+      E::Scalar,
+    ),
+    NovaError,
+  > {
+    let arity = U1.X.len();
+    if arity != U2.X.len() {
+      return Err(NovaError::InvalidInputLength);
+    }
+    let mut ro = <Dual<E> as Engine>::RO::new(
+      ro_consts.clone(),
+      1 + (2 * NUM_FE_IN_EMULATED_POINT + arity + 1) + NUM_FE_IN_EMULATED_POINT, // pp_digest + (U.comm_W + U.comm_E + U.X + U.u) + comm_T
+    );
+    ro.absorb(*pp_digest);
+    absorb_U::<E>(U2, &mut ro);
+    let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2, &E::Scalar::ZERO)?;
+    absorb_primary_commitment::<E, Dual<E>>(&comm_T, &mut ro);
+    let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
+    let U = U1.fold_relaxed(U2, &comm_T, &r);
+    let W = W1.fold_relaxed(W2, &T, &E::Scalar::ZERO, &r)?;
+    Ok((Self { comm_T }, (U, W), r))
+  }
+
+  pub fn verify(
+    &self,
+    ro_consts: &ROConstants<Dual<E>>,
+    pp_digest: &E::Scalar,
+    U1: &RelaxedR1CSInstance<E>,
+    U2: &RelaxedR1CSInstance<E>,
+  ) -> RelaxedR1CSInstance<E> {
+    let arity = U1.X.len();
+    let mut ro = <Dual<E> as Engine>::RO::new(
+      ro_consts.clone(),
+      1 + (2 * NUM_FE_IN_EMULATED_POINT + arity + 1) + NUM_FE_IN_EMULATED_POINT, // pp_digest + (U.comm_W + U.comm_E + U.X + U.u) + comm_T
+    );
+    ro.absorb(*pp_digest);
+    absorb_U::<E>(U2, &mut ro);
+    absorb_primary_commitment::<E, Dual<E>>(&self.comm_T, &mut ro);
+    let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
+    U1.fold_relaxed(U2, &self.comm_T, &r)
   }
 }

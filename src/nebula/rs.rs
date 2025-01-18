@@ -6,7 +6,7 @@ use crate::traits::commitment::CommitmentEngineTrait;
 
 use super::augmented_circuit::{AugmentedCircuit, AugmentedCircuitInputs, AugmentedCircuitParams};
 use super::ic::IC;
-use super::nifs::{PrimaryNIFS, NIFS};
+use super::nifs::{PrimaryNIFS, PrimaryRelaxedNIFS, NIFS};
 use crate::Commitment;
 use crate::{
   bellpepper::{
@@ -553,12 +553,14 @@ where
       RelaxedR1CSInstance<E1>,
       RelaxedR1CSWitness<E1>,
       PrimaryNIFS<E1>,
+      PrimaryRelaxedNIFS<E1>,
       E1::Scalar,
       E1::Scalar,
+      RelaxedR1CSInstance<E1>,
     ),
     NovaError,
   > {
-    let (nifs, (U, W), _) = PrimaryNIFS::prove(
+    let (nifs, (U_f, W_f), _) = PrimaryNIFS::prove(
       &*pp.ck_primary,
       &pp.ro_consts,
       &pp.digest(),
@@ -566,9 +568,26 @@ where
       (&self.r_U_primary, &self.r_W_primary),
       (&self.l_u_primary, &self.l_w_primary),
     )?;
+
+    // Fold random instance and witness
+    let (random_U, random_W) = pp
+      .circuit_shape_primary
+      .r1cs_shape
+      .sample_random_instance_witness(&pp.ck_primary)?;
+    let (nifs_r, (U, W), _) = PrimaryRelaxedNIFS::prove(
+      &*pp.ck_primary,
+      &pp.ro_consts,
+      &pp.digest(),
+      &pp.circuit_shape_primary.r1cs_shape,
+      (&U_f, &W_f),
+      (&random_U, &random_W),
+    )?;
+
     let (derandom_W, wit_blind, err_blind) = W.derandomize();
     let derandom_U = U.derandomize(&E1::CE::derand_key(&pp.ck_primary), &wit_blind, &err_blind);
-    Ok((derandom_U, derandom_W, nifs, wit_blind, err_blind))
+    Ok((
+      derandom_U, derandom_W, nifs, nifs_r, wit_blind, err_blind, random_U,
+    ))
   }
 
   /// Get the secondary curve part of the running instance

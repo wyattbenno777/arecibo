@@ -6,6 +6,7 @@ use crate::constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS};
 use crate::cyclefold::circuit::CycleFoldCircuit;
 use crate::cyclefold::util::{absorb_cyclefold_r1cs, absorb_primary_commitment};
 use crate::gadgets::scalar_as_base;
+use crate::nebula::nifs::PrimaryRelaxedNIFS;
 use crate::r1cs::R1CSWitness;
 use crate::traits::AbsorbInROTrait;
 use crate::traits::{CurveCycleEquipped, ROTrait};
@@ -187,55 +188,6 @@ where
       (U, W),
       (U_secondary, W_secondary),
     ))
-  }
-}
-
-/// NIFS for folding the primary relaxed r1cs instance and witness
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(bound = "")]
-pub struct PrimaryRelaxedNIFS<E1>
-where
-  E1: CurveCycleEquipped,
-{
-  pub(crate) comm_T: Commitment<E1>,
-}
-
-impl<E> PrimaryRelaxedNIFS<E>
-where
-  E: CurveCycleEquipped,
-{
-  #[tracing::instrument(skip_all, name = "PrimaryRelaxedNIFS::prove", level = "debug")]
-  pub fn prove(
-    ck: &CommitmentKey<E>,
-    ro_consts: &ROConstants<Dual<E>>,
-    pp_digest: &E::Scalar,
-    S: &R1CSShape<E>,
-    (U1, W1): (&RelaxedR1CSInstance<E>, &RelaxedR1CSWitness<E>),
-    (U2, W2): (&RelaxedR1CSInstance<E>, &RelaxedR1CSWitness<E>),
-  ) -> Result<
-    (
-      Self,
-      (RelaxedR1CSInstance<E>, RelaxedR1CSWitness<E>),
-      E::Scalar,
-    ),
-    NovaError,
-  > {
-    let arity = U1.X.len();
-    if arity != U2.X.len() {
-      return Err(NovaError::InvalidInputLength);
-    }
-    let mut ro = <Dual<E> as Engine>::RO::new(
-      ro_consts.clone(),
-      1 + (2 * NUM_FE_IN_EMULATED_POINT + arity + 1) + NUM_FE_IN_EMULATED_POINT, // pp_digest + (U.comm_W + U.comm_E + U.X + U.u) + comm_T
-    );
-    ro.absorb(*pp_digest);
-    absorb_U::<E>(U2, &mut ro);
-    let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2, &E::Scalar::ZERO)?;
-    absorb_primary_commitment::<E, Dual<E>>(&comm_T, &mut ro);
-    let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
-    let U = U1.fold_relaxed(U2, &comm_T, &r);
-    let W = W1.fold_relaxed(W2, &T, &E::Scalar::ZERO, &r)?;
-    Ok((Self { comm_T }, (U, W), r))
   }
 }
 
