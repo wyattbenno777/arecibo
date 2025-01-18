@@ -646,6 +646,7 @@ mod test {
   use std::marker::PhantomData;
 
   use bellpepper_core::num::AllocatedNum;
+  use rand_core::OsRng;
 
   use super::*;
   use crate::{provider::Bn256EngineIPA, traits::snark::default_ck_hint};

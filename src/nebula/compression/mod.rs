@@ -5,6 +5,7 @@ use super::{
   nifs::{CycleFoldRelaxedNIFS, PrimaryNIFS, PrimaryRelaxedNIFS},
   traits::{Layer1PPTrait, Layer1RSTrait},
 };
+use crate::traits::commitment::CommitmentEngineTrait;
 use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
   gadgets::scalar_as_base,
@@ -17,7 +18,6 @@ use crate::{
   r1cs::{R1CSInstance, RelaxedR1CSInstance},
   traits::{snark::BatchedRelaxedR1CSSNARKTrait, CurveCycleEquipped, Dual},
 };
-use crate::{r1cs::RelaxedR1CSWitness, traits::commitment::CommitmentEngineTrait};
 use crate::{traits::AbsorbInROTrait, Commitment};
 use ff::Field;
 use serde::{Deserialize, Serialize};
@@ -182,7 +182,6 @@ where
       wit_blind_secondary,
       err_blind_secondary,
     ) = rs.fold_cyclefold_derandom(pp)?;
-
     let snark_secondary = S2::prove(
       pp.ck_secondary(),
       &pk.secondary,
@@ -436,7 +435,6 @@ where
     }
 
     // 4. check h_IS' · h_WS' = h_RS' · h_FS'.
-
     // Inputs for multiset check
     let (h_is, h_rs, h_ws, h_fs) = {
       (

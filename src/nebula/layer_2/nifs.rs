@@ -4,14 +4,13 @@ use crate::bellpepper::r1cs::NovaWitness;
 use crate::bellpepper::solver::SatisfyingAssignment;
 use crate::constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS};
 use crate::cyclefold::circuit::CycleFoldCircuit;
-use crate::cyclefold::util::{absorb_cyclefold_r1cs, absorb_primary_commitment};
-use crate::gadgets::scalar_as_base;
+use crate::cyclefold::util::absorb_cyclefold_r1cs;
+
 use crate::nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryRelaxedNIFS};
 use crate::r1cs::R1CSWitness;
 use crate::traits::AbsorbInROTrait;
 use crate::traits::{CurveCycleEquipped, ROTrait};
 use crate::{
-  constants::NUM_FE_IN_EMULATED_POINT,
   errors::NovaError,
   r1cs::{R1CSInstance, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{Dual, Engine, ROConstants},
@@ -20,7 +19,7 @@ use crate::{
 use ff::Field;
 use serde::{Deserialize, Serialize};
 
-use super::utils::{absorb_U, absorb_U_bn, scalar_to_bools};
+use super::utils::{absorb_U_bn, scalar_to_bools};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]

@@ -86,6 +86,7 @@ where
   ) -> Result<Self, NovaError> {
     let r_U_verifier = rs.rs.r_U_primary.clone();
     let l_u_verifier = rs.rs.l_u_primary.clone();
+
     // Primary SNARK
     //
     // Fold's (U, W, u, w) into (U', W') and runs the folded instance witness pair though Spartan
