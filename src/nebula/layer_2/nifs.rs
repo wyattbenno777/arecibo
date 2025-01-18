@@ -230,11 +230,11 @@ where
     );
     ro.absorb(*pp_digest);
     absorb_U::<E>(U2, &mut ro);
-    let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2)?;
+    let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2, &E::Scalar::ZERO)?;
     absorb_primary_commitment::<E, Dual<E>>(&comm_T, &mut ro);
     let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
     let U = U1.fold_relaxed(U2, &comm_T, &r);
-    let W = W1.fold_relaxed(W2, &T, &r)?;
+    let W = W1.fold_relaxed(W2, &T, &E::Scalar::ZERO, &r)?;
     Ok((Self { comm_T }, (U, W), r))
   }
 }
@@ -277,11 +277,11 @@ where
     );
     absorb_U_bn(U1, &mut ro);
     absorb_cyclefold_r1cs(U2, &mut ro);
-    let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2)?;
+    let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2, &<Dual<E> as Engine>::Scalar::ZERO)?;
     comm_T.absorb_in_ro(&mut ro);
     let r = ro.squeeze(NUM_CHALLENGE_BITS);
     let U = U1.fold(U2, &comm_T, &r);
-    let W = W1.fold(W2, &T, &r)?;
+    let W = W1.fold(W2, &T, &<Dual<E> as Engine>::Scalar::ZERO, &r)?;
     Ok((Self { comm_T }, (U, W), r))
   }
 }
@@ -324,11 +324,11 @@ where
     );
     absorb_U_bn(U1, &mut ro);
     absorb_U_bn(U2, &mut ro);
-    let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2)?;
+    let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2, &<Dual<E> as Engine>::Scalar::ZERO)?;
     comm_T.absorb_in_ro(&mut ro);
     let r = ro.squeeze(NUM_CHALLENGE_BITS);
     let U = U1.fold_relaxed(U2, &comm_T, &r);
-    let W = W1.fold_relaxed(W2, &T, &r)?;
+    let W = W1.fold_relaxed(W2, &T, &<Dual<E> as Engine>::Scalar::ZERO, &r)?;
     Ok((Self { comm_T }, (U, W), r))
   }
 }

@@ -592,7 +592,7 @@ pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
   where
     E: Engine<Scalar = F>,
   {
-    E::CE::commit(ck, &self.non_deterministic_advice())
+    E::CE::commit(ck, &self.non_deterministic_advice(), &E::Scalar::ZERO)
   }
 }
 

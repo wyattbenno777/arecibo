@@ -618,8 +618,8 @@ pub trait AuditStepCircuit<F: PrimeField>: Send + Sync + Clone {
     E: Engine<Scalar = F>,
   {
     (
-      E::CE::commit(ck, &self.IS_advice()),
-      E::CE::commit(ck, &self.FS_advice()),
+      E::CE::commit(ck, &self.IS_advice(), &E::Scalar::ZERO),
+      E::CE::commit(ck, &self.FS_advice(), &E::Scalar::ZERO),
     )
   }
 }

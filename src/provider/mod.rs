@@ -28,7 +28,6 @@ use crate::{
   },
   traits::{CurveCycleEquipped, Engine},
 };
-use halo2curves::bn256::Bn256;
 use pasta_curves::{pallas, vesta};
 use serde::{Deserialize, Serialize};
 

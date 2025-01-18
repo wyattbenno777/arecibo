@@ -1,6 +1,5 @@
 //! This module implements a non-interactive folding scheme
 #![allow(non_snake_case)]
-
 use crate::{
   constants::{NUM_CHALLENGE_BITS, NUM_FE_FOR_RO, NUM_FE_WITHOUT_IO_FOR_NOVA_FOLD},
   errors::NovaError,
@@ -11,6 +10,7 @@ use crate::{
   traits::{commitment::CommitmentTrait, AbsorbInROTrait, Engine, ROConstants, ROTrait},
   Commitment, CommitmentKey, CompressedCommitment,
 };
+use ff::Field;
 use serde::{Deserialize, Serialize};
 
 /// A SNARK that holds the proof of a step of an incremental computation
@@ -72,7 +72,7 @@ impl<E: Engine> NIFS<E> {
     U2.absorb_in_ro(&mut ro);
 
     // compute a commitment to the cross-term
-    let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2)?;
+    let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2, &E::Scalar::ZERO)?;
 
     // append `comm_T` to the transcript and obtain a challenge
     comm_T.absorb_in_ro(&mut ro);
@@ -84,7 +84,7 @@ impl<E: Engine> NIFS<E> {
     let U = U1.fold(U2, &comm_T, &r);
 
     // fold the witness using `r` and `T`
-    let W = W1.fold(W2, &T, &r)?;
+    let W = W1.fold(W2, &T, &E::Scalar::ZERO, &r)?;
 
     // return the folded instance and witness
     Ok((

@@ -15,6 +15,7 @@ use crate::{
   traits::{Engine, ROConstants},
   CommitmentKey,
 };
+use ff::Field;
 
 /// Struct to implement Incremental Commitment Scheme
 pub struct IC<E1>
@@ -39,7 +40,7 @@ where
     prev_comm: E1::Scalar,
     w_input: Vec<E1::Scalar>, // non-deterministic witness ω
   ) -> E1::Scalar {
-    let comm_w_input = E1::CE::commit(ck, &w_input);
+    let comm_w_input = E1::CE::commit(ck, &w_input, &E1::Scalar::ZERO);
     let mut ro = <Dual<E1> as Engine>::RO::new(ro_consts.clone(), 1 + NUM_FE_IN_EMULATED_POINT); // prev_comm + comm_omega
     ro.absorb(prev_comm);
     absorb_primary_commitment::<E1, Dual<E1>>(&comm_w_input, &mut ro);
