@@ -16,7 +16,9 @@ use crate::{
   traits::{Dual, Engine, ROConstants},
   Commitment, CommitmentKey,
 };
+use ff::Field;
 use ff::PrimeFieldBits;
+use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 
 /// A SNARK for incremental computation
@@ -118,17 +120,19 @@ where
     );
     U1_secondary.absorb_in_ro(&mut ro);
     absorb_cyclefold_r1cs(&l_u_cyclefold_E, &mut ro);
+    let r_T1 = <Dual<E> as Engine>::Scalar::random(&mut OsRng);
     let (T1, comm_T1) = S_secondary.commit_T(
       ck_secondary,
       U1_secondary,
       W1_secondary,
       &l_u_cyclefold_E,
       &l_w_cyclefold_E,
+      &r_T1,
     )?;
     comm_T1.absorb_in_ro(&mut ro);
     let r1 = ro.squeeze(NUM_CHALLENGE_BITS);
     let U_secondary_temp = U1_secondary.fold(&l_u_cyclefold_E, &comm_T1, &r1);
-    let W_secondary_temp = W1_secondary.fold(&l_w_cyclefold_E, &T1, &r1)?;
+    let W_secondary_temp = W1_secondary.fold(&l_w_cyclefold_E, &T1, &r_T1, &r1)?;
 
     /*
      * Fold second cyclefold instance
@@ -139,17 +143,19 @@ where
     );
     U_secondary_temp.absorb_in_ro(&mut ro);
     absorb_cyclefold_r1cs(&l_u_cyclefold_W, &mut ro);
+    let r_T2 = <Dual<E> as Engine>::Scalar::random(&mut OsRng);
     let (T2, comm_T2) = S_secondary.commit_T(
       ck_secondary,
       &U_secondary_temp,
       &W_secondary_temp,
       &l_u_cyclefold_W,
       &l_w_cyclefold_W,
+      &r_T2,
     )?;
     comm_T2.absorb_in_ro(&mut ro);
     let r2 = ro.squeeze(NUM_CHALLENGE_BITS);
     let U_secondary = U_secondary_temp.fold(&l_u_cyclefold_W, &comm_T2, &r2);
-    let W_secondary = W_secondary_temp.fold(&l_w_cyclefold_W, &T2, &r2)?;
+    let W_secondary = W_secondary_temp.fold(&l_w_cyclefold_W, &T2, &r_T2, &r2)?;
 
     // The Nova-CycleFold NIFS proof
     let nifs = Self {
@@ -250,11 +256,12 @@ where
     );
     ro.absorb(*pp_digest);
     absorb_primary_r1cs::<E, Dual<E>>(U2, &mut ro);
-    let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2)?;
+    let r_T = E::Scalar::random(&mut OsRng);
+    let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2, &r_T)?;
     absorb_primary_commitment::<E, Dual<E>>(&comm_T, &mut ro);
     let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
     let U = U1.fold(U2, &comm_T, &r);
-    let W = W1.fold(W2, &T, &r)?;
+    let W = W1.fold(W2, &T, &r_T, &r)?;
     Ok((Self { comm_T }, (U, W), r))
   }
 
