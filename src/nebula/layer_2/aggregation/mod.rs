@@ -73,6 +73,12 @@ where
     let (circuit_shape_ops, ck_ops, digest_ops) = pp_ops.into_shape_ck_digest();
     let (circuit_shape_scan, ck_scan, digest_scan) = pp_scan.into_shape_ck_digest();
 
+    // Get Public Params for Verifier Circuit
+    let verifier_circuit: VerifierCircuit<E> =
+      VerifierCircuit::new(aug_params, ro_consts, None, None, None, None);
+    let pp: PublicParams<E> =
+      PublicParams::setup(&verifier_circuit, ck_hint_primary, ck_hint_cyclefold);
+
     // choose ck with biggest size
     let ck = {
       let mut ck = ck_F;
@@ -82,14 +88,11 @@ where
       if ck_scan.length() > ck.length() {
         ck = ck_scan;
       }
+      if pp.ck().length() > ck.length() {
+        ck = pp.ck().clone();
+      }
       ck
     };
-
-    // Get Public Params for Verifier Circuit
-    let verifier_circuit: VerifierCircuit<E> =
-      VerifierCircuit::new(aug_params, ro_consts, None, None, None, None);
-    let pp: PublicParams<E> =
-      PublicParams::setup(&verifier_circuit, ck_hint_primary, ck_hint_cyclefold);
 
     Self {
       pp,
@@ -661,19 +664,29 @@ where
 
 #[cfg(test)]
 mod test {
+  use super::compression::CompressedSNARK;
   use super::{AggregationPublicParams, AggregationRecursiveSNARK, Layer1PPTrait, Layer1RSTrait};
   use crate::nebula::audit_rs::{AuditPublicParams, AuditRecursiveSNARK, AuditStepCircuit};
   use crate::nebula::rs::{PublicParams, RecursiveSNARK};
   use crate::nebula::traits::MemoryCommitmentsTraits;
+  use crate::provider::ipa_pc;
+  use crate::spartan;
   use crate::traits::snark::default_ck_hint;
-  use crate::traits::CurveCycleEquipped;
+  use crate::traits::{CurveCycleEquipped, Dual};
   use crate::{nebula::rs::StepCircuit, provider::Bn256EngineIPA, traits::Engine};
   use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
   use ff::Field;
   use ff::PrimeField;
+  use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+  use tracing_subscriber::{fmt, EnvFilter, Registry};
+  use tracing_texray::TeXRayLayer;
 
   type E1 = Bn256EngineIPA;
   type F = <E1 as Engine>::Scalar;
+  type EE1 = ipa_pc::EvaluationEngine<E1>;
+  type EE2 = ipa_pc::EvaluationEngine<Dual<E1>>;
+  type S1 = spartan::batched::BatchedRelaxedR1CSSNARK<E1, EE1>;
+  type S2 = spartan::snark::RelaxedR1CSSNARK<Dual<E1>, EE2>;
 
   type TestMemoryComms<F> = (F, F);
 
@@ -692,7 +705,7 @@ mod test {
 
   #[test]
   fn test_ivc_folding() {
-    tracing_texray::init();
+    tracing_init();
     let (node_pp, nodes_rs) = node_nw(10);
     tracing_texray::examine(tracing::info_span!("aggregation"))
       .in_scope(|| aggregation_node(node_pp, &nodes_rs));
@@ -711,6 +724,11 @@ mod test {
     }
 
     aggregation_engine.verify(&aggregation_pp).unwrap();
+
+    let (pk, vk) = CompressedSNARK::<E1, S1, S2>::setup(&aggregation_pp).unwrap();
+    let snark =
+      CompressedSNARK::<E1, S1, S2>::prove(&aggregation_pp, &pk, &aggregation_engine).unwrap();
+    snark.verify(&aggregation_pp, &vk).unwrap();
   }
 
   struct NodePP {
@@ -1027,5 +1045,20 @@ mod test {
 
       Ok(z.to_vec())
     }
+  }
+
+  fn tracing_init() {
+    // Create an EnvFilter that filters out spans below the 'info' level
+    let filter = EnvFilter::new("arecibo=info");
+
+    // Create a TeXRayLayer
+    let texray_layer = TeXRayLayer::new(); // Optional: Only show spans longer than 100ms
+
+    // Set up the global subscriber
+    let subscriber = Registry::default()
+      .with(filter)
+      .with(fmt::layer())
+      .with(texray_layer);
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set global subscriber");
   }
 }

@@ -318,11 +318,11 @@ where
     (
       CommitmentKey {
         ck: self.ck[0..n].to_vec(),
-        h: self.h.clone(),
+        h: self.h,
       },
       CommitmentKey {
         ck: self.ck[n..].to_vec(),
-        h: self.h.clone(),
+        h: self.h,
       },
     )
   }
@@ -333,10 +333,7 @@ where
       c.extend(other.ck.clone());
       c
     };
-    CommitmentKey {
-      ck,
-      h: self.h.clone(),
-    }
+    CommitmentKey { ck, h: self.h }
   }
 
   // combines the left and right halves of `self` using `w1` and `w2` as the weights
@@ -351,7 +348,7 @@ where
 
     Self {
       ck: ck_affine,
-      h: L.h.clone(),
+      h: L.h,
     }
   }
 

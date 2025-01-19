@@ -52,6 +52,7 @@ where
 {
   snark_primary: S1,
   snark_secondary: S2,
+
   // primary data
   nifs_verifier: PrimaryNIFS<E>,
   r_U_verifier: RelaxedR1CSInstance<E>,
@@ -178,6 +179,10 @@ where
       wit_blind_secondary,
       err_blind_secondary,
     ) = rs.fold_derandom_secondary(pp)?;
+    assert!(pp
+      .r1cs_shape_cyclefold()
+      .is_sat_relaxed(pp.ck_cyclefold(), &U_secondary, &W_secondary)
+      .is_ok());
     let snark_secondary = S2::prove(
       &pp.pp.ck_cyclefold,
       &pk.secondary,
@@ -189,7 +194,6 @@ where
     Ok(Self {
       snark_primary,
       snark_secondary,
-
       // primary data
       nifs_verifier,
       nifs_r_verifier,
@@ -253,7 +257,7 @@ where
     let derandom_U = U.derandomize(
       &vk.dk_primary,
       &self.wit_blind_verifier,
-      &self.wit_blind_verifier,
+      &self.err_blind_verifier,
     );
 
     // Check F
@@ -263,7 +267,7 @@ where
       &self.r_U_F,
       &self.random_U_F,
     );
-    let derandom_U_F = U_F.derandomize(&vk.dk_primary, &self.wit_blind_F, &self.wit_blind_F);
+    let derandom_U_F = U_F.derandomize(&vk.dk_primary, &self.wit_blind_F, &self.err_blind_F);
 
     // Check ops
     let U_ops = self.nifs_r_ops.verify(
@@ -273,7 +277,7 @@ where
       &self.random_U_ops,
     );
     let derandom_U_ops =
-      U_ops.derandomize(&vk.dk_primary, &self.wit_blind_ops, &self.wit_blind_ops);
+      U_ops.derandomize(&vk.dk_primary, &self.wit_blind_ops, &self.err_blind_ops);
 
     // Check scan
     let U_scan = self.nifs_r_scan.verify(
@@ -283,7 +287,7 @@ where
       &self.random_U_scan,
     );
     let derandom_U_scan =
-      U_scan.derandomize(&vk.dk_primary, &self.wit_blind_scan, &self.wit_blind_scan);
+      U_scan.derandomize(&vk.dk_primary, &self.wit_blind_scan, &self.err_blind_scan);
 
     let U = vec![derandom_U_F, derandom_U_ops, derandom_U_scan, derandom_U];
     self.snark_primary.verify(&vk.primary, &U)?;
@@ -302,9 +306,8 @@ where
     let derandom_U_secondary = U_secondary.derandomize(
       &vk.dk_secondary,
       &self.wit_blind_secondary,
-      &self.wit_blind_secondary,
+      &self.err_blind_secondary,
     );
-
     self
       .snark_secondary
       .verify(&vk.secondary, &derandom_U_secondary)?;

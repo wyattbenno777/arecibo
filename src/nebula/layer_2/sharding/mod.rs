@@ -69,6 +69,12 @@ where
     let (circuit_shape_ops, ck_ops, digest_ops) = pp_ops.into_shape_ck_digest();
     let (circuit_shape_scan, ck_scan, digest_scan) = pp_scan.into_shape_ck_digest();
 
+    // Get Public Params for Verifier Circuit
+    let verifier_circuit: VerifierCircuit<E> =
+      VerifierCircuit::new(aug_params, ro_consts, None, None, None, None, None, None);
+    let pp: PublicParams<E> =
+      PublicParams::setup(&verifier_circuit, ck_hint_primary, ck_hint_cyclefold);
+
     // choose ck with biggest size
     let ck = {
       let mut ck = ck_F;
@@ -78,14 +84,11 @@ where
       if ck_scan.length() > ck.length() {
         ck = ck_scan;
       }
+      if pp.ck().length() > ck.length() {
+        ck = pp.ck().clone();
+      }
       ck
     };
-
-    // Get Public Params for Verifier Circuit
-    let verifier_circuit: VerifierCircuit<E> =
-      VerifierCircuit::new(aug_params, ro_consts, None, None, None, None, None, None);
-    let pp: PublicParams<E> =
-      PublicParams::setup(&verifier_circuit, ck_hint_primary, ck_hint_cyclefold);
 
     Self {
       pp,
