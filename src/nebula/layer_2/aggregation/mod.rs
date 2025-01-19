@@ -1,14 +1,14 @@
 //! Module containing components to enable aggregation of IVC proofs.
 
-use std::sync::Arc;
-
 use crate::constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT};
 use crate::errors::NovaError;
 use crate::gadgets::scalar_as_base;
 use crate::nebula::augmented_circuit::AugmentedCircuitParams;
-use crate::nebula::layer_2::utils::absorb_U;
 use crate::nebula::layer_2::utils::absorb_U_bn;
+use crate::nebula::layer_2::utils::{absorb_U, random_fold_and_derandom};
+use crate::nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryNIFS, PrimaryRelaxedNIFS};
 use crate::r1cs::{CommitmentKeyHint, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness};
+use crate::traits::commitment::CommitmentEngineTrait;
 use crate::traits::commitment::Len;
 use crate::traits::ROTrait;
 use crate::traits::{Dual, Engine};
@@ -19,6 +19,7 @@ use crate::{
   R1CSWithArity,
 };
 use ff::Field;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use verifier_circuit::VerifierCircuit;
@@ -134,13 +135,6 @@ where
       &self.circuit_shape_ops.r1cs_shape,
       &self.circuit_shape_scan.r1cs_shape,
       &self.pp.circuit_shape_primary.r1cs_shape,
-    ]
-  }
-
-  fn secondary_r1cs_shapes(&self) -> Vec<&R1CSShape<Dual<E>>> {
-    vec![
-      &self.r1cs_shape_cyclefold(),
-      &self.pp.circuit_shape_cyclefold.r1cs_shape,
     ]
   }
 }
@@ -497,6 +491,171 @@ where
     res_r_scan?;
     res_r_cyclefold?;
     Ok(())
+  }
+
+  fn fold_derandom(
+    &self,
+    pp: &AggregationPublicParams<E>,
+  ) -> Result<
+    (
+      // rs
+      RelaxedR1CSInstance<E>,
+      RelaxedR1CSWitness<E>,
+      PrimaryNIFS<E>,
+      PrimaryRelaxedNIFS<E>,
+      E::Scalar,
+      E::Scalar,
+      RelaxedR1CSInstance<E>,
+      // F
+      RelaxedR1CSInstance<E>,
+      RelaxedR1CSWitness<E>,
+      PrimaryRelaxedNIFS<E>,
+      E::Scalar,
+      E::Scalar,
+      RelaxedR1CSInstance<E>,
+      // ops
+      RelaxedR1CSInstance<E>,
+      RelaxedR1CSWitness<E>,
+      PrimaryRelaxedNIFS<E>,
+      E::Scalar,
+      E::Scalar,
+      RelaxedR1CSInstance<E>,
+      // scan
+      RelaxedR1CSInstance<E>,
+      RelaxedR1CSWitness<E>,
+      PrimaryRelaxedNIFS<E>,
+      E::Scalar,
+      E::Scalar,
+      RelaxedR1CSInstance<E>,
+    ),
+    NovaError,
+  > {
+    // Primary RS fold
+    let (
+      U_verifier,
+      W_verifier,
+      nifs_verifier,
+      nifs_r_verfier,
+      wit_blind_verifer,
+      err_blind_verifier,
+      random_U_verifier,
+    ) = self.rs.fold_ivc_compression_step(&pp.pp)?;
+
+    // Randomize the rest of the running instances
+    let (derandom_U_F, derandom_W_F, nifs_r_F, wit_blind_F, err_blind_F, random_U_F) =
+      random_fold_and_derandom(
+        &pp.circuit_shape_F.r1cs_shape,
+        &pp.ck,
+        &pp.pp.ro_consts,
+        pp.digest_F,
+        &self.r_U_F,
+        &self.r_W_F,
+      )?;
+    let (derandom_U_ops, derandom_W_ops, nifs_r_ops, wit_blind_ops, err_blind_ops, random_U_ops) =
+      random_fold_and_derandom(
+        &pp.circuit_shape_ops.r1cs_shape,
+        &pp.ck,
+        &pp.pp.ro_consts,
+        pp.digest_ops,
+        &self.r_U_ops,
+        &self.r_W_ops,
+      )?;
+    let (
+      derandom_U_scan,
+      derandom_W_scan,
+      nifs_r_scan,
+      wit_blind_scan,
+      err_blind_scan,
+      random_U_scan,
+    ) = random_fold_and_derandom(
+      &pp.circuit_shape_scan.r1cs_shape,
+      &pp.ck,
+      &pp.pp.ro_consts,
+      pp.digest_scan,
+      &self.r_U_scan,
+      &self.r_W_scan,
+    )?;
+
+    Ok((
+      // rs
+      U_verifier,
+      W_verifier,
+      nifs_verifier,
+      nifs_r_verfier,
+      wit_blind_verifer,
+      err_blind_verifier,
+      random_U_verifier,
+      // F
+      derandom_U_F,
+      derandom_W_F,
+      nifs_r_F,
+      wit_blind_F,
+      err_blind_F,
+      random_U_F,
+      // ops
+      derandom_U_ops,
+      derandom_W_ops,
+      nifs_r_ops,
+      wit_blind_ops,
+      err_blind_ops,
+      random_U_ops,
+      // scan
+      derandom_U_scan,
+      derandom_W_scan,
+      nifs_r_scan,
+      wit_blind_scan,
+      err_blind_scan,
+      random_U_scan,
+    ))
+  }
+
+  fn fold_derandom_secondary(
+    &self,
+    pp: &AggregationPublicParams<E>,
+  ) -> Result<
+    (
+      RelaxedR1CSInstance<Dual<E>>,
+      RelaxedR1CSWitness<Dual<E>>,
+      CycleFoldRelaxedNIFS<E>,
+      CycleFoldRelaxedNIFS<E>,
+      RelaxedR1CSInstance<Dual<E>>,
+      <Dual<E> as Engine>::Scalar,
+      <Dual<E> as Engine>::Scalar,
+    ),
+    NovaError,
+  > {
+    let ck = pp.ck_cyclefold();
+    let ro_consts = &pp.pp.ro_consts;
+    let S = pp.r1cs_shape_cyclefold();
+
+    let (r_U_secondary_verifier, r_W_secondary_verifier) = self.rs.secondary_rs_part();
+    let (nifs_1, (U_temp_1, W_temp_1), _) = CycleFoldRelaxedNIFS::<E>::prove(
+      ck,
+      ro_consts,
+      S,
+      r_U_secondary_verifier,
+      r_W_secondary_verifier,
+      &self.r_U_cyclefold,
+      &self.r_W_cyclefold,
+    )?;
+    // Sample random U and W
+    let (U_random, W_random) = S.sample_random_instance_witness(ck)?;
+
+    // Random Fold
+    let (nifs_final, (U, W), _) = CycleFoldRelaxedNIFS::<E>::prove(
+      ck, ro_consts, S, &U_temp_1, &W_temp_1, &U_random, &W_random,
+    )?;
+
+    // Derandomize
+    let (derandom_W, wit_blind, err_blind) = W.derandomize();
+    let derandom_U = U.derandomize(
+      &<Dual<E> as Engine>::CE::derand_key(ck),
+      &wit_blind,
+      &err_blind,
+    );
+    Ok((
+      derandom_U, derandom_W, nifs_1, nifs_final, U_random, wit_blind, err_blind,
+    ))
   }
 }
 
