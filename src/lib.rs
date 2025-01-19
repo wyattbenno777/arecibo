@@ -1073,14 +1073,13 @@ mod tests {
 
   use super::*;
   use crate::{
-    provider::{Bn256EngineIPA, Bn256EngineKZG, Bn256EngineZM, PallasEngine, Secp256k1Engine},
+    provider::{Bn256EngineIPA, Bn256EngineKZG, PallasEngine, Secp256k1Engine},
     traits::{evaluation::EvaluationEngineTrait, snark::default_ck_hint},
   };
   use ::bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
   use core::{fmt::Write, marker::PhantomData};
   use expect_test::{expect, Expect};
   use ff::PrimeField;
-  use halo2curves::bn256::Bn256;
   use traits::circuit::TrivialCircuit;
 
   type EE<E> = provider::ipa_pc::EvaluationEngine<E>;

@@ -12,6 +12,7 @@ pub(crate) mod poseidon;
 pub(crate) mod secp_secq;
 pub(crate) mod traits;
 
+#[allow(dead_code)]
 pub(crate) mod util;
 
 // crate-private modules

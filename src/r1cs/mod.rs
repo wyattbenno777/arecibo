@@ -967,12 +967,10 @@ pub fn default_T<E: Engine>(num_cons: usize) -> Vec<E::Scalar> {
 #[cfg(test)]
 pub(crate) mod tests {
   use ff::Field;
-  use rand_chacha::ChaCha20Rng;
-  use rand_core::SeedableRng;
 
   use super::*;
   use crate::{
-    provider::{Bn256EngineIPA, Bn256EngineKZG, PallasEngine, Secp256k1Engine},
+    provider::{Bn256EngineKZG, PallasEngine, Secp256k1Engine},
     r1cs::sparse::SparseMatrix,
     traits::Engine,
   };
