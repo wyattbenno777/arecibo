@@ -32,6 +32,7 @@ use bellpepper_core::{ConstraintSystem, SynthesisError};
 use ff::Field;
 use ff::PrimeField;
 use once_cell::sync::OnceCell;
+use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 
 mod augmented_circuit;
@@ -190,6 +191,9 @@ where
 
   // outputs
   pub(in crate::nebula) zi: Vec<E1::Scalar>,
+
+  // makes Nova simulataable
+  r_i: E1::Scalar,
 }
 
 impl<E1> AuditRecursiveSNARK<E1>
@@ -219,6 +223,7 @@ where
     //
     // Get the new instance-witness pair to be folded into running instance
     let mut cs_primary = SatisfyingAssignment::<E1>::new();
+    let r_i = E1::Scalar::random(&mut OsRng);
     let inputs_primary: AugmentedCircuitInputs<E1> = AugmentedCircuitInputs::new(
       scalar_as_base::<E1>(pp.digest()),
       <Dual<E1> as Engine>::Base::from(0u64),
@@ -231,6 +236,8 @@ where
       None,
       None,
       None,
+      None,
+      r_i,
     );
     let circuit_primary = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
@@ -274,6 +281,9 @@ where
       // running Cyclefold instance, witness pair
       r_U_cyclefold,
       r_W_cyclefold,
+
+      // makes Nova simulatable
+      r_i,
     })
   }
 
@@ -340,6 +350,7 @@ where
       pp.circuit_shape_primary.r1cs_shape.num_io + 1,
       pp.circuit_shape_primary.r1cs_shape.num_vars,
     );
+    let r_next = E1::Scalar::random(&mut OsRng);
     let inputs_primary: AugmentedCircuitInputs<E1> = AugmentedCircuitInputs::new(
       scalar_as_base::<E1>(pp.digest()),
       <Dual<E1> as Engine>::Base::from(self.i as u64),
@@ -352,6 +363,8 @@ where
       Some(W_new),
       Some(self.prev_IC),
       Some(self.comm_omega_prev),
+      Some(self.r_i),
+      r_next,
     );
     let circuit_primary: AugmentedCircuit<'_, E1, C> = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
@@ -386,7 +399,7 @@ where
 
     // Update number of steps proven
     self.i += 1;
-
+    self.r_i = r_next;
     Ok(())
   }
 
@@ -423,7 +436,7 @@ where
     let (hash_primary, hash_cyclefold) = {
       let mut hasher_p = <Dual<E1> as Engine>::RO::new(
         pp.ro_consts.clone(),
-        4 + 2 * pp.F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3,
+        5 + 2 * pp.F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3,
       );
       hasher_p.absorb(pp.digest());
       hasher_p.absorb(E1::Scalar::from(num_steps as u64));
@@ -436,17 +449,18 @@ where
       absorb_primary_relaxed_r1cs::<E1, Dual<E1>>(&self.r_U_primary, &mut hasher_p);
       hasher_p.absorb(self.prev_IC.0);
       hasher_p.absorb(self.prev_IC.1);
+      hasher_p.absorb(self.r_i);
       let hash_primary = hasher_p.squeeze(NUM_HASH_BITS);
 
       let mut hasher_c = <Dual<E1> as Engine>::RO::new(
         pp.ro_consts.clone(),
-        1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
+        1 + 1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
       );
       hasher_c.absorb(pp.digest());
       hasher_c.absorb(E1::Scalar::from(num_steps as u64));
       self.r_U_cyclefold.absorb_in_ro(&mut hasher_c);
+      hasher_c.absorb(self.r_i);
       let hash_cyclefold = hasher_c.squeeze(NUM_HASH_BITS);
-
       (hash_primary, hash_cyclefold)
     };
 

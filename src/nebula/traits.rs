@@ -220,6 +220,8 @@ where
 {
   /// Get r_U_cyclefold and r_W_cyclefold
   fn r_cyclefold(&self) -> (&RelaxedR1CSInstance<Dual<E>>, &RelaxedR1CSWitness<Dual<E>>);
+  /// Get the random value
+  fn r_i(&self) -> E::Scalar;
 }
 
 macro_rules! impl_rs_fields_trait {
@@ -230,6 +232,10 @@ macro_rules! impl_rs_fields_trait {
     {
       fn r_cyclefold(&self) -> (&RelaxedR1CSInstance<Dual<E>>, &RelaxedR1CSWitness<Dual<E>>) {
         (&self.r_U_cyclefold, &self.r_W_cyclefold)
+      }
+
+      fn r_i(&self) -> E::Scalar {
+        self.r_i
       }
     }
   };

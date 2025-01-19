@@ -5,6 +5,7 @@ use super::{
   nifs::{CycleFoldRelaxedNIFS, PrimaryNIFS, PrimaryRelaxedNIFS},
   traits::{Layer1PPTrait, Layer1RSTrait},
 };
+use crate::nebula::traits::RecursiveSNARKFieldsTrait;
 use crate::traits::commitment::CommitmentEngineTrait;
 use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
@@ -77,6 +78,7 @@ where
   wit_blind_F: E::Scalar,
   err_blind_F: E::Scalar,
   U_random_F: RelaxedR1CSInstance<E>,
+  r_i_F: E::Scalar,
 
   // ops data
   num_steps_ops: usize,
@@ -86,6 +88,7 @@ where
   wit_blind_ops: E::Scalar,
   err_blind_ops: E::Scalar,
   U_random_ops: RelaxedR1CSInstance<E>,
+  r_i_ops: E::Scalar,
 
   // scan data
   num_steps_scan: usize,
@@ -95,6 +98,7 @@ where
   wit_blind_scan: E::Scalar,
   err_blind_scan: E::Scalar,
   U_random_scan: RelaxedR1CSInstance<E>,
+  r_i_scan: E::Scalar,
 
   // CycleFold data
   nifs_1_secondary: CycleFoldRelaxedNIFS<E>,
@@ -212,6 +216,7 @@ where
       wit_blind_F,
       err_blind_F,
       U_random_F,
+      r_i_F: rs.F().r_i(),
 
       // ops data
       num_steps_ops: rs.ops().num_steps(),
@@ -221,6 +226,7 @@ where
       wit_blind_ops,
       err_blind_ops,
       U_random_ops,
+      r_i_ops: rs.ops().r_i(),
 
       // scan data
       num_steps_scan: rs.scan().num_steps(),
@@ -230,6 +236,7 @@ where
       wit_blind_scan,
       err_blind_scan,
       U_random_scan,
+      r_i_scan: rs.scan().r_i(),
 
       // CycleFold data
       nifs_1_secondary,
@@ -256,7 +263,7 @@ where
       let (hash_primary, hash_cyclefold) = {
         let mut hasher_p = <Dual<E> as Engine>::RO::new(
           pp.F().ro_consts.clone(),
-          3 + 2 * pp.F().F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3, // (digest, num_steps, prev_IC) + 2 * arity "(z0, zi)" + U
+          4 + 2 * pp.F().F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3, // (digest, num_steps, prev_IC) + 2 * arity "(z0, zi)" + U
         );
         hasher_p.absorb(pp.F().digest());
         hasher_p.absorb(E::Scalar::from(self.num_steps_F as u64));
@@ -268,14 +275,16 @@ where
         }
         absorb_primary_relaxed_r1cs::<E, Dual<E>>(&self.r_U[0], &mut hasher_p);
         hasher_p.absorb(self.prev_IC_F);
+        hasher_p.absorb(self.r_i_F);
         let hash_primary = hasher_p.squeeze(NUM_HASH_BITS);
         let mut hasher_c = <Dual<E> as Engine>::RO::new(
           pp.F().ro_consts.clone(),
-          1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
+          1 + 1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
         );
         hasher_c.absorb(pp.F().digest());
         hasher_c.absorb(E::Scalar::from(self.num_steps_F as u64));
         self.r_U_secondary[0].absorb_in_ro(&mut hasher_c);
+        hasher_c.absorb(self.r_i_F);
         let hash_cyclefold = hasher_c.squeeze(NUM_HASH_BITS);
         (hash_primary, hash_cyclefold)
       };
@@ -301,7 +310,7 @@ where
       let (hash_primary, hash_cyclefold) = {
         let mut hasher_p = <Dual<E> as Engine>::RO::new(
           pp.F().ro_consts.clone(),
-          3 + 2 * pp.ops().F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3, // (digest, num_steps, prev_IC) + 2 * arity "(z0, zi)" + U
+          4 + 2 * pp.ops().F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3, // (digest, num_steps, prev_IC) + 2 * arity "(z0, zi)" + U
         );
         hasher_p.absorb(pp.ops().digest());
         hasher_p.absorb(E::Scalar::from(self.num_steps_ops as u64));
@@ -313,14 +322,16 @@ where
         }
         absorb_primary_relaxed_r1cs::<E, Dual<E>>(&self.r_U[1], &mut hasher_p);
         hasher_p.absorb(self.prev_IC_ops);
+        hasher_p.absorb(self.r_i_ops);
         let hash_primary = hasher_p.squeeze(NUM_HASH_BITS);
         let mut hasher_c = <Dual<E> as Engine>::RO::new(
           pp.F().ro_consts.clone(),
-          1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
+          1 + 1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
         );
         hasher_c.absorb(pp.ops().digest());
         hasher_c.absorb(E::Scalar::from(self.num_steps_ops as u64));
         self.r_U_secondary[1].absorb_in_ro(&mut hasher_c);
+        hasher_c.absorb(self.r_i_ops);
         let hash_cyclefold = hasher_c.squeeze(NUM_HASH_BITS);
         (hash_primary, hash_cyclefold)
       };
@@ -349,7 +360,7 @@ where
       let (hash_primary, hash_cyclefold) = {
         let mut hasher_p = <Dual<E> as Engine>::RO::new(
           pp.F().ro_consts.clone(),
-          4 + 2 * pp.scan().F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3, // (digest, num_steps, prev_IC) + 2 * arity "(z0, zi)" + U
+          5 + 2 * pp.scan().F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3, // (digest, num_steps, prev_IC) + 2 * arity "(z0, zi)" + U
         );
         hasher_p.absorb(pp.scan().digest());
         hasher_p.absorb(E::Scalar::from(self.num_steps_scan as u64));
@@ -362,14 +373,16 @@ where
         absorb_primary_relaxed_r1cs::<E, Dual<E>>(&self.r_U[2], &mut hasher_p);
         hasher_p.absorb(self.prev_IC_scan.0);
         hasher_p.absorb(self.prev_IC_scan.1);
+        hasher_p.absorb(self.r_i_scan);
         let hash_primary = hasher_p.squeeze(NUM_HASH_BITS);
         let mut hasher_c = <Dual<E> as Engine>::RO::new(
           pp.F().ro_consts.clone(),
-          1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
+          1 + 1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
         );
         hasher_c.absorb(pp.scan().digest());
         hasher_c.absorb(E::Scalar::from(self.num_steps_scan as u64));
         self.r_U_secondary[2].absorb_in_ro(&mut hasher_c);
+        hasher_c.absorb(self.r_i_scan);
         let hash_cyclefold = hasher_c.squeeze(NUM_HASH_BITS);
         (hash_primary, hash_cyclefold)
       };
