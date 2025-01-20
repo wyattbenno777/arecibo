@@ -43,6 +43,8 @@ pub struct UniversalKZGParam<E: Engine> {
   // Look for the static assertions in provider macros for a justification
   #[abomonate_with(Vec<[u64; 16]>)]
   pub powers_of_h: Vec<E::G2Affine>,
+  #[abomonate_with(Vec<[u64; 16]>)]
+  pub h: E::G1Affine,
 }
 
 impl<E: Engine> PartialEq for UniversalKZGParam<E> {
@@ -178,10 +180,11 @@ where
       || E::G1::batch_normalize(&powers_of_g_projective, &mut powers_of_g),
       || E::G2::batch_normalize(&powers_of_h_projective, &mut powers_of_h),
     );
-
+    let h = powers_of_g[0];
     Self {
       powers_of_g,
       powers_of_h,
+      h,
     }
   }
 }
@@ -216,6 +219,12 @@ where
   }
 }
 
+/// A type that holds blinding generator
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DerandKey<E: Engine> {
+  h: E::G1Affine,
+}
+
 /// Provides a commitment engine
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KZGCommitmentEngine<E> {
@@ -232,6 +241,7 @@ where
 {
   type CommitmentKey = UniversalKZGParam<E>;
   type Commitment = Commitment<NE>;
+  type DerandKey = DerandKey<E>;
 
   fn setup(label: &'static [u8], n: usize) -> Self::CommitmentKey {
     // TODO: this is just for testing, replace by grabbing from a real setup for production
@@ -242,10 +252,32 @@ where
     UniversalKZGParam::gen_srs_for_testing(rng, n.next_power_of_two())
   }
 
-  fn commit(ck: &Self::CommitmentKey, v: &[<E::G1 as Group>::Scalar]) -> Self::Commitment {
+  fn commit(
+    ck: &Self::CommitmentKey,
+    v: &[<E::G1 as Group>::Scalar],
+    r: &<E::G1 as Group>::Scalar,
+  ) -> Self::Commitment {
     assert!(ck.length() >= v.len());
+    let mut scalars = v.to_vec();
+    scalars.push(*r);
+    let mut bases = ck.powers_of_g[..v.len()].to_vec();
+    bases.push(ck.h);
     Commitment {
-      comm: E::G1::vartime_multiscalar_mul(v, &ck.powers_of_g[..v.len()]),
+      comm: E::G1::vartime_multiscalar_mul(&scalars, &bases),
+    }
+  }
+
+  fn derand_key(ck: &Self::CommitmentKey) -> Self::DerandKey {
+    DerandKey { h: ck.h }
+  }
+
+  fn derandomize(
+    dk: &Self::DerandKey,
+    commit: &Self::Commitment,
+    r: &<E::G1 as Group>::Scalar,
+  ) -> Self::Commitment {
+    Commitment {
+      comm: commit.comm - E::G1::from(dk.h) * r,
     }
   }
 }

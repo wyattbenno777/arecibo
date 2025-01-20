@@ -1,11 +1,13 @@
 //! This module implements Nova's traits using the following several different combinations
 
 // public modules to be used as an evaluation engine with Spartan
-// pub mod hyperkzg;
+pub mod hyperkzg;
 pub mod ipa_pc;
+mod kzg_commitment;
 
 // crate-public modules, made crate-public mostly for tests
 pub(crate) mod bn256_grumpkin;
+pub mod non_hiding_zeromorph;
 mod pasta;
 pub mod pedersen;
 pub(crate) mod poseidon;
@@ -21,7 +23,7 @@ mod keccak;
 
 use crate::{
   provider::{
-    bn256_grumpkin::{bn256, grumpkin},
+    bn256_grumpkin::grumpkin,
     keccak::Keccak256Transcript,
     pedersen::CommitmentEngine as PedersenCommitmentEngine,
     poseidon::{PoseidonRO, PoseidonROCircuit},
@@ -29,10 +31,12 @@ use crate::{
   },
   traits::{CurveCycleEquipped, Engine},
 };
+use bn256_grumpkin::bn256;
+use halo2curves::bn256::Bn256;
 use pasta_curves::{pallas, vesta};
 use serde::{Deserialize, Serialize};
 
-// use self::kzg_commitment::KZGCommitmentEngine;
+use self::kzg_commitment::KZGCommitmentEngine;
 
 /// An implementation of the Nova `Engine` trait with Grumpkin curve and Pedersen commitment scheme
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -73,7 +77,7 @@ impl Engine for Bn256EngineZM {
   type RO = PoseidonRO<Self::Base, Self::Scalar>;
   type ROCircuit = PoseidonROCircuit<Self::Base>;
   type TE = Keccak256Transcript<Self>;
-  type CE = PedersenCommitmentEngine<Self>;
+  type CE = KZGCommitmentEngine<Bn256>;
 }
 /// An implementation of Nova traits with HyperKZG over the BN256 curve
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -86,7 +90,7 @@ impl Engine for Bn256EngineKZG {
   type RO = PoseidonRO<Self::Base, Self::Scalar>;
   type ROCircuit = PoseidonROCircuit<Self::Base>;
   type TE = Keccak256Transcript<Self>;
-  type CE = PedersenCommitmentEngine<Self>;
+  type CE = KZGCommitmentEngine<Bn256>;
 }
 
 impl CurveCycleEquipped for Bn256EngineIPA {
