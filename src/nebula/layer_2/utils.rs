@@ -1,5 +1,10 @@
+use crate::errors::NovaError;
 use crate::gadgets::scalar_as_base;
-use crate::traits::AbsorbInROTrait;
+use crate::nebula::nifs::PrimaryRelaxedNIFS;
+use crate::r1cs::{R1CSShape, RelaxedR1CSWitness};
+use crate::traits::commitment::CommitmentEngineTrait;
+use crate::traits::{AbsorbInROTrait, ROConstants};
+use crate::CommitmentKey;
 use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_CHALLENGE_BITS},
   cyclefold::util::absorb_primary_commitment,
@@ -103,4 +108,36 @@ where
       U2_secondary,
     }
   }
+}
+
+pub fn random_fold_and_derandom<E>(
+  S: &R1CSShape<E>,
+  ck: &CommitmentKey<E>,
+  ro_const: &ROConstants<Dual<E>>,
+  digest: E::Scalar,
+  U: &RelaxedR1CSInstance<E>,
+  W: &RelaxedR1CSWitness<E>,
+) -> Result<
+  (
+    RelaxedR1CSInstance<E>,
+    RelaxedR1CSWitness<E>,
+    PrimaryRelaxedNIFS<E>,
+    E::Scalar,
+    E::Scalar,
+    RelaxedR1CSInstance<E>,
+  ),
+  NovaError,
+>
+where
+  E: CurveCycleEquipped,
+{
+  // Fold random instance and witness
+  let (random_U, random_W) = S.sample_random_instance_witness(ck)?;
+  let (nifs_r, (U, W), _) =
+    PrimaryRelaxedNIFS::prove(ck, ro_const, &digest, S, (U, W), (&random_U, &random_W))?;
+  let (derandom_W, wit_blind, err_blind) = W.derandomize();
+  let derandom_U = U.derandomize(&E::CE::derand_key(ck), &wit_blind, &err_blind);
+  Ok((
+    derandom_U, derandom_W, nifs_r, wit_blind, err_blind, random_U,
+  ))
 }

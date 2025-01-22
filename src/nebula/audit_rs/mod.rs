@@ -6,8 +6,10 @@ use std::sync::Arc;
 
 use super::augmented_circuit::AugmentedCircuitParams;
 use super::ic::IC;
-use super::nifs::{PrimaryNIFS, NIFS};
+use super::nifs::{PrimaryNIFS, PrimaryRelaxedNIFS, NIFS};
+use super::traits::impl_rs_fields_trait;
 use crate::cyclefold::util::{absorb_primary_relaxed_r1cs, FoldingData};
+use crate::nebula::traits::RecursiveSNARKFieldsTrait;
 use crate::traits::commitment::CommitmentEngineTrait;
 use crate::Commitment;
 use crate::{
@@ -30,6 +32,7 @@ use bellpepper_core::{ConstraintSystem, SynthesisError};
 use ff::Field;
 use ff::PrimeField;
 use once_cell::sync::OnceCell;
+use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 
 mod augmented_circuit;
@@ -188,6 +191,9 @@ where
 
   // outputs
   pub(in crate::nebula) zi: Vec<E1::Scalar>,
+
+  // makes Nova simulataable
+  r_i: E1::Scalar,
 }
 
 impl<E1> AuditRecursiveSNARK<E1>
@@ -217,6 +223,7 @@ where
     //
     // Get the new instance-witness pair to be folded into running instance
     let mut cs_primary = SatisfyingAssignment::<E1>::new();
+    let r_i = E1::Scalar::random(&mut OsRng);
     let inputs_primary: AugmentedCircuitInputs<E1> = AugmentedCircuitInputs::new(
       scalar_as_base::<E1>(pp.digest()),
       <Dual<E1> as Engine>::Base::from(0u64),
@@ -229,6 +236,8 @@ where
       None,
       None,
       None,
+      None,
+      r_i,
     );
     let circuit_primary = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
@@ -272,6 +281,9 @@ where
       // running Cyclefold instance, witness pair
       r_U_cyclefold,
       r_W_cyclefold,
+
+      // makes Nova simulatable
+      r_i,
     })
   }
 
@@ -338,6 +350,7 @@ where
       pp.circuit_shape_primary.r1cs_shape.num_io + 1,
       pp.circuit_shape_primary.r1cs_shape.num_vars,
     );
+    let r_next = E1::Scalar::random(&mut OsRng);
     let inputs_primary: AugmentedCircuitInputs<E1> = AugmentedCircuitInputs::new(
       scalar_as_base::<E1>(pp.digest()),
       <Dual<E1> as Engine>::Base::from(self.i as u64),
@@ -350,6 +363,8 @@ where
       Some(W_new),
       Some(self.prev_IC),
       Some(self.comm_omega_prev),
+      Some(self.r_i),
+      r_next,
     );
     let circuit_primary: AugmentedCircuit<'_, E1, C> = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
@@ -384,7 +399,7 @@ where
 
     // Update number of steps proven
     self.i += 1;
-
+    self.r_i = r_next;
     Ok(())
   }
 
@@ -421,7 +436,7 @@ where
     let (hash_primary, hash_cyclefold) = {
       let mut hasher_p = <Dual<E1> as Engine>::RO::new(
         pp.ro_consts.clone(),
-        4 + 2 * pp.F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3,
+        5 + 2 * pp.F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3,
       );
       hasher_p.absorb(pp.digest());
       hasher_p.absorb(E1::Scalar::from(num_steps as u64));
@@ -434,17 +449,18 @@ where
       absorb_primary_relaxed_r1cs::<E1, Dual<E1>>(&self.r_U_primary, &mut hasher_p);
       hasher_p.absorb(self.prev_IC.0);
       hasher_p.absorb(self.prev_IC.1);
+      hasher_p.absorb(self.r_i);
       let hash_primary = hasher_p.squeeze(NUM_HASH_BITS);
 
       let mut hasher_c = <Dual<E1> as Engine>::RO::new(
         pp.ro_consts.clone(),
-        1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
+        1 + 1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
       );
       hasher_c.absorb(pp.digest());
       hasher_c.absorb(E1::Scalar::from(num_steps as u64));
       self.r_U_cyclefold.absorb_in_ro(&mut hasher_c);
+      hasher_c.absorb(self.r_i);
       let hash_cyclefold = hasher_c.squeeze(NUM_HASH_BITS);
-
       (hash_primary, hash_cyclefold)
     };
 
@@ -549,6 +565,25 @@ where
     (&self.r_U_cyclefold, &self.r_W_cyclefold)
   }
 
+  /// Get the secondary curve part of the running instance
+  pub fn secondary_rs_part_derandomized(
+    &self,
+    pp: &AuditPublicParams<E1>,
+  ) -> (
+    RelaxedR1CSInstance<Dual<E1>>,
+    RelaxedR1CSWitness<Dual<E1>>,
+    <Dual<E1> as Engine>::Scalar,
+    <Dual<E1> as Engine>::Scalar,
+  ) {
+    let (derandom_W, wit_blind, err_blind) = self.r_W_cyclefold.derandomize();
+    let derandom_U = self.r_U_cyclefold.derandomize(
+      &<Dual<E1> as Engine>::CE::derand_key(&pp.ck_cyclefold),
+      &wit_blind,
+      &err_blind,
+    );
+    (derandom_U, derandom_W, wit_blind, err_blind)
+  }
+
   /// Get primary & secondayr relaxed instance witness pair
   pub fn primary_secondary_U_W(
     &self,
@@ -575,10 +610,14 @@ where
       RelaxedR1CSInstance<E1>,
       RelaxedR1CSWitness<E1>,
       PrimaryNIFS<E1>,
+      PrimaryRelaxedNIFS<E1>,
+      E1::Scalar,
+      E1::Scalar,
+      RelaxedR1CSInstance<E1>,
     ),
     NovaError,
   > {
-    let (nifs, (U, W), _) = PrimaryNIFS::prove(
+    let (nifs, (U_f, W_f), _) = PrimaryNIFS::prove(
       &*pp.ck_primary,
       &pp.ro_consts,
       &pp.digest(),
@@ -586,9 +625,30 @@ where
       (&self.r_U_primary, &self.r_W_primary),
       (&self.l_u_primary, &self.l_w_primary),
     )?;
-    Ok((U, W, nifs))
+
+    // Fold random instance and witness
+    let (random_U, random_W) = pp
+      .circuit_shape_primary
+      .r1cs_shape
+      .sample_random_instance_witness(&pp.ck_primary)?;
+    let (nifs_r, (U, W), _) = PrimaryRelaxedNIFS::prove(
+      &*pp.ck_primary,
+      &pp.ro_consts,
+      &pp.digest(),
+      &pp.circuit_shape_primary.r1cs_shape,
+      (&U_f, &W_f),
+      (&random_U, &random_W),
+    )?;
+
+    let (derandom_W, wit_blind, err_blind) = W.derandomize();
+    let derandom_U = U.derandomize(&E1::CE::derand_key(&pp.ck_primary), &wit_blind, &err_blind);
+    Ok((
+      derandom_U, derandom_W, nifs, nifs_r, wit_blind, err_blind, random_U,
+    ))
   }
 }
+
+impl_rs_fields_trait!(AuditRecursiveSNARK);
 
 /// A helper trait for a step of the incremental computation (i.e., circuit for F)
 pub trait AuditStepCircuit<F: PrimeField>: Send + Sync + Clone {
@@ -618,8 +678,8 @@ pub trait AuditStepCircuit<F: PrimeField>: Send + Sync + Clone {
     E: Engine<Scalar = F>,
   {
     (
-      E::CE::commit(ck, &self.IS_advice()),
-      E::CE::commit(ck, &self.FS_advice()),
+      E::CE::commit(ck, &self.IS_advice(), &E::Scalar::ZERO),
+      E::CE::commit(ck, &self.FS_advice(), &E::Scalar::ZERO),
     )
   }
 }

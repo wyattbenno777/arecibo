@@ -136,7 +136,7 @@ where
   ) -> Vec<E::G1Affine> {
     let comms: Vec<NE::GE> = (1..polys.len())
       .into_par_iter()
-      .map(|i| <NE::CE as CommitmentEngineTrait<NE>>::commit(ck, &polys[i]).comm)
+      .map(|i| <NE::CE as CommitmentEngineTrait<NE>>::commit(ck, &polys[i], &E::Fr::from(0)).comm)
       .collect();
 
     let mut comms_affine: Vec<E::G1Affine> = vec![E::G1Affine::identity(); comms.len()];
@@ -228,7 +228,7 @@ where
     let D = UniPoly::new(vec![u[2] * u[2], -u[2], -u[2], E::Fr::from(1)]);
     let (Q_x, R_x) = batched_Pi.divide_with_q_and_r(&D).unwrap();
 
-    let C_Q = <NE::CE as CommitmentEngineTrait<NE>>::commit(ck, &Q_x.coeffs)
+    let C_Q = <NE::CE as CommitmentEngineTrait<NE>>::commit(ck, &Q_x.coeffs, &E::Fr::from(0))
       .comm
       .to_affine();
 
@@ -239,7 +239,7 @@ where
 
     // TODO: since this is a usual KZG10 we should use it as utility instead
     let h = K_x.divide_minus_u(a);
-    let C_H = <NE::CE as CommitmentEngineTrait<NE>>::commit(ck, &h.coeffs)
+    let C_H = <NE::CE as CommitmentEngineTrait<NE>>::commit(ck, &h.coeffs, &E::Fr::from(0))
       .comm
       .to_affine();
 
@@ -416,6 +416,7 @@ mod tests {
       <<crate::provider::Bn256EngineKZG as NovaEngine>::CE as CommitmentEngineTrait<NE>>::commit(
         ck,
         &Q_x.coeffs,
+        &Fr::from(0),
       )
       .comm
       .to_affine();
@@ -427,6 +428,7 @@ mod tests {
       <<crate::provider::Bn256EngineKZG as NovaEngine>::CE as CommitmentEngineTrait<NE>>::commit(
         ck,
         &K_x.coeffs,
+        &Fr::from(0),
       )
       .comm
       .to_affine();
@@ -551,7 +553,7 @@ mod tests {
       <KZGCommitmentEngine<E> as CommitmentEngineTrait<NE>>::setup(b"test", poly.len());
 
     let ck = Arc::new(ck);
-    let C: Commitment<NE> = KZGCommitmentEngine::commit(&ck, &poly);
+    let C: Commitment<NE> = KZGCommitmentEngine::commit(&ck, &poly, &Fr::from(0));
 
     test_batching_property_on_evaluation(&poly, &point, &eval);
     test_d_polynomial_correctness(&poly, &point, &eval);
@@ -588,7 +590,7 @@ mod tests {
       EvaluationEngine::<E, NE>::setup(ck.clone());
 
     // make a commitment
-    let C: Commitment<NE> = KZGCommitmentEngine::commit(&ck, &poly);
+    let C: Commitment<NE> = KZGCommitmentEngine::commit(&ck, &poly, &Fr::from(0));
 
     let mut prover_transcript = Keccak256Transcript::new(b"TestEval");
     let proof =
@@ -649,7 +651,7 @@ mod tests {
       EvaluationEngine::<E, NE>::setup(ck.clone());
 
     // make a commitment
-    let C: Commitment<NE> = KZGCommitmentEngine::commit(&ck, poly);
+    let C: Commitment<NE> = KZGCommitmentEngine::commit(&ck, poly, &Fr::from(0));
 
     let mut prover_transcript = Keccak256Transcript::new(b"TestEval");
     let mut verifier_transcript = Keccak256Transcript::<NE>::new(b"TestEval");
@@ -703,8 +705,8 @@ mod tests {
     let ck: CommitmentKey<NE> =
       <KZGCommitmentEngine<E> as CommitmentEngineTrait<NE>>::setup(b"test", n);
 
-    let C1: Commitment<NE> = KZGCommitmentEngine::commit(&ck, &poly); // correct commitment
-    let C2: Commitment<NE> = KZGCommitmentEngine::commit(&ck, &altered_poly); // wrong commitment
+    let C1: Commitment<NE> = KZGCommitmentEngine::commit(&ck, &poly, &Fr::from(0)); // correct commitment
+    let C2: Commitment<NE> = KZGCommitmentEngine::commit(&ck, &altered_poly, &Fr::from(0)); // wrong commitment
 
     test_negative_inner_commitment(&poly, &point, &eval, &ck, &C1, &C2); // here we check detection when proof and commitment do not correspond
     test_negative_inner_commitment(&poly, &point, &eval, &ck, &C2, &C2); // here we check detection when proof was built with wrong commitment
@@ -760,7 +762,7 @@ mod tests {
     // poly is in eval. representation; evaluated at [(0,0), (0,1), (1,0), (1,1)]
     let poly = vec![Fr::from(1), Fr::from(2), Fr::from(2), Fr::from(4)];
 
-    let C = <KZGCommitmentEngine<E> as CommitmentEngineTrait<NE>>::commit(&ck, &poly);
+    let C = <KZGCommitmentEngine<E> as CommitmentEngineTrait<NE>>::commit(&ck, &poly, &Fr::from(0));
 
     let test_inner = |point: Vec<Fr>, eval: Fr| -> Result<(), NovaError> {
       let mut tr = Keccak256Transcript::<NE>::new(b"TestEval");
@@ -822,7 +824,7 @@ mod tests {
       EvaluationEngine::<E, NE>::setup(ck.clone());
 
     // make a commitment
-    let C = KZGCommitmentEngine::commit(&ck, &poly);
+    let C = KZGCommitmentEngine::commit(&ck, &poly, &Fr::from(0));
 
     // prove an evaluation
     let mut prover_transcript = Keccak256Transcript::new(b"TestEval");

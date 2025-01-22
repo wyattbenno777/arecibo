@@ -1,7 +1,7 @@
 //! CycleFold for Nova
 use crate::bellpepper::r1cs::NovaWitness;
 use crate::bellpepper::solver::SatisfyingAssignment;
-use crate::constants::NUM_CHALLENGE_BITS;
+use crate::constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS};
 use crate::cyclefold::circuit::CycleFoldCircuit;
 use crate::cyclefold::util::{
   absorb_cyclefold_r1cs, absorb_primary_commitment, absorb_primary_r1cs,
@@ -16,8 +16,12 @@ use crate::{
   traits::{Dual, Engine, ROConstants},
   Commitment, CommitmentKey,
 };
+use ff::Field;
 use ff::PrimeFieldBits;
+use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
+
+use super::layer_2::utils::{absorb_U, absorb_U_bn};
 
 /// A SNARK for incremental computation
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -118,17 +122,19 @@ where
     );
     U1_secondary.absorb_in_ro(&mut ro);
     absorb_cyclefold_r1cs(&l_u_cyclefold_E, &mut ro);
+    let r_T1 = <Dual<E> as Engine>::Scalar::random(&mut OsRng);
     let (T1, comm_T1) = S_secondary.commit_T(
       ck_secondary,
       U1_secondary,
       W1_secondary,
       &l_u_cyclefold_E,
       &l_w_cyclefold_E,
+      &r_T1,
     )?;
     comm_T1.absorb_in_ro(&mut ro);
     let r1 = ro.squeeze(NUM_CHALLENGE_BITS);
     let U_secondary_temp = U1_secondary.fold(&l_u_cyclefold_E, &comm_T1, &r1);
-    let W_secondary_temp = W1_secondary.fold(&l_w_cyclefold_E, &T1, &r1)?;
+    let W_secondary_temp = W1_secondary.fold(&l_w_cyclefold_E, &T1, &r_T1, &r1)?;
 
     /*
      * Fold second cyclefold instance
@@ -139,17 +145,19 @@ where
     );
     U_secondary_temp.absorb_in_ro(&mut ro);
     absorb_cyclefold_r1cs(&l_u_cyclefold_W, &mut ro);
+    let r_T2 = <Dual<E> as Engine>::Scalar::random(&mut OsRng);
     let (T2, comm_T2) = S_secondary.commit_T(
       ck_secondary,
       &U_secondary_temp,
       &W_secondary_temp,
       &l_u_cyclefold_W,
       &l_w_cyclefold_W,
+      &r_T2,
     )?;
     comm_T2.absorb_in_ro(&mut ro);
     let r2 = ro.squeeze(NUM_CHALLENGE_BITS);
     let U_secondary = U_secondary_temp.fold(&l_u_cyclefold_W, &comm_T2, &r2);
-    let W_secondary = W_secondary_temp.fold(&l_w_cyclefold_W, &T2, &r2)?;
+    let W_secondary = W_secondary_temp.fold(&l_w_cyclefold_W, &T2, &r_T2, &r2)?;
 
     // The Nova-CycleFold NIFS proof
     let nifs = Self {
@@ -250,11 +258,12 @@ where
     );
     ro.absorb(*pp_digest);
     absorb_primary_r1cs::<E, Dual<E>>(U2, &mut ro);
-    let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2)?;
+    let r_T = E::Scalar::random(&mut OsRng);
+    let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2, &r_T)?;
     absorb_primary_commitment::<E, Dual<E>>(&comm_T, &mut ro);
     let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
     let U = U1.fold(U2, &comm_T, &r);
-    let W = W1.fold(W2, &T, &r)?;
+    let W = W1.fold(W2, &T, &r_T, &r)?;
     Ok((Self { comm_T }, (U, W), r))
   }
 
@@ -276,5 +285,138 @@ where
     absorb_primary_commitment::<E, Dual<E>>(&self.comm_T, &mut ro);
     let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
     U1.fold(U2, &self.comm_T, &r)
+  }
+}
+
+/// NIFS for folding the primary relaxed r1cs instance and witness
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct PrimaryRelaxedNIFS<E1>
+where
+  E1: CurveCycleEquipped,
+{
+  pub(crate) comm_T: Commitment<E1>,
+}
+
+impl<E> PrimaryRelaxedNIFS<E>
+where
+  E: CurveCycleEquipped,
+{
+  #[tracing::instrument(skip_all, name = "PrimaryRelaxedNIFS::prove", level = "debug")]
+  pub fn prove(
+    ck: &CommitmentKey<E>,
+    ro_consts: &ROConstants<Dual<E>>,
+    pp_digest: &E::Scalar,
+    S: &R1CSShape<E>,
+    (U1, W1): (&RelaxedR1CSInstance<E>, &RelaxedR1CSWitness<E>),
+    (U2, W2): (&RelaxedR1CSInstance<E>, &RelaxedR1CSWitness<E>),
+  ) -> Result<
+    (
+      Self,
+      (RelaxedR1CSInstance<E>, RelaxedR1CSWitness<E>),
+      E::Scalar,
+    ),
+    NovaError,
+  > {
+    let arity = U1.X.len();
+    if arity != U2.X.len() {
+      return Err(NovaError::InvalidInputLength);
+    }
+    let mut ro = <Dual<E> as Engine>::RO::new(
+      ro_consts.clone(),
+      1 + (2 * NUM_FE_IN_EMULATED_POINT + arity + 1) + NUM_FE_IN_EMULATED_POINT, // pp_digest + (U.comm_W + U.comm_E + U.X + U.u) + comm_T
+    );
+    ro.absorb(*pp_digest);
+    absorb_U::<E>(U2, &mut ro);
+    let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2, &E::Scalar::ZERO)?;
+    absorb_primary_commitment::<E, Dual<E>>(&comm_T, &mut ro);
+    let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
+    let U = U1.fold_relaxed(U2, &comm_T, &r);
+    let W = W1.fold_relaxed(W2, &T, &E::Scalar::ZERO, &r)?;
+    Ok((Self { comm_T }, (U, W), r))
+  }
+
+  pub fn verify(
+    &self,
+    ro_consts: &ROConstants<Dual<E>>,
+    pp_digest: &E::Scalar,
+    U1: &RelaxedR1CSInstance<E>,
+    U2: &RelaxedR1CSInstance<E>,
+  ) -> RelaxedR1CSInstance<E> {
+    let arity = U1.X.len();
+    let mut ro = <Dual<E> as Engine>::RO::new(
+      ro_consts.clone(),
+      1 + (2 * NUM_FE_IN_EMULATED_POINT + arity + 1) + NUM_FE_IN_EMULATED_POINT, // pp_digest + (U.comm_W + U.comm_E + U.X + U.u) + comm_T
+    );
+    ro.absorb(*pp_digest);
+    absorb_U::<E>(U2, &mut ro);
+    absorb_primary_commitment::<E, Dual<E>>(&self.comm_T, &mut ro);
+    let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
+    U1.fold_relaxed(U2, &self.comm_T, &r)
+  }
+}
+
+/// NIFS for folding two Cyclefold [`RelaxedR1CSInstance`] and [`RelaxedR1CSWitness`] instances
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct CycleFoldRelaxedNIFS<E>
+where
+  E: CurveCycleEquipped,
+{
+  pub(crate) comm_T: Commitment<Dual<E>>,
+}
+
+impl<E> CycleFoldRelaxedNIFS<E>
+where
+  E: CurveCycleEquipped,
+{
+  /// Prover algorithm for folding two CycleFold [`RelaxedR1CSInstance`] and [`RelaxedR1CSWitness`] instances
+  #[tracing::instrument(skip_all, name = "CycleFoldRelaxedNIFS::prove", level = "debug")]
+  pub fn prove(
+    ck: &CommitmentKey<Dual<E>>,
+    ro_consts: &ROConstants<Dual<E>>,
+    S: &R1CSShape<Dual<E>>,
+    U1: &RelaxedR1CSInstance<Dual<E>>,
+    W1: &RelaxedR1CSWitness<Dual<E>>,
+    U2: &RelaxedR1CSInstance<Dual<E>>,
+    W2: &RelaxedR1CSWitness<Dual<E>>,
+  ) -> Result<
+    (
+      Self,
+      (RelaxedR1CSInstance<Dual<E>>, RelaxedR1CSWitness<Dual<E>>),
+      <Dual<E> as Engine>::Scalar,
+    ),
+    NovaError,
+  > {
+    let mut ro = <Dual<E> as Engine>::RO::new(
+      ro_consts.clone(),
+      2 * (3 + 3 + BN_N_LIMBS + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (U) + T
+    );
+    absorb_U_bn(U1, &mut ro);
+    absorb_U_bn(U2, &mut ro);
+    let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2, &<Dual<E> as Engine>::Scalar::ZERO)?;
+    comm_T.absorb_in_ro(&mut ro);
+    let r = ro.squeeze(NUM_CHALLENGE_BITS);
+    let U = U1.fold_relaxed(U2, &comm_T, &r);
+    let W = W1.fold_relaxed(W2, &T, &<Dual<E> as Engine>::Scalar::ZERO, &r)?;
+    Ok((Self { comm_T }, (U, W), r))
+  }
+
+  /// Verifier protocol
+  pub fn verify(
+    &self,
+    ro_consts: &ROConstants<Dual<E>>,
+    U1: &RelaxedR1CSInstance<Dual<E>>,
+    U2: &RelaxedR1CSInstance<Dual<E>>,
+  ) -> RelaxedR1CSInstance<Dual<E>> {
+    let mut ro = <Dual<E> as Engine>::RO::new(
+      ro_consts.clone(),
+      2 * (3 + 3 + BN_N_LIMBS + NIO_CYCLE_FOLD * BN_N_LIMBS) + 3, // (U) + (U) + T
+    );
+    absorb_U_bn(U1, &mut ro);
+    absorb_U_bn(U2, &mut ro);
+    self.comm_T.absorb_in_ro(&mut ro);
+    let r = ro.squeeze(NUM_CHALLENGE_BITS);
+    U1.fold_relaxed(U2, &self.comm_T, &r)
   }
 }

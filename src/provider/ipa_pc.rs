@@ -218,6 +218,7 @@ where
           .chain(iter::once(&c_L))
           .copied()
           .collect::<Vec<E::Scalar>>(),
+        &E::Scalar::ZERO,
       )
       .compress();
       let R = CE::<E>::commit(
@@ -227,6 +228,7 @@ where
           .chain(iter::once(&c_R))
           .copied()
           .collect::<Vec<E::Scalar>>(),
+        &E::Scalar::ZERO,
       )
       .compress();
 
@@ -306,7 +308,7 @@ where
     let r = transcript.squeeze(b"r")?;
     ck_c.scale(&r);
 
-    let P = U.comm_a_vec + CE::<E>::commit(&ck_c, &[U.c]);
+    let P = U.comm_a_vec + CE::<E>::commit(&ck_c, &[U.c], &E::Scalar::ZERO);
 
     // compute a vector of public coins using self.L_vec and self.R_vec
     let r = (0..self.L_vec.len())
@@ -346,7 +348,7 @@ where
     };
 
     let ck_hat = {
-      let c = CE::<E>::commit(&ck, &s).compress();
+      let c = CE::<E>::commit(&ck, &s, &E::Scalar::ZERO).compress();
       CommitmentKey::<E>::reinterpret_commitments_as_ck(&[c])?
     };
 
@@ -368,10 +370,17 @@ where
           .chain(iter::once(&E::Scalar::ONE))
           .copied()
           .collect::<Vec<E::Scalar>>(),
+        &E::Scalar::ZERO,
       )
     };
 
-    if P_hat == CE::<E>::commit(&ck_hat.combine(&ck_c), &[self.a_hat, self.a_hat * b_hat]) {
+    if P_hat
+      == CE::<E>::commit(
+        &ck_hat.combine(&ck_c),
+        &[self.a_hat, self.a_hat * b_hat],
+        &E::Scalar::ZERO,
+      )
+    {
       Ok(())
     } else {
       Err(NovaError::PCSError(PCSError::InvalidPCS))

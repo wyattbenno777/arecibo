@@ -154,7 +154,7 @@ pub mod test_utils {
     let ck = E::CE::setup(b"test", 1 << num_vars);
     let ck = Arc::new(ck);
     // Commits to the provided vector using the provided generators.
-    let commitment = E::CE::commit(&ck, poly.evaluations());
+    let commitment = E::CE::commit(&ck, poly.evaluations(), &E::Scalar::ZERO);
 
     prove_verify_with::<E, EE>(ck, &commitment, &poly, &point, &eval, true)
   }
