@@ -1,5 +1,6 @@
 //! Nova verifier
 use askama::Template;
+use bellpepper_core::num::AllocatedNum;
 
 use super::g16;
 use super::g16::Groth16Verifier;
@@ -73,16 +74,16 @@ impl From<NovaCycleFoldVerifierKey> for NovaCycleFoldDecider {
     }
 }
 
-/// `LimbVar` represents a single limb of a non-native unsigned integer in the
+/// `AllocatedLimb` represents a single limb of a non-native unsigned integer in the
 /// circuit.
-/// The limb value `v` should be small enough to fit into `FpVar`, and we also
+/// The limb value `v` should be small enough to fit into `AllocatedNum`, and we also
 /// store an upper bound `ub` for the limb value, which is treated as a constant
 /// in the circuit and is used for efficient equality checks and some arithmetic
 /// operations.
 #[derive(Debug, Clone)]
-pub struct LimbVar<F: PrimeField> {
+pub struct AllocatedLimb<F: PrimeField> {
     /// Limb value
-    // pub v: FpVar<F>,
+    pub v: AllocatedNum<F>,
     /// Upper bound
     pub ub: BigNat<F>,
 }
@@ -96,7 +97,7 @@ pub struct LimbVar<F: PrimeField> {
 /// terminology) after each arithmetic operation, while the former only reduces
 /// the integer when explicitly called.
 #[derive(Debug, Clone)]
-pub struct NonNativeUintVar<F: PrimeField>(pub Vec<LimbVar<F>>);
+pub struct NonNativeUintVar<F: PrimeField>(pub Vec<AllocatedLimb<F>>);
 
 impl<F: PrimeField> NonNativeUintVar<F> {
     /// Get the bits per limb
