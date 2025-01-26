@@ -3,12 +3,11 @@ use crate::onchain::utils::encoding::{g1_to_fq_repr, g2_to_fq_repr};
 use crate::onchain::utils::encoding::{G1Repr, G2Repr};
 use crate::onchain::utils::HeaderInclusion;
 use askama::Template;
-use halo2curves::bn256::Bn256;
 use serde::{Deserialize, Serialize};
-use pairing::Engine;
 use super::PRAGMA_GROTH16_VERIFIER;
 use super::ProtocolVerifierKey;
 use super::GPL3_SDPX_IDENTIFIER;
+use crate::onchain::groth16::VerifyingKey;
 
 /// Solidity Groth16 verifier
 #[derive(Template, Default)]
@@ -47,60 +46,17 @@ impl From<Groth16VerifierKey> for Groth16Verifier {
     }
 }
 
-/// A verification key in the Groth16 SNARK.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct VerifyingKey<E: Engine> {
-    /// The `alpha * G`, where `G` is the generator of `E::G1`.
-    pub alpha_g1: E::G1Affine,
-    /// The `alpha * H`, where `H` is the generator of `E::G2`.
-    pub beta_g2: E::G2Affine,
-    /// The `gamma * H`, where `H` is the generator of `E::G2`.
-    pub gamma_g2: E::G2Affine,
-    /// The `delta * H`, where `H` is the generator of `E::G2`.
-    pub delta_g2: E::G2Affine,
-    /// The `gamma^{-1} * (beta * a_i + alpha * b_i + c_i) * H`, where `H` is
-    /// the generator of `E::G1`.
-    pub gamma_abc_g1: Vec<E::G1Affine>,
-}
-
-/// The prover key for for the Groth16 zkSNARK.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct ProvingKey<E: Engine> {
-    /// The underlying verification key.
-    pub vk: VerifyingKey<E>,
-    /// The element `beta * G` in `E::G1`.
-    pub beta_g1: E::G1Affine,
-    /// The element `delta * G` in `E::G1`.
-    pub delta_g1: E::G1Affine,
-    /// The elements `a_i * G` in `E::G1`.
-    pub a_query: Vec<E::G1Affine>,
-    /// The elements `b_i * G` in `E::G1`.
-    pub b_g1_query: Vec<E::G1Affine>,
-    /// The elements `b_i * H` in `E::G2`.
-    pub b_g2_query: Vec<E::G2Affine>,
-    /// The elements `h_i * G` in `E::G1`.
-    pub h_query: Vec<E::G1Affine>,
-    /// The elements `l_i * G` in `E::G1`.
-    pub l_query: Vec<E::G1Affine>,
-
-    // TODO: Remove this
-    /// Dummy element
-    pub _dummy: E::G2Affine,
-}
-
-
-
 /// Groth16 verifier key
 #[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct Groth16VerifierKey(pub(crate) VerifyingKey<Bn256>);
+pub struct Groth16VerifierKey(pub(crate) VerifyingKey);
 
-impl From<VerifyingKey<Bn256>> for Groth16VerifierKey {
-    fn from(value: VerifyingKey<Bn256>) -> Self {
+impl From<VerifyingKey> for Groth16VerifierKey {
+    fn from(value: VerifyingKey) -> Self {
         Self(value)
     }
 }
 
-impl From<Groth16VerifierKey> for VerifyingKey<Bn256> {
+impl From<Groth16VerifierKey> for VerifyingKey {
     fn from(value: Groth16VerifierKey) -> Self {
         value.0
     }
