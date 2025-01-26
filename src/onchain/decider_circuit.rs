@@ -1,48 +1,41 @@
-#![allow(non_snake_case)]
 #![allow(unused_imports)]
-
-use std::hash::Hash;
-
-use crate::gadgets::{alloc_scalar_as_base, le_bits_to_num, scalar_as_base};
-use crate::onchain::utils::{evaluate_polynomial, lagrange_interpolation};
-use crate::provider::poseidon::{PoseidonROCircuit, PoseidonConstantsCircuit};
+#![allow(unused_variables)]
+#![allow(unused_mut)]
+use crate::gadgets::le_bits_to_num;
+use crate::provider::traits::DlogGroup;
+use crate::traits::ROConstantsCircuit;
+use crate::CommitmentKey;
 use crate::{
   cyclefold::gadgets::emulated::{
     AllocatedEmulR1CSInstance, AllocatedEmulRelaxedR1CSInstance, AllocatedEmulRelaxedR1CSWitness,
   },
   errors::NovaError,
-  gadgets::{AllocatedR1CSInstance, AllocatedRelaxedR1CSInstance},
+  gadgets::AllocatedRelaxedR1CSInstance,
   nebula::{
     nifs::NIFS,
     rs::{PublicParams, RecursiveSNARK},
   },
-  onchain::verifiers::nova::NonNativeUintVar,
   r1cs::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
-  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstants, ROTrait, ROCircuitTrait},
-  Commitment,
+  traits::{CurveCycleEquipped, Dual, Engine, ROTrait, ROConstants, ROCircuitTrait},
 };
 use bellpepper_core::boolean::AllocatedBit;
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
-use ff::PrimeField;
-use abomonation::Abomonation;
 use super::gadgets::{KZGChallengesGadget, EvalGadget};
 
 // TODO: Add ZK
 pub struct DeciderCircuit<E>
 where
   E: CurveCycleEquipped,
-  <E::Base as PrimeField>::Repr: Abomonation,
+  // E::GE: DlogGroup<ScalarExt = E::Scalar>,
 {
   /// Constraint system of the Augmented Function circuit
   pub arith: R1CSShape<E>,
   /// R1CS of the CycleFold circuit
   pub cf_arith: R1CSShape<Dual<E>>,
-  /// CycleFold PedersenParams over C2
-  pub cf_pedersen_params: PublicParams<E>,
-  pub ro_consts: ROConstants<Dual<E>>,
+  pub ro_consts: ROConstants<E>,
   // /// public params hash
   pub pp_hash: E::Scalar,
-  pub i: usize,
+  pub i: usize, // TODO: Maybe pass E::Scalar as sonobe
   /// initial state
   pub z_0: Vec<E::Scalar>,
   /// current i-th state
@@ -56,8 +49,9 @@ where
   pub W_i1: RelaxedR1CSWitness<E>,
 
   // /// Helper for folding verification
-  // pub proof: D::Proof,
-  // pub randomness: D::Randomness,
+  pub nifs_proof: NIFS<E>,
+  pub randomness: E::Scalar,
+
   /// CycleFold running instance
   pub cf_U_i: RelaxedR1CSInstance<Dual<E>>,
   pub cf_W_i: RelaxedR1CSWitness<Dual<E>>,
@@ -69,57 +63,74 @@ where
 }
 
 
-fn hash_instance_var<E: CurveCycleEquipped, CS: ConstraintSystem<E::Base>>(
+fn hash_U_i<E: CurveCycleEquipped, CS: ConstraintSystem<E::Scalar>>(
     cs: &mut CS,
-    ro: &mut E::ROCircuit,
-    U_i: &AllocatedEmulRelaxedR1CSInstance<E>,
+    ro: &mut <Dual<E> as Engine>::ROCircuit,
+    U_i: &AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
     pp_hash: &AllocatedNum<E::Scalar>,
     i: &AllocatedNum<E::Scalar>,
-    z_0: &[AllocatedNum<E::Scalar>],
-    z_i: &[AllocatedNum<E::Scalar>]
+    z_0: &Vec<AllocatedNum<E::Scalar>>,
+    z_i: &Vec<AllocatedNum<E::Scalar>>
 ) -> Result<Vec<AllocatedBit>, SynthesisError> {
-    let pp_hash_base = alloc_scalar_as_base::<E, _>(cs.namespace(|| "pp_hash_base"), pp_hash.get_value())?;
-    ROCircuitTrait::absorb(ro, &pp_hash_base);
-    let i_base = alloc_scalar_as_base::<E, _>(cs.namespace(|| "i_base"), i.get_value())?;
-    ROCircuitTrait::absorb(ro, &i_base);
-    for (idx, z) in z_0.iter().enumerate() {
-        let z_base = alloc_scalar_as_base::<E, _>(cs.namespace(|| format!("z0_{}", idx)), z.get_value())?;
-        ROCircuitTrait::absorb(ro, &z_base);
+    ROCircuitTrait::absorb(ro, pp_hash);
+    ROCircuitTrait::absorb(ro, i);
+    for z in z_0 {
+        ROCircuitTrait::absorb(ro, &z);
     }
-    for (idx, z) in z_i.iter().enumerate() {
-        let z_base = alloc_scalar_as_base::<E, _>(cs.namespace(|| format!("zi_{}", idx)), z.get_value())?;
-        ROCircuitTrait::absorb(ro, &z_base);
+    for z in z_i {
+        ROCircuitTrait::absorb(ro, &z);
     }
     U_i.absorb_in_ro(cs.namespace(|| "U_i"), ro)?;
     ROCircuitTrait::squeeze(ro, cs.namespace(|| "squeeze"), 128)
 }
 
-// fn fold_field_elements<E: CurveCycleEquipped>(
-//     ro: &mut <Dual<E> as Engine>::RO,
-//     pp_hash: E::Scalar,
-//     U: AllocatedRelaxedR1CSInstance<E, 2>,
-//     U_vec: Vec<AllocatedNum<E::Scalar>>,
-//     u: AllocatedR1CSInstance<E, 2>,
-//     // proof: Commitment<E> // I believe Nebula doesn't have this cross term
-// ) -> Result<AllocatedRelaxedR1CSInstance<E, 2>, SynthesisError> {
-//     // let cmT = NonNativeUintVar::new(constants, num_absorbs);
-//     unimplemented!()
-// }
-
 impl<E> DeciderCircuit<E>
 where
   E: CurveCycleEquipped,
-  <E::Base as PrimeField>::Repr: Abomonation,
+  // E::GE: DlogGroup<ScalarExt = E::Scalar>,
 {
+  pub fn default(
+    arith: &R1CSShape<E>,
+    cf_arith: &R1CSShape<Dual<E>>,
+    ro_consts: ROConstants<E>,
+    pp_hash: E::Scalar,
+    state_len: usize,
+    num_commitments: usize,
+    (ck, ck_secondary): (&CommitmentKey<E>, &CommitmentKey<Dual<E>>),
+  ) -> Self {
+    Self {
+      arith: arith.clone(),
+      cf_arith: cf_arith.clone(),
+      ro_consts,
+      pp_hash,
+      i: 0,
+      z_0: vec![E::Scalar::from(0); state_len],
+      z_i: vec![E::Scalar::from(0); state_len],
+      U_i: RelaxedR1CSInstance::default(ck, arith),
+      W_i: RelaxedR1CSWitness::default(arith),
+      u_i: R1CSInstance::<E>::default(arith),
+      w_i: R1CSWitness::<E>::default(arith),
+      U_i1: RelaxedR1CSInstance::default(ck, arith),
+      W_i1: RelaxedR1CSWitness::default(arith),
+      nifs_proof: NIFS::default(cf_arith),
+      randomness: E::Scalar::from(0),
+      cf_U_i: RelaxedR1CSInstance::default(ck_secondary, cf_arith),
+      cf_W_i: RelaxedR1CSWitness::default(cf_arith),
+      kzg_challenges: vec![E::Scalar::from(0); num_commitments],
+      kzg_evaluations: vec![E::Scalar::from(0); num_commitments],
+    }
+  }
+
   pub fn new(pp: &PublicParams<E>, rs: RecursiveSNARK<E>) -> Result<Self, NovaError> {
-    let mut ro = <Dual<E> as Engine>::RO::new(
-      pp.ro_consts.clone(),
-      42, // TODO: Pass a right number
+    let ro_consts = ROConstants::<E>::default(); // TODO: Not sure if this is OK
+    let mut ro = <E as Engine>::RO::new(
+      ROConstants::<E>::default(),
+      42,
     );
 
-    // compute the U_{i+1}, W_{i+1}
-    // 1. compute (Ui+1,Wi+1,T) ← NIFS.P(pk,(Ui,Wi),(ui,wi)),
-    let (nifs, (r_U_primary, r_W_primary), (r_U_cyclefold, r_W_cyclefold), r, U_secondary_temp) =
+    // TODO: Do I need to run an iteration for IS and FS in Nebula?
+    // 1. Compute the U_{i+1}, W_{i+1}
+    let (nifs, (r_U_primary, r_W_primary), (r_U_cyclefold, r_W_cyclefold), rho, _U_secondary_temp) =
       NIFS::<E>::prove(
         (&pp.ck_primary, &pp.ck_cyclefold),
         &pp.ro_consts,
@@ -134,14 +145,13 @@ where
       )?;
 
     let (rw, re) = KZGChallengesGadget::get_challenges_native(&mut ro, r_U_primary.clone());
-    let rw_eval = EvalGadget::evaluate_native(r_W_primary.W, rw);
-    let re_eval = EvalGadget::evaluate_native(r_W_primary.E, re);
+    let rw_eval = EvalGadget::evaluate_native(r_W_primary.clone().W, rw);
+    let re_eval = EvalGadget::evaluate_native(r_W_primary.clone().E, re);
 
     Ok(Self {
-      arith: pp.circuit_shape_primary.r1cs_shape,
-      cf_arith: pp.circuit_shape_cyclefold.r1cs_shape,
-      cf_pedersen_params: pp.clone(),
-      ro_consts: pp.ro_consts.clone(),
+      arith: pp.circuit_shape_primary.r1cs_shape.clone(),
+      cf_arith: pp.circuit_shape_cyclefold.r1cs_shape.clone(),
+      ro_consts: ro_consts,
       pp_hash: pp.digest(),
       i: rs.i,
       z_0: rs.z0,
@@ -156,6 +166,8 @@ where
       cf_W_i: r_W_cyclefold,
       kzg_challenges: vec![rw, re],
       kzg_evaluations: vec![rw_eval, re_eval],
+      randomness: rho,
+      nifs_proof: nifs
     })
   }
 
@@ -184,9 +196,9 @@ where
       .map(|(i, val)| AllocatedNum::alloc(cs.namespace(|| format!("z_i_{}", i)), || Ok(*val)))
       .collect::<Result<Vec<_>, SynthesisError>>()?;
 
-    let u_i: AllocatedEmulR1CSInstance<E> = AllocatedEmulR1CSInstance::alloc(
+    let u_i: AllocatedEmulR1CSInstance<Dual<E>> = AllocatedEmulR1CSInstance::alloc(
       cs.namespace(|| "u_i"), Some(&self.u_i), 1, 2)?;
-    let U_i = AllocatedEmulRelaxedR1CSInstance::alloc(
+    let U_i: AllocatedEmulRelaxedR1CSInstance<Dual<E>> = AllocatedEmulRelaxedR1CSInstance::alloc(
       cs.namespace(|| "U_i"),
       Some(&self.U_i),
       1, // TODO: Pass a right number
@@ -197,12 +209,15 @@ where
     //     Ok(self.U_i1.get_commitments())
     // })?;
 
-    let U_i1 = AllocatedEmulRelaxedR1CSInstance::alloc(cs, Some(&self.U_i1), 1, 2)?;
-    let W_i1 = AllocatedEmulRelaxedR1CSWitness::alloc(cs, Some(&self.W_i1))?;
+    let U_i1: AllocatedEmulRelaxedR1CSInstance<Dual<E>> = AllocatedEmulRelaxedR1CSInstance::alloc(
+      cs.namespace(|| "U_i1"), Some(&self.U_i1), 1, 2)?;
+    let W_i1: AllocatedEmulRelaxedR1CSWitness<Dual<E>> = AllocatedEmulRelaxedR1CSWitness::alloc(
+      cs.namespace(|| "W_i1"), Some(&self.W_i1))?;
 
     // U_i1.get_commitments().enforce_equal(&U_i1_commitments)?;
 
-    let cf_U_i = AllocatedRelaxedR1CSInstance::alloc(cs, Some(&self.cf_U_i), 1, 2)?;
+    let cf_U_i: AllocatedRelaxedR1CSInstance<Dual<E>, 2> = AllocatedRelaxedR1CSInstance::alloc(
+      cs.namespace(|| "cf_U_i"), Some(&self.cf_U_i), 1, 2)?;
 
     let kzg_challenges: Vec<AllocatedNum<E::Scalar>> = self
       .kzg_challenges
@@ -216,9 +231,9 @@ where
       .map(|x| AllocatedNum::alloc(cs.namespace(|| "kzg_evaluations"), || Ok(*x)))
       .collect::<Result<Vec<_>, SynthesisError>>()?;
 
-      let mut ro = <Dual<E> as Engine>::RO::new(
-        self.ro_consts.clone(),
-        42, // TODO: Pass a right number
+      let mut ro = <Dual<E> as Engine>::ROCircuit::new(
+        ROConstantsCircuit::<Dual<E>>::default(),
+        42,
       );
   
     // Step 1: Enforce U_{n+1} and W_{n+1} satisfy r1cs
@@ -232,7 +247,14 @@ where
 
     // Step 3: Verify the hash conditions:
     //         un.x0 == H(n, z0, zn, Un) and un.x1 == H(U_EC,n).
-    let hash_bits = hash_instance_var(cs, &mut ro, &U_i, &pp_hash, &i, &z_0, &z_i)?;
+    let hash_bits = hash_U_i::<E, CS>(
+      cs, 
+      &mut ro, 
+      &U_i, 
+      &pp_hash, 
+      &i, 
+      &z_0, 
+      &z_i)?;
     let alloc_hash = le_bits_to_num(cs.namespace(|| "bits_to_num"), &hash_bits)?;
 
     cs.enforce(
@@ -257,21 +279,24 @@ where
 
     // Step 7.1: Check correct computation of the KZG challenges.
     //           - cE ≡ H(E.{x, y}), cW ≡ H(W.{x, y}).
-    let (alloc_rw, alloc_re) = KZGChallengesGadget::get_challenges_gadget(cs, &mut ro, U_i1)?;
+    // let (alloc_rw, alloc_re) = KZGChallengesGadget::get_challenges_gadget(
+    //   cs, 
+    //   // &mut ro, 
+    //   U_i1)?;
 
-    cs.enforce(
-      || "cW ≡ H(W.{x, y})",
-      |lc| lc,
-      |lc| lc,
-      |lc| lc + kzg_challenges[0].get_variable() - alloc_rw.get_variable(),
-    );
+    // cs.enforce(
+    //   || "cW ≡ H(W.{x, y})",
+    //   |lc| lc,
+    //   |lc| lc,
+    //   |lc| lc + kzg_challenges[0].get_variable() - alloc_rw.get_variable(),
+    // );
 
-    cs.enforce(
-      || "cE ≡ H(E.{x, y})",
-      |lc| lc,
-      |lc| lc,
-      |lc| lc + kzg_challenges[1].get_variable() - alloc_re.get_variable(),
-    );
+    // cs.enforce(
+    //   || "cE ≡ H(E.{x, y})",
+    //   |lc| lc,
+    //   |lc| lc,
+    //   |lc| lc + kzg_challenges[1].get_variable() - alloc_re.get_variable(),
+    // );
 
     // Step 7.2: Verify that the KZG evaluations are correct:
     for ((v, c), e) in vec![W_i1.W]
@@ -279,7 +304,7 @@ where
       .zip(&kzg_challenges)
       .zip(&kzg_evaluations)
     {
-      let eval = EvalGadget::evaluate_gadget(cs, *v, c)?;
+      let eval = EvalGadget::evaluate_gadget::<&mut CS, E>(cs, v.clone(), c)?;
       cs.enforce(
         || "evalW == pW(cW)",
         |lc| lc,
