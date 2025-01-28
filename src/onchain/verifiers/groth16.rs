@@ -3,11 +3,22 @@ use crate::onchain::utils::encoding::{g1_to_fq_repr, g2_to_fq_repr};
 use crate::onchain::utils::encoding::{G1Repr, G2Repr};
 use crate::onchain::utils::HeaderInclusion;
 use askama::Template;
+use halo2curves::bn256::{G1Affine, G2Affine};
 use serde::{Deserialize, Serialize};
 use super::PRAGMA_GROTH16_VERIFIER;
 use super::ProtocolVerifierKey;
 use super::GPL3_SDPX_IDENTIFIER;
-use crate::onchain::groth16::VerifyingKey;
+
+
+/// A verification key in the Groth16 SNARK.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct VerifyingKey {
+  pub alpha_g1: G1Affine,
+  pub beta_g2: G2Affine,
+  pub gamma_g2: G2Affine,
+  pub delta_g2: G2Affine,
+  pub gamma_abc_g1: Vec<G1Affine>,
+}
 
 /// Solidity Groth16 verifier
 #[derive(Template, Default)]
