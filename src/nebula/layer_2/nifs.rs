@@ -1,11 +1,11 @@
 //! A CycleFold influenced NIFS for folding IVC proofs.
 
-use crate::bellpepper::r1cs::NovaWitness;
-use crate::bellpepper::solver::SatisfyingAssignment;
 use crate::constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS};
 use crate::cyclefold::circuit::CycleFoldCircuit;
 use crate::cyclefold::util::absorb_cyclefold_r1cs;
-
+use crate::frontend::r1cs::NovaWitness;
+use crate::frontend::solver::SatisfyingAssignment;
+use crate::frontend::ConstraintSystem;
 use crate::nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryRelaxedNIFS};
 use crate::r1cs::R1CSWitness;
 use crate::traits::AbsorbInROTrait;
@@ -248,8 +248,7 @@ pub fn compute_cyclefold_instance_witness_pair<E>(
 where
   E: CurveCycleEquipped,
 {
-  let mut cs_cyclefold_W =
-    SatisfyingAssignment::<Dual<E>>::with_capacity(S_cyclefold.num_io + 1, S_cyclefold.num_vars);
+  let mut cs_cyclefold_W = SatisfyingAssignment::<Dual<E>>::new();
   let circuit_cyclefold_W: CycleFoldCircuit<E> =
     CycleFoldCircuit::new(Some(commit_1), Some(commit_2), scalar);
   let _ = circuit_cyclefold_W.synthesize(&mut cs_cyclefold_W);

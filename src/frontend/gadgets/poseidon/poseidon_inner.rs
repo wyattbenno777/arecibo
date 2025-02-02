@@ -253,6 +253,74 @@ where
     }
   }
 
+  /// Creates [`Poseidon`] instance using provided preimage and [`PoseidonConstants`] as input.
+  /// Doesn't support [`PoseidonConstants`] with [`HashType::VariableLength`]. It is assumed that
+  /// size of input preimage set can't be greater than [`Arity`].
+  ///
+  /// # Example
+  ///
+  /// ```
+  /// use neptune::poseidon::PoseidonConstants;
+  /// use neptune::poseidon::Poseidon;
+  /// use pasta_curves::Fp;
+  /// use ff::Field;
+  /// use generic_array::typenum::U2;
+  ///
+  /// let preimage_set_length = 1;
+  /// let constants: PoseidonConstants<Fp, U2> = PoseidonConstants::new_constant_length(preimage_set_length);
+  ///
+  /// let preimage = vec![Fp::from(u64::MAX); preimage_set_length];
+  ///
+  /// let mut poseidon = Poseidon::<Fp, U2>::new_with_preimage(&preimage, &constants);
+  ///
+  /// assert_eq!(constants.width(), 3);
+  /// assert_eq!(poseidon.elements.len(), constants.width());
+  /// assert_eq!(poseidon.elements[1], Fp::from(u64::MAX));
+  /// assert_eq!(poseidon.elements[2], Fp::ZERO);
+  /// ```
+  pub fn new_with_preimage(preimage: &[F], constants: &'a PoseidonConstants<F, A>) -> Self {
+    let elements = match constants.hash_type {
+      HashType::ConstantLength(constant_len) => {
+        assert_eq!(constant_len, preimage.len(), "Invalid preimage size");
+
+        GenericArray::generate(|i| {
+          if i == 0 {
+            constants.domain_tag
+          } else if i > preimage.len() {
+            F::ZERO
+          } else {
+            preimage[i - 1]
+          }
+        })
+      }
+      HashType::MerkleTreeSparse(_) => {
+        panic!("Merkle Tree (with some empty leaves) hashes are not yet supported.")
+      }
+      HashType::VariableLength => panic!("variable-length hashes are not yet supported."),
+      _ => {
+        assert_eq!(preimage.len(), A::to_usize(), "Invalid preimage size");
+
+        GenericArray::generate(|i| {
+          if i == 0 {
+            constants.domain_tag
+          } else {
+            preimage[i - 1]
+          }
+        })
+      }
+    };
+    let width = preimage.len() + 1;
+
+    Poseidon {
+      constants_offset: 0,
+      current_round: 0,
+      elements,
+      pos: width,
+      constants,
+      _f: PhantomData::<F>,
+    }
+  }
+
   pub(crate) fn reset_offsets(&mut self) {
     self.constants_offset = 0;
     self.current_round = 0;

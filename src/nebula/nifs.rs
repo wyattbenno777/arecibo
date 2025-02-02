@@ -1,11 +1,12 @@
 //! CycleFold for Nova
-use crate::bellpepper::r1cs::NovaWitness;
-use crate::bellpepper::solver::SatisfyingAssignment;
 use crate::constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS};
 use crate::cyclefold::circuit::CycleFoldCircuit;
 use crate::cyclefold::util::{
   absorb_cyclefold_r1cs, absorb_primary_commitment, absorb_primary_r1cs,
 };
+use crate::frontend::r1cs::NovaWitness;
+use crate::frontend::solver::SatisfyingAssignment;
+use crate::frontend::ConstraintSystem;
 use crate::gadgets::scalar_as_base;
 use crate::traits::AbsorbInROTrait;
 use crate::traits::{CurveCycleEquipped, ROTrait};
@@ -87,10 +88,7 @@ where
 
     // Get the committed R1CS instance and witness from first CycleFold instance computing: comm_E1 + r · comm_T
     let (l_u_cyclefold_E, l_w_cyclefold_E) = {
-      let mut cs_cyclefold_E = SatisfyingAssignment::<Dual<E>>::with_capacity(
-        S_secondary.num_io + 1,
-        S_secondary.num_vars,
-      );
+      let mut cs_cyclefold_E = SatisfyingAssignment::<Dual<E>>::new();
       let circuit_cyclefold_E: CycleFoldCircuit<E> =
         CycleFoldCircuit::new(Some(U1.comm_E), Some(nifs_primary.comm_T), r_bools);
       let _ = circuit_cyclefold_E.synthesize(&mut cs_cyclefold_E);
@@ -101,10 +99,7 @@ where
 
     // Get the committed R1CS instance and witness from second CycleFold instance computing: comm_W1 + r· comm_W2
     let (l_u_cyclefold_W, l_w_cyclefold_W) = {
-      let mut cs_cyclefold_W = SatisfyingAssignment::<Dual<E>>::with_capacity(
-        S_secondary.num_io + 1,
-        S_secondary.num_vars,
-      );
+      let mut cs_cyclefold_W = SatisfyingAssignment::<Dual<E>>::new();
       let circuit_cyclefold_W: CycleFoldCircuit<E> =
         CycleFoldCircuit::new(Some(U1.comm_W), Some(U2.comm_W), r_bools);
       let _ = circuit_cyclefold_W.synthesize(&mut cs_cyclefold_W);

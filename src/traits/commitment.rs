@@ -5,7 +5,6 @@ use crate::{
   errors::NovaError,
   traits::{AbsorbInROTrait, Engine, TranscriptReprTrait},
 };
-use abomonation::Abomonation;
 use core::{
   fmt::Debug,
   ops::{Add, Mul, MulAssign},
@@ -32,7 +31,6 @@ pub trait CommitmentTrait<E: Engine>:
   + TranscriptReprTrait<E::GE>
   + Serialize
   + for<'de> Deserialize<'de>
-  + Abomonation
   + AbsorbInROTrait<E>
   + Add<Self, Output = Self>
   + ScalarMul<E::Scalar>
@@ -81,8 +79,7 @@ pub trait CommitmentEngineTrait<E: Engine>: Clone + Send + Sync {
     + Send
     + Sync
     + Serialize
-    + for<'de> Deserialize<'de>
-    + Abomonation;
+    + for<'de> Deserialize<'de>;
   /// Holds the type of the derandomization key
   type DerandKey: Clone + Debug + Send + Sync + Serialize + for<'de> Deserialize<'de>;
 

@@ -666,6 +666,7 @@ where
 mod test {
   use super::compression::CompressedSNARK;
   use super::{AggregationPublicParams, AggregationRecursiveSNARK, Layer1PPTrait, Layer1RSTrait};
+  use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
   use crate::nebula::audit_rs::{AuditPublicParams, AuditRecursiveSNARK, AuditStepCircuit};
   use crate::nebula::rs::{PublicParams, RecursiveSNARK};
   use crate::nebula::traits::MemoryCommitmentsTraits;
@@ -674,7 +675,6 @@ mod test {
   use crate::traits::snark::default_ck_hint;
   use crate::traits::{CurveCycleEquipped, Dual};
   use crate::{nebula::rs::StepCircuit, provider::Bn256EngineIPA, traits::Engine};
-  use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
   use ff::Field;
   use ff::PrimeField;
   use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;

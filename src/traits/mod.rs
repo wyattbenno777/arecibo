@@ -1,7 +1,6 @@
 //! This module defines various traits required by the users of the library to implement.
 use crate::errors::NovaError;
-use abomonation::Abomonation;
-use bellpepper_core::{boolean::AllocatedBit, num::AllocatedNum, ConstraintSystem, SynthesisError};
+use crate::frontend::{num::AllocatedNum, AllocatedBit, ConstraintSystem, SynthesisError};
 use core::fmt::Debug;
 use ff::{PrimeField, PrimeFieldBits};
 use num_bigint::BigInt;
@@ -83,8 +82,7 @@ pub trait ROTrait<Base: PrimeField, Scalar> {
     + Send
     + Sync
     + Serialize
-    + for<'de> Deserialize<'de>
-    + Abomonation;
+    + for<'de> Deserialize<'de>;
 
   /// Initializes the hash function
   fn new(constants: Self::Constants, num_absorbs: usize) -> Self;
@@ -109,8 +107,7 @@ pub trait ROCircuitTrait<Base: PrimeField> {
     + Send
     + Sync
     + Serialize
-    + for<'de> Deserialize<'de>
-    + Abomonation;
+    + for<'de> Deserialize<'de>;
 
   /// Initializes the hash function
   fn new(constants: Self::Constants, num_absorbs: usize) -> Self;

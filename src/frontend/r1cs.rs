@@ -6,7 +6,7 @@ use super::{shape_cs::ShapeCS, solver::SatisfyingAssignment, test_shape_cs::Test
 use crate::{
   errors::NovaError,
   frontend::{Index, LinearCombination},
-  r1cs::{CommitmentKeyHint, R1CSInstance, R1CSShape, R1CSWitness, SparseMatrix, R1CS},
+  r1cs::{commitment_key, CommitmentKeyHint, R1CSInstance, R1CSShape, R1CSWitness, SparseMatrix},
   traits::Engine,
   CommitmentKey,
 };
@@ -36,12 +36,12 @@ impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
     shape: &R1CSShape<E>,
     ck: &CommitmentKey<E>,
   ) -> Result<(R1CSInstance<E>, R1CSWitness<E>), NovaError> {
-    let W = R1CSWitness::<E>::new(shape, self.aux_assignment())?;
+    let W = R1CSWitness::<E>::new(shape, self.aux_assignment().to_vec())?;
     let X = &self.input_assignment()[1..];
 
     let comm_W = W.commit(ck);
 
-    let instance = R1CSInstance::<E>::new(shape, &comm_W, X)?;
+    let instance = R1CSInstance::<E>::new(shape, comm_W, X.to_vec())?;
 
     Ok((instance, W))
   }
@@ -81,7 +81,7 @@ macro_rules! impl_nova_shape {
 
         // Don't count One as an input for shape's purposes.
         let S = R1CSShape::new(num_constraints, num_vars, num_inputs - 1, A, B, C).unwrap();
-        let ck = R1CS::<E>::commitment_key(&S, ck_hint);
+        let ck = commitment_key(&S, ck_hint);
 
         (S, ck)
       }

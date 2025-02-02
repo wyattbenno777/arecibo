@@ -742,7 +742,7 @@ mod tests {
     );
     let mut cs: TestShapeCS<E1> = TestShapeCS::new();
     let _ = circuit1.synthesize(&mut cs);
-    let (shape1, ck1) = cs.r1cs_shape_and_key(&*default_ck_hint());
+    let (shape1, ck1) = cs.r1cs_shape(&*default_ck_hint());
 
     num_constraints_primary.assert_eq(&cs.num_constraints().to_string());
 
@@ -758,7 +758,7 @@ mod tests {
       );
     let mut cs: TestShapeCS<Dual<E1>> = TestShapeCS::new();
     let _ = circuit2.synthesize(&mut cs);
-    let (shape2, ck2) = cs.r1cs_shape_and_key(&*default_ck_hint());
+    let (shape2, ck2) = cs.r1cs_shape(&*default_ck_hint());
 
     num_constraints_secondary.assert_eq(&cs.num_constraints().to_string());
 

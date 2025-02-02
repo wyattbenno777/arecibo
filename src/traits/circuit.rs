@@ -1,6 +1,5 @@
 //! This module defines traits that a step function must implement
-use crate::StepCounterType;
-use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
+use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use core::marker::PhantomData;
 use ff::PrimeField;
 
@@ -11,9 +10,6 @@ pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
   /// `synthesize` and `output` methods are expected to take as
   /// input a vector of size equal to arity and output a vector of size equal to arity
   fn arity(&self) -> usize;
-
-  /// Returns the type of the counter to be used with this circuit
-  fn get_counter_type(&self) -> StepCounterType;
 
   /// Sythesize the circuit for a computation step and return variable
   /// that corresponds to the output of the step `z_{i+1}`
@@ -28,7 +24,6 @@ pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrivialCircuit<F> {
   _p: PhantomData<F>,
-  counter_type: StepCounterType,
 }
 
 impl<F> TrivialCircuit<F>
@@ -36,11 +31,8 @@ where
   F: PrimeField,
 {
   /// Creates a new trivial test circuit with a particular step counter type
-  pub fn new(counter_type: StepCounterType) -> TrivialCircuit<F> {
-    Self {
-      _p: PhantomData,
-      counter_type,
-    }
+  pub fn new() -> TrivialCircuit<F> {
+    Self { _p: PhantomData }
   }
 }
 
@@ -50,10 +42,7 @@ where
 {
   /// Creates a new trivial test circuit with step counter type Incremental
   fn default() -> TrivialCircuit<F> {
-    Self {
-      _p: PhantomData,
-      counter_type: StepCounterType::Incremental,
-    }
+    Self { _p: PhantomData }
   }
 }
 
@@ -63,10 +52,6 @@ where
 {
   fn arity(&self) -> usize {
     1
-  }
-
-  fn get_counter_type(&self) -> StepCounterType {
-    self.counter_type
   }
 
   fn synthesize<CS: ConstraintSystem<F>>(

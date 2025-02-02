@@ -12,10 +12,8 @@ use crate::{
   },
   zip_with, Commitment, CommitmentKey, DerandKey, CE,
 };
-use abomonation::Abomonation;
-use abomonation_derive::Abomonation;
 use core::cmp::max;
-use ff::{Field, PrimeField};
+use ff::Field;
 use once_cell::sync::OnceCell;
 use rand_core::{CryptoRng, OsRng, RngCore};
 
@@ -25,8 +23,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) use sparse::SparseMatrix;
 
 /// A type that holds the shape of the R1CS matrices
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Abomonation)]
-#[abomonation_bounds(where <E::Scalar as PrimeField>::Repr: Abomonation)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct R1CSShape<E: Engine> {
   pub(crate) num_cons: usize,
   pub(crate) num_vars: usize,
@@ -35,7 +32,6 @@ pub struct R1CSShape<E: Engine> {
   pub(crate) B: SparseMatrix<E::Scalar>,
   pub(crate) C: SparseMatrix<E::Scalar>,
   #[serde(skip, default = "OnceCell::new")]
-  #[abomonate_with(<E::Scalar as PrimeField>::Repr)]
   pub(crate) digest: OnceCell<E::Scalar>,
 }
 

@@ -14,7 +14,7 @@ mod round_numbers;
 mod serde_impl;
 mod sponge;
 
-pub use circuit2::Elt;
+pub use circuit2::{poseidon_hash_allocated, Elt};
 pub use poseidon_inner::PoseidonConstants;
 use round_constants::generate_constants;
 use round_numbers::{round_numbers_base, round_numbers_strengthened};

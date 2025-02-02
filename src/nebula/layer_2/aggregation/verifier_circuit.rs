@@ -1,3 +1,4 @@
+use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use crate::traits::commitment::CommitmentTrait;
 use crate::traits::ROCircuitTrait;
 use crate::{
@@ -21,7 +22,6 @@ use crate::{
   r1cs::RelaxedR1CSInstance,
   traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
 };
-use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::Field;
 
 #[derive(Clone)]
@@ -45,11 +45,11 @@ where
     1
   }
 
-  fn synthesize<CS: bellpepper_core::ConstraintSystem<E::Scalar>>(
+  fn synthesize<CS: ConstraintSystem<E::Scalar>>(
     &self,
     cs: &mut CS,
     z: &[AllocatedNum<E::Scalar>],
-  ) -> Result<Vec<AllocatedNum<E::Scalar>>, bellpepper_core::SynthesisError> {
+  ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
     let U1_secondary = self.alloc_cyclefold_running_instance(cs.namespace(|| "U1_secondary"))?;
 
     // alloc witness for F

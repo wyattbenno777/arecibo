@@ -1,11 +1,9 @@
 //! This module defines Cyclefold circuit
 
-use bellpepper_core::{
-  boolean::{AllocatedBit, Boolean},
-  ConstraintSystem, SynthesisError,
-};
+use crate::frontend::gadgets::poseidon::poseidon_hash_allocated;
+use crate::frontend::{AllocatedBit, Boolean, ConstraintSystem, PoseidonConstants, SynthesisError};
+use crate::gadgets::conditionally_select;
 use ff::Field;
-use neptune::{circuit2::poseidon_hash_allocated, poseidon::PoseidonConstants};
 
 use crate::{
   constants::NUM_CHALLENGE_BITS,
@@ -13,7 +11,6 @@ use crate::{
   traits::{commitment::CommitmentTrait, Engine},
   Commitment,
 };
-use bellpepper::gadgets::boolean_utils::conditionally_select;
 
 /// A structure containing the CycleFold circuit inputs and implementing the synthesize function
 pub struct CycleFoldCircuit<E: Engine> {
