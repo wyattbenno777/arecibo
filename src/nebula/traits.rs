@@ -178,7 +178,7 @@ pub trait Layer1PPTrait<E: CurveCycleEquipped> {
   }
 
   /// Get the secondary R1CS shape
-  fn cyclefold_r1cs_shape<'a>(&'a self) -> &R1CSShape<Dual<E>>
+  fn cyclefold_r1cs_shape<'a>(&'a self) -> &'a R1CSShape<Dual<E>>
   where
     E: 'a,
   {

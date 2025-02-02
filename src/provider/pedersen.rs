@@ -162,7 +162,7 @@ where
   }
 }
 
-impl<'a, 'b, E> Mul<&'b E::Scalar> for &'a Commitment<E>
+impl<'b, E> Mul<&'b E::Scalar> for &'_ Commitment<E>
 where
   E: Engine,
   E::GE: DlogGroup<ScalarExt = E::Scalar>,
