@@ -19,6 +19,8 @@ where
   )>,
   inputs: usize,
   aux: usize,
+  precommitted: usize,
+  precommitted2: usize,
 }
 
 impl<E: Engine> ShapeCS<E> {
@@ -41,6 +43,16 @@ impl<E: Engine> ShapeCS<E> {
   pub fn num_aux(&self) -> usize {
     self.aux
   }
+
+  /// Returns the number of precommitted inputs defined for this `ShapeCS`.
+  pub fn num_precommitted(&self) -> usize {
+    self.precommitted
+  }
+
+  /// Returns the number of precommitted2 inputs defined for this `ShapeCS`.
+  pub fn num_precommitted2(&self) -> usize {
+    self.precommitted2
+  }
 }
 
 impl<E: Engine> Default for ShapeCS<E> {
@@ -49,6 +61,8 @@ impl<E: Engine> Default for ShapeCS<E> {
       constraints: vec![],
       inputs: 1,
       aux: 0,
+      precommitted: 0,
+      precommitted2: 0,
     }
   }
 }
@@ -65,6 +79,40 @@ impl<E: Engine> ConstraintSystem<E::Scalar> for ShapeCS<E> {
     self.aux += 1;
 
     Ok(Variable::new_unchecked(Index::Aux(self.aux - 1)))
+  }
+
+  fn alloc_precommitted<F, A, AR>(
+    &mut self,
+    _annotation: A,
+    _f: F,
+  ) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    self.precommitted += 1;
+
+    Ok(Variable::new_unchecked(Index::Precommitted(
+      self.precommitted - 1,
+    )))
+  }
+
+  fn alloc_precommitted2<F, A, AR>(
+    &mut self,
+    _annotation: A,
+    _f: F,
+  ) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    self.precommitted2 += 1;
+
+    Ok(Variable::new_unchecked(Index::Precommitted2(
+      self.precommitted2 - 1,
+    )))
   }
 
   fn alloc_input<F, A, AR>(&mut self, _annotation: A, _f: F) -> Result<Variable, SynthesisError>

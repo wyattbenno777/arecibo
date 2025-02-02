@@ -46,6 +46,9 @@ impl Ord for OrderedVariable {
       }
       (Index::Input(_), Index::Aux(_)) => Ordering::Less,
       (Index::Aux(_), Index::Input(_)) => Ordering::Greater,
+      (Index::Input(_), _) | (Index::Aux(_), _) => Ordering::Less,
+      (_, Index::Input(_)) | (_, Index::Aux(_)) => Ordering::Greater,
+      (_, _) => Ordering::Equal,
     }
   }
 }
@@ -63,6 +66,8 @@ pub struct TestShapeCS<E: Engine> {
   )>,
   inputs: Vec<String>,
   aux: Vec<String>,
+  precommitted: Vec<String>,
+  precommitted2: Vec<String>,
 }
 
 fn proc_lc<Scalar: PrimeField>(
@@ -114,6 +119,16 @@ where
   /// Returns the number of aux inputs defined for this `TestShapeCS`.
   pub fn num_aux(&self) -> usize {
     self.aux.len()
+  }
+
+  /// Returns the number of precommitted inputs defined for this `ShapeCS`.
+  pub fn num_precommitted(&self) -> usize {
+    self.precommitted.len()
+  }
+
+  /// Returns the number of precommitted2 inputs defined for this `ShapeCS`.
+  pub fn num_precommitted2(&self) -> usize {
+    self.precommitted2.len()
   }
 
   /// Print all public inputs, aux inputs, and constraint names.
@@ -179,6 +194,12 @@ where
           Index::Aux(i) => {
             write!(s, "`A{}`", &self.aux[i]).unwrap();
           }
+          Index::Precommitted(_) => {
+            unimplemented!();
+          }
+          Index::Precommitted2(_) => {
+            unimplemented!();
+          }
         }
       }
       if is_first {
@@ -226,6 +247,8 @@ impl<E: Engine> Default for TestShapeCS<E> {
       constraints: vec![],
       inputs: vec![String::from("ONE")],
       aux: vec![],
+      precommitted: vec![],
+      precommitted2: vec![],
     }
   }
 }
@@ -246,6 +269,24 @@ where
     self.aux.push(path);
 
     Ok(Variable::new_unchecked(Index::Aux(self.aux.len() - 1)))
+  }
+
+  fn alloc_precommitted<F, A, AR>(&mut self, _: A, _: F) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    unimplemented!()
+  }
+
+  fn alloc_precommitted2<F, A, AR>(&mut self, _: A, _: F) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    unimplemented!()
   }
 
   fn alloc_input<F, A, AR>(&mut self, annotation: A, _f: F) -> Result<Variable, SynthesisError>

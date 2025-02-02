@@ -29,6 +29,10 @@ pub enum Index {
   Input(usize),
   /// Private auxiliary variable
   Aux(usize),
+  /// Precommitted variable
+  Precommitted(usize),
+  /// Precommitted variable
+  Precommitted2(usize),
 }
 
 /// This represents a linear combination of some variables, with coefficients
@@ -37,6 +41,8 @@ pub enum Index {
 pub struct LinearCombination<Scalar: PrimeField> {
   inputs: Indexer<Scalar>,
   aux: Indexer<Scalar>,
+  precommitted: Indexer<Scalar>,
+  precommitted2: Indexer<Scalar>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -135,6 +141,8 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
     LinearCombination {
       inputs: Default::default(),
       aux: Default::default(),
+      precommitted: Default::default(),
+      precommitted2: Default::default(),
     }
   }
 
@@ -144,10 +152,26 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
       Variable(Index::Input(i)) => Self {
         inputs: Indexer::from_value(i, coeff),
         aux: Default::default(),
+        precommitted: Default::default(),
+        precommitted2: Default::default(),
       },
       Variable(Index::Aux(i)) => Self {
         inputs: Default::default(),
         aux: Indexer::from_value(i, coeff),
+        precommitted: Default::default(),
+        precommitted2: Default::default(),
+      },
+      Variable(Index::Precommitted(i)) => Self {
+        inputs: Default::default(),
+        aux: Default::default(),
+        precommitted: Indexer::from_value(i, coeff),
+        precommitted2: Default::default(),
+      },
+      Variable(Index::Precommitted2(i)) => Self {
+        inputs: Default::default(),
+        aux: Default::default(),
+        precommitted: Default::default(),
+        precommitted2: Indexer::from_value(i, coeff),
       },
     }
   }
@@ -200,6 +224,19 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
   }
 
   #[inline]
+  fn add_assign_unsimplified_precommitted(&mut self, new_var: usize, coeff: Scalar) {
+    self
+      .precommitted
+      .insert_or_update(new_var, || coeff, |val| *val += coeff);
+  }
+  #[inline]
+  fn add_assign_unsimplified_precommitted2(&mut self, new_var: usize, coeff: Scalar) {
+    self
+      .precommitted2
+      .insert_or_update(new_var, || coeff, |val| *val += coeff);
+  }
+
+  #[inline]
   fn add_assign_unsimplified_aux(&mut self, new_var: usize, coeff: Scalar) {
     self
       .aux
@@ -215,6 +252,12 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
       Index::Aux(new_var) => {
         self.add_assign_unsimplified_aux(new_var, coeff);
       }
+      Index::Precommitted(new_var) => {
+        self.add_assign_unsimplified_precommitted(new_var, coeff);
+      }
+      Index::Precommitted2(new_var) => {
+        self.add_assign_unsimplified_precommitted2(new_var, coeff);
+      }
     }
 
     self
@@ -223,6 +266,16 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
   #[inline]
   fn sub_assign_unsimplified_input(&mut self, new_var: usize, coeff: Scalar) {
     self.add_assign_unsimplified_input(new_var, -coeff);
+  }
+
+  #[inline]
+  fn sub_assign_unsimplified_precommitted(&mut self, new_var: usize, coeff: Scalar) {
+    self.add_assign_unsimplified_precommitted(new_var, -coeff);
+  }
+
+  #[inline]
+  fn sub_assign_unsimplified_precommitted2(&mut self, new_var: usize, coeff: Scalar) {
+    self.add_assign_unsimplified_precommitted2(new_var, -coeff);
   }
 
   #[inline]
@@ -238,6 +291,12 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
       }
       Index::Aux(new_var) => {
         self.sub_assign_unsimplified_aux(new_var, coeff);
+      }
+      Index::Precommitted(new_var) => {
+        self.sub_assign_unsimplified_precommitted(new_var, coeff);
+      }
+      Index::Precommitted2(new_var) => {
+        self.sub_assign_unsimplified_precommitted2(new_var, coeff);
       }
     }
 

@@ -63,11 +63,15 @@ macro_rules! impl_nova_shape {
         let num_inputs = self.num_inputs();
         let num_constraints = self.num_constraints();
         let num_vars = self.num_aux();
+        let num_precommitted = self.num_precommitted();
+        let num_precommitted2 = self.num_precommitted2();
 
         for constraint in self.constraints.iter() {
           add_constraint(
             &mut X,
             num_vars,
+            num_precommitted,
+            num_precommitted2,
             &constraint.0,
             &constraint.1,
             &constraint.2,
@@ -100,6 +104,8 @@ fn add_constraint<S: PrimeField>(
     &mut usize,
   ),
   num_vars: usize,
+  num_precommitted: usize,
+  num_precommitted2: usize,
   a_lc: &LinearCombination<S>,
   b_lc: &LinearCombination<S>,
   c_lc: &LinearCombination<S>,
@@ -117,11 +123,21 @@ fn add_constraint<S: PrimeField>(
         Index::Input(idx) => {
           // Inputs come last, with input 0, representing 'one',
           // at position num_vars within the witness vector.
-          let idx = idx + num_vars;
+          let idx = idx + num_vars + num_precommitted + num_precommitted2;
           M.data.push(*coeff);
           M.indices.push(idx);
         }
         Index::Aux(idx) => {
+          M.data.push(*coeff);
+          M.indices.push(idx);
+        }
+        Index::Precommitted(idx) => {
+          let idx = idx + num_vars;
+          M.data.push(*coeff);
+          M.indices.push(idx);
+        }
+        Index::Precommitted2(idx) => {
+          let idx = idx + num_vars + num_precommitted;
           M.data.push(*coeff);
           M.indices.push(idx);
         }

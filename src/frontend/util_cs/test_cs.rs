@@ -27,12 +27,16 @@ pub struct TestConstraintSystem<Scalar: PrimeField> {
   )>,
   inputs: Vec<(Scalar, String)>,
   aux: Vec<(Scalar, String)>,
+  precommitted: Vec<(Scalar, String)>,
+  precommitted2: Vec<(Scalar, String)>,
 }
 
 fn _eval_lc2<Scalar: PrimeField>(
   terms: &LinearCombination<Scalar>,
   inputs: &[Scalar],
   aux: &[Scalar],
+  precommitted: &[Scalar],
+  precommitted2: &[Scalar],
 ) -> Scalar {
   let mut acc = Scalar::ZERO;
 
@@ -40,6 +44,8 @@ fn _eval_lc2<Scalar: PrimeField>(
     let mut tmp = match var.get_unchecked() {
       Index::Input(index) => inputs[index],
       Index::Aux(index) => aux[index],
+      Index::Precommitted(index) => precommitted[index],
+      Index::Precommitted2(index) => precommitted2[index],
     };
 
     tmp.mul_assign(coeff);
@@ -53,6 +59,8 @@ fn eval_lc<Scalar: PrimeField>(
   terms: &LinearCombination<Scalar>,
   inputs: &[(Scalar, String)],
   aux: &[(Scalar, String)],
+  precommitted: &[(Scalar, String)],
+  precommitted2: &[(Scalar, String)],
 ) -> Scalar {
   let mut acc = Scalar::ZERO;
 
@@ -60,6 +68,8 @@ fn eval_lc<Scalar: PrimeField>(
     let mut tmp = match var.get_unchecked() {
       Index::Input(index) => inputs[index].0,
       Index::Aux(index) => aux[index].0,
+      Index::Precommitted(index) => precommitted[index].0,
+      Index::Precommitted2(index) => precommitted2[index].0,
     };
 
     tmp.mul_assign(coeff);
@@ -80,6 +90,8 @@ impl<Scalar: PrimeField> Default for TestConstraintSystem<Scalar> {
       constraints: vec![],
       inputs: vec![(Scalar::ONE, "ONE".into())],
       aux: vec![],
+      precommitted: vec![],
+      precommitted2: vec![],
     }
   }
 }
@@ -93,9 +105,27 @@ impl<Scalar: PrimeField> TestConstraintSystem<Scalar> {
   /// Get path which is unsatisfied
   pub fn which_is_unsatisfied(&self) -> Option<&str> {
     for (a, b, c, path) in &self.constraints {
-      let mut a = eval_lc::<Scalar>(a, &self.inputs, &self.aux);
-      let b = eval_lc::<Scalar>(b, &self.inputs, &self.aux);
-      let c = eval_lc::<Scalar>(c, &self.inputs, &self.aux);
+      let mut a = eval_lc::<Scalar>(
+        a,
+        &self.inputs,
+        &self.aux,
+        &self.precommitted,
+        &self.precommitted2,
+      );
+      let b = eval_lc::<Scalar>(
+        b,
+        &self.inputs,
+        &self.aux,
+        &self.precommitted,
+        &self.precommitted2,
+      );
+      let c = eval_lc::<Scalar>(
+        c,
+        &self.inputs,
+        &self.aux,
+        &self.precommitted,
+        &self.precommitted2,
+      );
 
       a.mul_assign(&b);
 
@@ -156,6 +186,44 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for TestConstraintSystem<Scala
     let path = compute_path(&self.current_namespace, &annotation().into());
     self.aux.push((f()?, path.clone()));
     let var = Variable::new_unchecked(Index::Aux(index));
+    self.set_named_obj(path, NamedObject::Var);
+
+    Ok(var)
+  }
+
+  fn alloc_precommitted<F, A, AR>(
+    &mut self,
+    annotation: A,
+    f: F,
+  ) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    let index = self.precommitted.len();
+    let path = compute_path(&self.current_namespace, &annotation().into());
+    self.precommitted.push((f()?, path.clone()));
+    let var = Variable::new_unchecked(Index::Precommitted(index));
+    self.set_named_obj(path, NamedObject::Var);
+
+    Ok(var)
+  }
+
+  fn alloc_precommitted2<F, A, AR>(
+    &mut self,
+    annotation: A,
+    f: F,
+  ) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    let index = self.precommitted2.len();
+    let path = compute_path(&self.current_namespace, &annotation().into());
+    self.precommitted2.push((f()?, path.clone()));
+    let var = Variable::new_unchecked(Index::Precommitted2(index));
     self.set_named_obj(path, NamedObject::Var);
 
     Ok(var)
