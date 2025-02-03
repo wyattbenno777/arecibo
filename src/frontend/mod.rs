@@ -1,24 +1,44 @@
-//! Support for generating R1CS from [Bellpepper].
+//! Support for generating R1CS
 //!
-//! [Bellpepper]: https://github.com/lurk-lab/bellpepper
+//! Most of the code is ported from https://github.com/argumentcomputer/bellpepper.
+
+pub mod gadgets;
+
+mod constraint_system;
+mod lc;
+
+pub use constraint_system::{Circuit, ConstraintSystem, Namespace, SynthesisError};
+pub use gadgets::{
+  boolean::{AllocatedBit, Boolean},
+  num,
+  poseidon::{Elt, PoseidonConstants, SpongeCircuit},
+  sha256::sha256,
+  Assignment,
+};
+pub use lc::{Index, LinearCombination, Variable};
 
 pub mod r1cs;
 pub mod shape_cs;
 pub mod solver;
 pub mod test_shape_cs;
+pub mod util_cs;
+
+#[cfg(test)]
+pub use util_cs::test_cs;
 
 #[cfg(test)]
 mod tests {
   use crate::{
-    bellpepper::{
+    frontend::{
+      num::AllocatedNum,
       r1cs::{NovaShape, NovaWitness},
       shape_cs::ShapeCS,
       solver::SatisfyingAssignment,
+      ConstraintSystem,
     },
     provider::{Bn256EngineKZG, PallasEngine, Secp256k1Engine},
     traits::{snark::default_ck_hint, Engine},
   };
-  use bellpepper_core::{num::AllocatedNum, ConstraintSystem};
   use ff::PrimeField;
 
   fn synthesize_alloc_bit<Fr: PrimeField, CS: ConstraintSystem<Fr>>(cs: &mut CS) {
@@ -45,7 +65,7 @@ mod tests {
     // First create the shape
     let mut cs: ShapeCS<E> = ShapeCS::new();
     synthesize_alloc_bit(&mut cs);
-    let (shape, ck) = cs.r1cs_shape_and_key(&*default_ck_hint());
+    let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
 
     // Now get the assignment
     let mut cs = SatisfyingAssignment::<E>::new();
@@ -53,7 +73,7 @@ mod tests {
     let (inst, witness) = cs.r1cs_instance_and_witness(&shape, &ck).unwrap();
 
     // Make sure that this is satisfiable
-    shape.is_sat(&ck, &inst, &witness).unwrap();
+    assert!(shape.is_sat(&ck, &inst, &witness).is_ok());
   }
 
   #[test]

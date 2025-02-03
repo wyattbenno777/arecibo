@@ -1,7 +1,9 @@
 //! Support for generating R1CS shape using bellpepper.
 
-use crate::traits::Engine;
-use bellpepper_core::{ConstraintSystem, Index, LinearCombination, SynthesisError, Variable};
+use crate::{
+  frontend::{ConstraintSystem, Index, LinearCombination, SynthesisError, Variable},
+  traits::Engine,
+};
 use ff::PrimeField;
 
 /// `ShapeCS` is a `ConstraintSystem` for creating `R1CSShape`s for a circuit.
@@ -17,12 +19,14 @@ where
   )>,
   inputs: usize,
   aux: usize,
+  precommitted: usize,
+  precommitted2: usize,
 }
 
 impl<E: Engine> ShapeCS<E> {
   /// Create a new, default `ShapeCS`,
   pub fn new() -> Self {
-    Self::default()
+    ShapeCS::default()
   }
 
   /// Returns the number of constraints defined for this `ShapeCS`.
@@ -39,14 +43,26 @@ impl<E: Engine> ShapeCS<E> {
   pub fn num_aux(&self) -> usize {
     self.aux
   }
+
+  /// Returns the number of precommitted inputs defined for this `ShapeCS`.
+  pub fn num_precommitted(&self) -> usize {
+    self.precommitted
+  }
+
+  /// Returns the number of precommitted2 inputs defined for this `ShapeCS`.
+  pub fn num_precommitted2(&self) -> usize {
+    self.precommitted2
+  }
 }
 
 impl<E: Engine> Default for ShapeCS<E> {
   fn default() -> Self {
-    Self {
+    ShapeCS {
       constraints: vec![],
       inputs: 1,
       aux: 0,
+      precommitted: 0,
+      precommitted2: 0,
     }
   }
 }
@@ -63,6 +79,40 @@ impl<E: Engine> ConstraintSystem<E::Scalar> for ShapeCS<E> {
     self.aux += 1;
 
     Ok(Variable::new_unchecked(Index::Aux(self.aux - 1)))
+  }
+
+  fn alloc_precommitted<F, A, AR>(
+    &mut self,
+    _annotation: A,
+    _f: F,
+  ) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    self.precommitted += 1;
+
+    Ok(Variable::new_unchecked(Index::Precommitted(
+      self.precommitted - 1,
+    )))
+  }
+
+  fn alloc_precommitted2<F, A, AR>(
+    &mut self,
+    _annotation: A,
+    _f: F,
+  ) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    self.precommitted2 += 1;
+
+    Ok(Variable::new_unchecked(Index::Precommitted2(
+      self.precommitted2 - 1,
+    )))
   }
 
   fn alloc_input<F, A, AR>(&mut self, _annotation: A, _f: F) -> Result<Variable, SynthesisError>

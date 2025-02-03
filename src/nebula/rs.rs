@@ -6,25 +6,26 @@ use super::ic::IC;
 use super::nifs::{PrimaryNIFS, PrimaryRelaxedNIFS, NIFS};
 use super::traits::impl_rs_fields_trait;
 use crate::cyclefold::util::{absorb_primary_relaxed_r1cs, FoldingData};
+use crate::digest::SimpleDigestible;
+use crate::frontend::num::AllocatedNum;
+use crate::frontend::{ConstraintSystem, SynthesisError};
 use crate::nebula::traits::RecursiveSNARKFieldsTrait;
 use crate::traits::commitment::CommitmentEngineTrait;
-use crate::Commitment;
 use crate::{
-  bellpepper::{
+  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
+  cyclefold::circuit::CycleFoldCircuit,
+  errors::NovaError,
+  frontend::{
     r1cs::{NovaShape, NovaWitness},
     shape_cs::ShapeCS,
     solver::SatisfyingAssignment,
   },
-  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
-  cyclefold::circuit::CycleFoldCircuit,
-  errors::NovaError,
   gadgets::scalar_as_base,
   r1cs::{CommitmentKeyHint, R1CSInstance, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},
-  CommitmentKey, DigestComputer, R1CSWithArity, ROConstants, SimpleDigestible,
+  CommitmentKey, DigestComputer, ROConstants,
 };
-use bellpepper_core::num::AllocatedNum;
-use bellpepper_core::{ConstraintSystem, SynthesisError};
+use crate::{Commitment, R1CSWithArity};
 use ff::Field;
 use ff::PrimeField;
 use once_cell::sync::OnceCell;
@@ -89,7 +90,7 @@ where
     );
     let mut cs: ShapeCS<E1> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
-    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape_and_key(ck_hint_primary);
+    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape(ck_hint_primary);
     let ck_primary = Arc::new(ck_primary);
     let circuit_shape_primary = R1CSWithArity::new(r1cs_shape_primary, F_arity_primary);
 
@@ -97,7 +98,7 @@ where
     let mut cs: ShapeCS<Dual<E1>> = ShapeCS::new();
     let circuit_cyclefold: CycleFoldCircuit<E1> = CycleFoldCircuit::default();
     let _ = circuit_cyclefold.synthesize(&mut cs);
-    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape_and_key(ck_hint_cyclefold);
+    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape(ck_hint_cyclefold);
     let ck_cyclefold = Arc::new(ck_cyclefold);
     let circuit_shape_cyclefold = R1CSWithArity::new(r1cs_shape_cyclefold, 0);
 
@@ -338,10 +339,7 @@ where
     let data_c_W = FoldingData::new(U_secondary_temp, nifs.l_u_cyclefold_W, nifs.comm_T2);
 
     // 2. compute (ui+1, wi+1) ← trace(F ′, (vk, Ui, ui, (i, z0, zi), ωi, T )),
-    let mut cs_primary = SatisfyingAssignment::<E1>::with_capacity(
-      pp.circuit_shape_primary.r1cs_shape.num_io + 1,
-      pp.circuit_shape_primary.r1cs_shape.num_vars,
-    );
+    let mut cs_primary = SatisfyingAssignment::<E1>::new();
     let r_next = E1::Scalar::random(&mut OsRng);
     let inputs_primary: AugmentedCircuitInputs<E1> = AugmentedCircuitInputs::new(
       scalar_as_base::<E1>(pp.digest()),
@@ -658,8 +656,8 @@ impl_rs_fields_trait!(RecursiveSNARK);
 #[cfg(test)]
 mod test {
   use super::*;
+  use crate::frontend::num::AllocatedNum;
   use crate::{provider::Bn256EngineIPA, traits::snark::default_ck_hint};
-  use bellpepper_core::num::AllocatedNum;
   use std::marker::PhantomData;
 
   #[derive(Clone)]

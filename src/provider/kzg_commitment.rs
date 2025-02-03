@@ -3,7 +3,6 @@
 
 use std::marker::PhantomData;
 
-use abomonation_derive::Abomonation;
 use ff::{Field, PrimeField, PrimeFieldBits};
 use group::{prime::PrimeCurveAffine, Curve, Group as _};
 use pairing::Engine;
@@ -24,26 +23,22 @@ use crate::{
 };
 
 /// `UniversalParams` are the universal parameters for the KZG10 scheme.
-#[derive(Debug, Clone, Eq, Serialize, Deserialize, Abomonation)]
+#[derive(Debug, Clone, Eq, Serialize, Deserialize)]
 #[serde(bound(
   serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",
   deserialize = "E::G1Affine: Deserialize<'de>, E::G2Affine: Deserialize<'de>"
 ))]
-#[abomonation_omit_bounds]
 pub struct UniversalKZGParam<E: Engine> {
   /// Group elements of the form `{ β^i G }`, where `i` ranges from 0 to
   /// `degree`.
   // this is a hack; we just assume the size of the element.
   // Look for the static assertions in provider macros for a justification
-  #[abomonate_with(Vec<[u64; 8]>)]
   pub powers_of_g: Vec<E::G1Affine>,
   /// Group elements of the form `{ β^i H }`, where `i` ranges from 0 to
   /// `degree`.
   // this is a hack; we just assume the size of the element.
   // Look for the static assertions in provider macros for a justification
-  #[abomonate_with(Vec<[u64; 16]>)]
   pub powers_of_h: Vec<E::G2Affine>,
-  #[abomonate_with(Vec<[u64; 16]>)]
   pub h: E::G1Affine,
 }
 

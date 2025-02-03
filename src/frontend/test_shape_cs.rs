@@ -6,15 +6,17 @@ use std::{
   collections::{BTreeMap, HashMap},
 };
 
-use crate::traits::Engine;
-use bellpepper_core::{ConstraintSystem, Index, LinearCombination, SynthesisError, Variable};
+use crate::{
+  frontend::{ConstraintSystem, Index, LinearCombination, SynthesisError, Variable},
+  traits::Engine,
+};
 use core::fmt::Write;
 use ff::{Field, PrimeField};
 
 #[derive(Clone, Copy)]
 struct OrderedVariable(Variable);
 
-#[allow(dead_code)]
+#[allow(unused)]
 #[derive(Debug)]
 enum NamedObject {
   Constraint(usize),
@@ -24,7 +26,7 @@ enum NamedObject {
 
 impl Eq for OrderedVariable {}
 impl PartialEq for OrderedVariable {
-  fn eq(&self, other: &Self) -> bool {
+  fn eq(&self, other: &OrderedVariable) -> bool {
     match (self.0.get_unchecked(), other.0.get_unchecked()) {
       (Index::Input(ref a), Index::Input(ref b)) | (Index::Aux(ref a), Index::Aux(ref b)) => a == b,
       _ => false,
@@ -44,6 +46,9 @@ impl Ord for OrderedVariable {
       }
       (Index::Input(_), Index::Aux(_)) => Ordering::Less,
       (Index::Aux(_), Index::Input(_)) => Ordering::Greater,
+      (Index::Input(_), _) | (Index::Aux(_), _) => Ordering::Less,
+      (_, Index::Input(_)) | (_, Index::Aux(_)) => Ordering::Greater,
+      (_, _) => Ordering::Equal,
     }
   }
 }
@@ -61,6 +66,8 @@ pub struct TestShapeCS<E: Engine> {
   )>,
   inputs: Vec<String>,
   aux: Vec<String>,
+  precommitted: Vec<String>,
+  precommitted2: Vec<String>,
 }
 
 fn proc_lc<Scalar: PrimeField>(
@@ -96,7 +103,7 @@ where
   #[allow(unused)]
   /// Create a new, default `TestShapeCS`,
   pub fn new() -> Self {
-    Self::default()
+    TestShapeCS::default()
   }
 
   /// Returns the number of constraints defined for this `TestShapeCS`.
@@ -112,6 +119,16 @@ where
   /// Returns the number of aux inputs defined for this `TestShapeCS`.
   pub fn num_aux(&self) -> usize {
     self.aux.len()
+  }
+
+  /// Returns the number of precommitted inputs defined for this `ShapeCS`.
+  pub fn num_precommitted(&self) -> usize {
+    self.precommitted.len()
+  }
+
+  /// Returns the number of precommitted2 inputs defined for this `ShapeCS`.
+  pub fn num_precommitted2(&self) -> usize {
+    self.precommitted2.len()
   }
 
   /// Print all public inputs, aux inputs, and constraint names.
@@ -133,7 +150,7 @@ where
     result
   }
 
-  /// Print all iputs and a detailed representation of each constraint.
+  /// Print all inputs and a detailed representation of each constraint.
   #[allow(dead_code)]
   pub fn pretty_print(&self) -> String {
     let mut s = String::new();
@@ -177,6 +194,12 @@ where
           Index::Aux(i) => {
             write!(s, "`A{}`", &self.aux[i]).unwrap();
           }
+          Index::Precommitted(_) => {
+            unimplemented!();
+          }
+          Index::Precommitted2(_) => {
+            unimplemented!();
+          }
         }
       }
       if is_first {
@@ -217,13 +240,15 @@ where
 impl<E: Engine> Default for TestShapeCS<E> {
   fn default() -> Self {
     let mut map = HashMap::new();
-    map.insert("ONE".into(), NamedObject::Var(Self::one()));
-    Self {
+    map.insert("ONE".into(), NamedObject::Var(TestShapeCS::<E>::one()));
+    TestShapeCS {
       named_objects: map,
       current_namespace: vec![],
       constraints: vec![],
       inputs: vec![String::from("ONE")],
       aux: vec![],
+      precommitted: vec![],
+      precommitted2: vec![],
     }
   }
 }
@@ -244,6 +269,24 @@ where
     self.aux.push(path);
 
     Ok(Variable::new_unchecked(Index::Aux(self.aux.len() - 1)))
+  }
+
+  fn alloc_precommitted<F, A, AR>(&mut self, _: A, _: F) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    unimplemented!()
+  }
+
+  fn alloc_precommitted2<F, A, AR>(&mut self, _: A, _: F) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    unimplemented!()
   }
 
   fn alloc_input<F, A, AR>(&mut self, annotation: A, _f: F) -> Result<Variable, SynthesisError>
@@ -298,7 +341,10 @@ where
 }
 
 fn compute_path(ns: &[String], this: &str) -> String {
-  assert!(!this.contains('/'), "'/' is not allowed in names");
+  assert!(
+    !this.chars().any(|a| a == '/'),
+    "'/' is not allowed in names"
+  );
 
   let mut name = String::new();
 

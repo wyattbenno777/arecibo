@@ -4,7 +4,7 @@ use super::{
   },
   OptionExt,
 };
-use bellpepper_core::{boolean::AllocatedBit, ConstraintSystem, LinearCombination, SynthesisError};
+use crate::frontend::{AllocatedBit, ConstraintSystem, LinearCombination, SynthesisError};
 use ff::PrimeField;
 use itertools::Itertools as _;
 use num_bigint::BigInt;
@@ -803,7 +803,7 @@ impl<Scalar: PrimeField> Polynomial<Scalar> {
 mod tests {
 
   use super::*;
-  use bellpepper_core::{test_cs::TestConstraintSystem, Circuit};
+  use crate::frontend::{test_cs::TestConstraintSystem, Circuit};
 
   use pasta_curves::pallas::Scalar;
   #[cfg(not(target_arch = "wasm32"))]

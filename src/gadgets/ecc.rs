@@ -1,5 +1,10 @@
 //! This module implements various elliptic curve gadgets
 #![allow(non_snake_case)]
+use crate::frontend::gadgets::Assignment;
+use crate::frontend::{
+  num::AllocatedNum,
+  ConstraintSystem, SynthesisError, {AllocatedBit, Boolean},
+};
 use crate::{
   gadgets::utils::{
     alloc_num_equals, alloc_one, alloc_zero, conditionally_select2, select_num_or_one,
@@ -8,13 +13,9 @@ use crate::{
   },
   traits::Group,
 };
-use bellpepper::gadgets::{boolean_utils::conditionally_select, Assignment};
-use bellpepper_core::{
-  boolean::{AllocatedBit, Boolean},
-  num::AllocatedNum,
-  ConstraintSystem, SynthesisError,
-};
 use ff::{Field, PrimeField};
+
+use super::utils::conditionally_select;
 
 /// `AllocatedPoint` provides an elliptic curve abstraction inside a circuit.
 #[derive(Debug, Clone)]
@@ -777,12 +778,9 @@ impl<G: Group> AllocatedPointNonInfinity<G> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::frontend::r1cs::NovaShape;
   use crate::{
-    bellpepper::{
-      r1cs::{NovaShape, NovaWitness},
-      solver::SatisfyingAssignment,
-      test_shape_cs::TestShapeCS,
-    },
+    frontend::{r1cs::NovaWitness, solver::SatisfyingAssignment, test_shape_cs::TestShapeCS},
     provider::{
       bn256_grumpkin::{bn256, grumpkin},
       secp_secq::{secp256k1, secq256k1},
@@ -1037,7 +1035,7 @@ mod tests {
     let _ = synthesize_smul::<E1::GE, _>(cs.namespace(|| "synthesize"));
     expected_constraints.assert_eq(&cs.num_constraints().to_string());
     expected_variables.assert_eq(&cs.num_aux().to_string());
-    let (shape, ck) = cs.r1cs_shape_and_key(&*default_ck_hint());
+    let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
 
     // Then the satisfying assignment
     let mut cs = SatisfyingAssignment::<E2>::new();
@@ -1093,7 +1091,7 @@ mod tests {
     let mut cs: TestShapeCS<E2> = TestShapeCS::new();
     let _ = synthesize_add_equal::<E1::GE, _>(cs.namespace(|| "synthesize add equal"));
     println!("Number of constraints: {}", cs.num_constraints());
-    let (shape, ck) = cs.r1cs_shape_and_key(&*default_ck_hint());
+    let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
 
     // Then the satisfying assignment
     let mut cs = SatisfyingAssignment::<E2>::new();
@@ -1168,7 +1166,7 @@ mod tests {
     let _ = synthesize_add_negation::<E1::GE, _>(cs.namespace(|| "synthesize add equal"));
     expected_constraints.assert_eq(&cs.num_constraints().to_string());
     expected_variables.assert_eq(&cs.num_aux().to_string());
-    let (shape, ck) = cs.r1cs_shape_and_key(&*default_ck_hint());
+    let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
 
     // Then the satisfying assignment
     let mut cs = SatisfyingAssignment::<E2>::new();

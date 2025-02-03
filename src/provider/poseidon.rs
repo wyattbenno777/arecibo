@@ -1,30 +1,20 @@
 //! Poseidon Constants and Poseidon-based RO used in Nova
-use crate::traits::{ROCircuitTrait, ROTrait};
-use abomonation::Abomonation;
-use abomonation_derive::Abomonation;
-use bellpepper_core::{
-  boolean::{AllocatedBit, Boolean},
+use crate::frontend::{
+  gadgets::poseidon::{
+    Elt, IOPattern, PoseidonConstants, Simplex, Sponge, SpongeAPI, SpongeCircuit, SpongeOp,
+    SpongeTrait, Strength,
+  },
   num::AllocatedNum,
-  ConstraintSystem, SynthesisError,
+  ConstraintSystem, SynthesisError, {AllocatedBit, Boolean},
 };
+use crate::traits::{ROCircuitTrait, ROTrait};
 use core::marker::PhantomData;
 use ff::{PrimeField, PrimeFieldBits};
 use generic_array::typenum::U24;
-use neptune::{
-  circuit2::Elt,
-  poseidon::PoseidonConstants,
-  sponge::{
-    api::{IOPattern, SpongeAPI, SpongeOp},
-    circuit::SpongeCircuit,
-    vanilla::{Mode::Simplex, Sponge, SpongeTrait},
-  },
-  Strength,
-};
 use serde::{Deserialize, Serialize};
 
 /// All Poseidon Constants that are used in Nova
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Abomonation)]
-#[abomonation_bounds(where Scalar::Repr: Abomonation)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PoseidonConstantsCircuit<Scalar: PrimeField>(pub(crate) PoseidonConstants<Scalar, U24>);
 
 impl<Scalar: PrimeField> Default for PoseidonConstantsCircuit<Scalar> {
@@ -36,20 +26,12 @@ impl<Scalar: PrimeField> Default for PoseidonConstantsCircuit<Scalar> {
 }
 
 /// A Poseidon-based RO to use outside circuits
-#[derive(Debug, Abomonation)]
-#[abomonation_bounds(
-  where
-    Base: PrimeField,
-    Scalar: PrimeField,
-    <Base as PrimeField>::Repr: Abomonation
-)]
 pub struct PoseidonRO<Base, Scalar>
 where
   Base: PrimeField,
   Scalar: PrimeField,
 {
   // Internal State
-  #[abomonate_with(Vec<Base::Repr>)]
   state: Vec<Base>,
   constants: PoseidonConstantsCircuit<Base>,
   num_absorbs: usize,
@@ -60,7 +42,6 @@ where
 impl<Base, Scalar> ROTrait<Base, Scalar> for PoseidonRO<Base, Scalar>
 where
   Base: PrimeField + PrimeFieldBits + Serialize + for<'de> Deserialize<'de>,
-  Base::Repr: Abomonation,
   Scalar: PrimeField,
 {
   type CircuitRO = PoseidonROCircuit<Base>;
@@ -128,7 +109,7 @@ pub struct PoseidonROCircuit<Scalar: PrimeField> {
 impl<Scalar> ROCircuitTrait<Scalar> for PoseidonROCircuit<Scalar>
 where
   Scalar: PrimeField + PrimeFieldBits + Serialize + for<'de> Deserialize<'de>,
-  Scalar::Repr: Abomonation,
+  Scalar::Repr:,
 {
   type NativeRO<T: PrimeField> = PoseidonRO<Scalar, T>;
   type Constants = PoseidonConstantsCircuit<Scalar>;
@@ -208,8 +189,8 @@ mod tests {
     Bn256EngineKZG, GrumpkinEngine, PallasEngine, Secp256k1Engine, Secq256k1Engine, VestaEngine,
   };
   use crate::{
-    bellpepper::solver::SatisfyingAssignment, constants::NUM_CHALLENGE_BITS,
-    gadgets::le_bits_to_num, traits::Engine,
+    constants::NUM_CHALLENGE_BITS, frontend::solver::SatisfyingAssignment, gadgets::le_bits_to_num,
+    traits::Engine,
   };
 
   use ff::Field;
@@ -220,8 +201,8 @@ mod tests {
   where
     // we can print the field elements we get from E's Base & Scalar fields,
     // and compare their byte representations
-    <<E as Engine>::Base as PrimeField>::Repr: std::fmt::Debug + Abomonation,
-    <<E as Engine>::Scalar as PrimeField>::Repr: std::fmt::Debug + Abomonation,
+    <<E as Engine>::Base as PrimeField>::Repr: std::fmt::Debug,
+    <<E as Engine>::Scalar as PrimeField>::Repr: std::fmt::Debug,
     <<E as Engine>::Base as PrimeField>::Repr:
       PartialEq<<<E as Engine>::Scalar as PrimeField>::Repr>,
   {

@@ -188,17 +188,13 @@ impl<E: Engine> NIFS<E> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
   use crate::{
-    bellpepper::{
-      r1cs::{NovaShape, NovaWitness},
-      solver::SatisfyingAssignment,
-      test_shape_cs::TestShapeCS,
-    },
+    frontend::{r1cs::NovaWitness, solver::SatisfyingAssignment, test_shape_cs::TestShapeCS},
     provider::{Bn256EngineKZG, PallasEngine, Secp256k1Engine},
     r1cs::commitment_key,
     traits::{snark::default_ck_hint, Engine},
   };
-  use ::bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
   use ff::{Field, PrimeField};
   use rand::rngs::OsRng;
 
@@ -239,7 +235,7 @@ mod tests {
     // First create the shape
     let mut cs: TestShapeCS<E> = TestShapeCS::new();
     let _ = synthesize_tiny_r1cs_bellpepper(&mut cs, None);
-    let (shape, ck) = cs.r1cs_shape_and_key(&*default_ck_hint());
+    let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
     let ro_consts =
       <<E as Engine>::RO as ROTrait<<E as Engine>::Base, <E as Engine>::Scalar>>::Constants::default();
 

@@ -4,6 +4,11 @@
 //! of the running instances. Each of these hashes is H(params = H(shape, ck), i, z0, zi, U).
 //! Each circuit folds the last invocation of the other into the running instance
 
+use crate::frontend::gadgets::Assignment;
+use crate::frontend::{
+  num::AllocatedNum,
+  ConstraintSystem, SynthesisError, {AllocatedBit, Boolean},
+};
 use crate::{
   constants::{NIO_NOVA_FOLD, NUM_FE_WITHOUT_IO_FOR_CRHF, NUM_HASH_BITS},
   gadgets::{
@@ -17,12 +22,6 @@ use crate::{
   Commitment, StepCounterType,
 };
 use abomonation_derive::Abomonation;
-use bellpepper::gadgets::{boolean_utils::conditionally_select_slice, Assignment};
-use bellpepper_core::{
-  boolean::{AllocatedBit, Boolean},
-  num::AllocatedNum,
-  ConstraintSystem, SynthesisError,
-};
 use ff::Field;
 use serde::{Deserialize, Serialize};
 
@@ -378,12 +377,12 @@ impl<'a, E: Engine, SC: StepCircuit<E::Base>> NovaAugmentedCircuit<'a, E, SC> {
 mod tests {
   use super::*;
   use crate::{
-    bellpepper::{
+    constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
+    frontend::{
       r1cs::{NovaShape, NovaWitness},
       solver::SatisfyingAssignment,
       test_shape_cs::TestShapeCS,
     },
-    constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
     gadgets::scalar_as_base,
     provider::{
       poseidon::PoseidonConstantsCircuit, Bn256EngineKZG, GrumpkinEngine, PallasEngine,
@@ -410,7 +409,7 @@ mod tests {
       NovaAugmentedCircuit::new(primary_params, None, &tc1, ro_consts1.clone());
     let mut cs: TestShapeCS<E1> = TestShapeCS::new();
     let _ = circuit1.synthesize(&mut cs);
-    let (shape1, ck1) = cs.r1cs_shape_and_key(&*default_ck_hint());
+    let (shape1, ck1) = cs.r1cs_shape(&*default_ck_hint());
 
     expected_num_constraints_primary.assert_eq(&cs.num_constraints().to_string());
 
@@ -420,7 +419,7 @@ mod tests {
       NovaAugmentedCircuit::new(secondary_params, None, &tc2, ro_consts2.clone());
     let mut cs: TestShapeCS<Dual<E1>> = TestShapeCS::new();
     let _ = circuit2.synthesize(&mut cs);
-    let (shape2, ck2) = cs.r1cs_shape_and_key(&*default_ck_hint());
+    let (shape2, ck2) = cs.r1cs_shape(&*default_ck_hint());
 
     expected_num_constraints_secondary.assert_eq(&cs.num_constraints().to_string());
 

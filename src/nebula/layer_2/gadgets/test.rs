@@ -7,6 +7,7 @@ use super::{PrimaryNIFSVerifierGadget, NUM_CHALLENGE_BITS};
 use crate::constants::NUM_FE_IN_EMULATED_POINT;
 use crate::cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance;
 use crate::cyclefold::gadgets::AllocatedCycleFoldInstance;
+use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use crate::gadgets::scalar_as_base;
 use crate::nebula::layer_2::utils::{absorb_U, absorb_U_bn, Layer2FoldingData};
 use crate::provider::PallasEngine;
@@ -27,7 +28,6 @@ use crate::{
   traits::{snark::default_ck_hint, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
 };
 use crate::{CommitmentKey, R1CSWithArity};
-use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::Field;
 use std::marker::PhantomData;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
@@ -323,11 +323,11 @@ where
     1
   }
 
-  fn synthesize<CS: bellpepper_core::ConstraintSystem<E::Scalar>>(
+  fn synthesize<CS: ConstraintSystem<E::Scalar>>(
     &self,
     cs: &mut CS,
     z: &[AllocatedNum<E::Scalar>],
-  ) -> Result<Vec<AllocatedNum<E::Scalar>>, bellpepper_core::SynthesisError> {
+  ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
     let U1_secondary = self.alloc_cyclefold_running_instance(cs.namespace(|| "U1_secondary"))?;
     let (pp_digest, U1, U2, E_new, W_new, U2_secondary, nifs) =
       VerifierCircuit::alloc_folding_data(
@@ -596,11 +596,11 @@ where
     1
   }
 
-  fn synthesize<CS: bellpepper_core::ConstraintSystem<E::Scalar>>(
+  fn synthesize<CS: ConstraintSystem<E::Scalar>>(
     &self,
     cs: &mut CS,
     z: &[AllocatedNum<E::Scalar>],
-  ) -> Result<Vec<AllocatedNum<E::Scalar>>, bellpepper_core::SynthesisError> {
+  ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
     let mut x = z[0].clone();
     let mut y = x.clone();
     for i in 0..10 {

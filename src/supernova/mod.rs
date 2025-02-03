@@ -298,7 +298,7 @@ where
     circuit_secondary
       .synthesize(&mut cs)
       .expect("circuit synthesis failed");
-    let (r1cs_shape_secondary, ck_secondary) = cs.r1cs_shape_and_key(ck_hint2);
+    let (r1cs_shape_secondary, ck_secondary) = cs.r1cs_shape(ck_hint2);
     let ck_secondary = Arc::new(ck_secondary);
     let circuit_shape_secondary = R1CSWithArity::new(r1cs_shape_secondary, F_arity_secondary);
 

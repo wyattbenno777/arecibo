@@ -1,7 +1,6 @@
 use super::{BitAccess, OptionExt};
-use bellpepper_core::{
-  boolean::AllocatedBit, num::AllocatedNum, ConstraintSystem, LinearCombination, SynthesisError,
-  Variable,
+use crate::frontend::{
+  num::AllocatedNum, AllocatedBit, ConstraintSystem, LinearCombination, SynthesisError, Variable,
 };
 use byteorder::WriteBytesExt;
 use ff::PrimeField;

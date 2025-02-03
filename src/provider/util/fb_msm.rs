@@ -37,7 +37,7 @@ where
 {
   let in_window = 1 << window;
   // Number of outer iterations needed to cover the entire scalar
-  let outerc = (scalar_size + window - 1) / window;
+  let outerc = scalar_size.div_ceil(window);
 
   // Number of multiples of the window's "outer point" needed for each window (fewer for the last window)
   let last_in_window = 1 << (scalar_size - (outerc - 1) * window);
@@ -121,7 +121,7 @@ where
   T: PrimeCurve,
   T::Scalar: PrimeFieldBits,
 {
-  let outerc = (scalar_size + window - 1) / window;
+  let outerc = scalar_size.div_ceil(window);
   assert!(outerc <= table.len());
 
   v.par_iter()

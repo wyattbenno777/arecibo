@@ -1,70 +1,18 @@
 //! This module implements various gadgets necessary for folding R1CS types.
-use super::nonnative::{
-  bignat::BigNat,
-  util::{f_to_nat, Num},
+use super::{
+  alloc_scalar_as_base, conditionally_select_bignat,
+  nonnative::{bignat::BigNat, util::f_to_nat},
+  utils::conditionally_select,
 };
+use crate::frontend::gadgets::{boolean::Boolean, num::AllocatedNum};
+use crate::frontend::{ConstraintSystem, SynthesisError};
 use crate::{
-  constants::{NUM_CHALLENGE_BITS, NUM_FE_WITHOUT_IO_FOR_NOVA_FOLD},
-  gadgets::{
-    ecc::AllocatedPoint,
-    utils::{
-      alloc_bignat_constant, alloc_one, alloc_scalar_as_base, conditionally_select_bignat,
-      le_bits_to_num,
-    },
-  },
-  r1cs::{R1CSInstance, RelaxedR1CSInstance},
-  traits::{commitment::CommitmentTrait, Engine, Group, ROCircuitTrait, ROConstantsCircuit},
+  gadgets::ecc::AllocatedPoint,
+  r1cs::RelaxedR1CSInstance,
+  traits::{commitment::CommitmentTrait, Engine, Group, ROCircuitTrait},
 };
-use bellpepper::gadgets::{
-  boolean::Boolean, boolean_utils::conditionally_select, num::AllocatedNum, Assignment,
-};
-use bellpepper_core::{ConstraintSystem, SynthesisError};
 use ff::Field;
 use itertools::Itertools as _;
-
-/// An Allocated R1CS Instance
-#[derive(Clone)]
-pub struct AllocatedR1CSInstance<E: Engine, const N: usize> {
-  pub(crate) W: AllocatedPoint<E::GE>,
-  pub(crate) X: [AllocatedNum<E::Base>; N],
-}
-
-impl<E: Engine, const N: usize> AllocatedR1CSInstance<E, N> {
-  /// Takes the r1cs instance and creates a new allocated r1cs instance
-  pub fn alloc<CS: ConstraintSystem<<E as Engine>::Base>>(
-    mut cs: CS,
-    u: Option<&R1CSInstance<E>>,
-  ) -> Result<Self, SynthesisError> {
-    let W = AllocatedPoint::alloc(
-      cs.namespace(|| "allocate W"),
-      u.map(|u| u.comm_W.to_coordinates()),
-    )?;
-    W.check_on_curve(cs.namespace(|| "check W on curve"))?;
-
-    let X: [AllocatedNum<E::Base>; N] = (0..N)
-      .map(|idx| {
-        alloc_scalar_as_base::<E, _>(
-          cs.namespace(|| format!("allocating X[{idx}]")),
-          u.map(|u| u.X[idx]),
-        )
-      })
-      .collect::<Result<Vec<_>, _>>()?
-      .try_into()
-      .map_err(|err: Vec<_>| {
-        SynthesisError::IncompatibleLengthVector(format!("{} != {N}", err.len()))
-      })?;
-
-    Ok(Self { W, X })
-  }
-
-  /// Absorb the provided instance in the RO
-  pub fn absorb_in_ro(&self, ro: &mut E::ROCircuit) {
-    ro.absorb(&self.W.x);
-    ro.absorb(&self.W.y);
-    ro.absorb(&self.W.is_infinity);
-    self.X.iter().for_each(|x| ro.absorb(x));
-  }
-}
 
 /// An Allocated Relaxed R1CS Instance
 #[derive(Clone)]
@@ -153,39 +101,6 @@ impl<E: Engine, const N: usize> AllocatedRelaxedR1CSInstance<E, N> {
     Ok(Self { W, E, u, X })
   }
 
-  /// Allocates the R1CS Instance as a `RelaxedR1CSInstance` in the circuit.
-  /// E = 0, u = 1
-  pub fn from_r1cs_instance<CS: ConstraintSystem<<E as Engine>::Base>>(
-    mut cs: CS,
-    inst: AllocatedR1CSInstance<E, N>,
-    limb_width: usize,
-    n_limbs: usize,
-  ) -> Result<Self, SynthesisError> {
-    let E = AllocatedPoint::default(cs.namespace(|| "allocate default E"));
-
-    let u = alloc_one(cs.namespace(|| "one"));
-
-    let X = inst
-      .X
-      .into_iter()
-      .enumerate()
-      .map(|(idx, x)| {
-        BigNat::from_num(
-          cs.namespace(|| format!("allocate X[{idx}] from relaxed r1cs")),
-          &Num::from(x),
-          limb_width,
-          n_limbs,
-        )
-      })
-      .collect::<Result<Vec<_>, _>>()?
-      .try_into()
-      .map_err(|err: Vec<_>| {
-        SynthesisError::IncompatibleLengthVector(format!("{} != {N}", err.len()))
-      })?;
-
-    Ok(Self { W: inst.W, E, u, X })
-  }
-
   /// Absorb the provided instance in the RO
   pub fn absorb_in_ro<CS: ConstraintSystem<<E as Engine>::Base>>(
     &self,
@@ -215,94 +130,6 @@ impl<E: Engine, const N: usize> AllocatedRelaxedR1CSInstance<E, N> {
     })?;
 
     Ok(())
-  }
-
-  /// Folds self with a relaxed r1cs instance and returns the result
-  pub fn fold_with_r1cs<CS: ConstraintSystem<<E as Engine>::Base>>(
-    &self,
-    mut cs: CS,
-    params: &AllocatedNum<E::Base>, // hash of R1CSShape of F'
-    u: &AllocatedR1CSInstance<E, N>,
-    T: &AllocatedPoint<E::GE>,
-    ro_consts: ROConstantsCircuit<E>,
-    limb_width: usize,
-    n_limbs: usize,
-  ) -> Result<Self, SynthesisError> {
-    // Compute r:
-    let mut ro = E::ROCircuit::new(ro_consts, NUM_FE_WITHOUT_IO_FOR_NOVA_FOLD + N);
-    ro.absorb(params);
-
-    // running instance `U` does not need to absorbed since u.X[0] = Hash(params, U, i, z0, zi)
-    u.absorb_in_ro(&mut ro);
-
-    ro.absorb(&T.x);
-    ro.absorb(&T.y);
-    ro.absorb(&T.is_infinity);
-    let r_bits = ro.squeeze(cs.namespace(|| "r bits"), NUM_CHALLENGE_BITS)?;
-    let r = le_bits_to_num(cs.namespace(|| "r"), &r_bits)?;
-
-    // W_fold = self.W + r * u.W
-    let rW = u.W.scalar_mul(cs.namespace(|| "r * u.W"), &r_bits)?;
-    let W_fold = self.W.add(cs.namespace(|| "self.W + r * u.W"), &rW)?;
-
-    // E_fold = self.E + r * T
-    let rT = T.scalar_mul(cs.namespace(|| "r * T"), &r_bits)?;
-    let E_fold = self.E.add(cs.namespace(|| "self.E + r * T"), &rT)?;
-
-    // u_fold = u_r + r
-    let u_fold = AllocatedNum::alloc(cs.namespace(|| "u_fold"), || {
-      Ok(*self.u.get_value().get()? + r.get_value().get()?)
-    })?;
-    cs.enforce(
-      || "Check u_fold",
-      |lc| lc,
-      |lc| lc,
-      |lc| lc + u_fold.get_variable() - self.u.get_variable() - r.get_variable(),
-    );
-
-    // Fold the IO:
-    // Analyze r into limbs
-    let r_bn = BigNat::from_num(
-      cs.namespace(|| "allocate r_bn"),
-      &Num::from(r),
-      limb_width,
-      n_limbs,
-    )?;
-
-    // Allocate the order of the non-native field as a constant
-    let m_bn = alloc_bignat_constant(
-      cs.namespace(|| "alloc m"),
-      &E::GE::group_params().2,
-      limb_width,
-      n_limbs,
-    )?;
-
-    let mut X_fold = vec![];
-
-    for (idx, (X, x)) in self.X.iter().zip_eq(u.X.iter()).enumerate() {
-      let x_bn = BigNat::from_num(
-        cs.namespace(|| format!("allocate u.X[{idx}]_bn")),
-        &Num::from(x.clone()),
-        limb_width,
-        n_limbs,
-      )?;
-
-      let (_, r) = x_bn.mult_mod(cs.namespace(|| format!("r*u.X[{idx}]")), &r_bn, &m_bn)?;
-      let r_new = X.add(&r)?;
-      let X_i_fold = r_new.red_mod(cs.namespace(|| format!("reduce folded X[{idx}]")), &m_bn)?;
-      X_fold.push(X_i_fold);
-    }
-
-    let X_fold = X_fold.try_into().map_err(|err: Vec<_>| {
-      SynthesisError::IncompatibleLengthVector(format!("{} != {N}", err.len()))
-    })?;
-
-    Ok(Self {
-      W: W_fold,
-      E: E_fold,
-      u: u_fold,
-      X: X_fold,
-    })
   }
 
   /// If the condition is true then returns this otherwise it returns the other

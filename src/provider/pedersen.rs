@@ -8,7 +8,6 @@ use crate::{
   },
   zip_with,
 };
-use abomonation_derive::Abomonation;
 use core::{
   fmt::Debug,
   marker::PhantomData,
@@ -23,8 +22,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// A type that holds commitment generators
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Abomonation)]
-#[abomonation_omit_bounds]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitmentKey<E>
 where
   E: Engine,
@@ -32,9 +30,7 @@ where
 {
   // this is a hack; we just assume the size of the element.
   // Look for the static assertions in provider macros for a justification
-  #[abomonate_with(Vec<[u64; 8]>)]
   pub(crate) ck: Vec<<E::GE as PrimeCurve>::Affine>,
-  #[abomonate_with(Vec<[u64; 8]>)]
   pub(crate) h: Option<<E::GE as PrimeCurve>::Affine>,
 }
 
@@ -49,13 +45,11 @@ where
 }
 
 /// A type that holds a commitment
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Abomonation)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(bound = "")]
-#[abomonation_omit_bounds]
 pub struct Commitment<E: Engine> {
   // this is a hack; we just assume the size of the element.
   // Look for the static assertions in provider macros for a justification
-  #[abomonate_with(Vec<[u64; 12]>)]
   pub(crate) comm: E::GE,
 }
 
@@ -168,7 +162,7 @@ where
   }
 }
 
-impl<'a, 'b, E> Mul<&'b E::Scalar> for &'a Commitment<E>
+impl<'b, E> Mul<&'b E::Scalar> for &'_ Commitment<E>
 where
   E: Engine,
   E::GE: DlogGroup<ScalarExt = E::Scalar>,
