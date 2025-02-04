@@ -1,14 +1,14 @@
 use group::{prime::PrimeCurveAffine, UncompressedEncoding};
 use pairing::MultiMillerLoop;
 
-use bellpepper_core::SynthesisError;
+use crate::frontend::SynthesisError;
 use ec_gpu_gen::multiexp_cpu::SourceBuilder;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod memmap_uses {
-    pub use crate::groth16::MappedParameters;
+    pub use crate::frontend::groth16::MappedParameters;
     pub use memmap2::{Mmap, MmapOptions};
     pub use std::fs::File;
     pub use std::mem;

@@ -30,8 +30,8 @@ use std::ops::AddAssign;
 use group::{prime::PrimeCurveAffine, Curve};
 use rayon::prelude::*;
 
-use crate::groth16::aggregate::inner_product;
-use bellpepper_core::SynthesisError;
+use crate::frontend::groth16::aggregate::inner_product;
+use crate::frontend::SynthesisError;
 use pairing::{Engine, MultiMillerLoop};
 
 /// Key is a generic commitment key that is instanciated with g and h as basis,
@@ -188,8 +188,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::groth16::aggregate::structured_generators_scalar_power;
-    use blstrs::{Bls12, G1Projective, G2Projective, Scalar as Fr};
+    use crate::frontend::groth16::aggregate::structured_generators_scalar_power;
+    use halo2curves::bn256::{Bn256, G1, G2, Fr};
     use ff::Field;
     use group::Group;
     use rand_core::SeedableRng;
@@ -198,22 +198,22 @@ mod tests {
     fn test_commit_single() {
         let n = 6;
         let mut rng = rand_chacha::ChaChaRng::seed_from_u64(0u64);
-        let h = G2Projective::generator();
+        let h = G2::generator();
         let u = Fr::random(&mut rng);
         let v = Fr::random(&mut rng);
         let v1 = structured_generators_scalar_power(n, &h, &u);
         let v2 = structured_generators_scalar_power(n, &h, &v);
-        let vkey = VKey::<Bls12> { a: v1, b: v2 };
+        let vkey = VKey::<Bn256> { a: v1, b: v2 };
         let a = (0..n)
-            .map(|_| G1Projective::random(&mut rng).to_affine())
+            .map(|_| G1::random(&mut rng).to_affine())
             .collect::<Vec<_>>();
-        let c1 = single_g1::<Bls12>(&vkey, &a).unwrap();
-        let c2 = single_g1::<Bls12>(&vkey, &a).unwrap();
+        let c1 = single_g1::<Bn256>(&vkey, &a).unwrap();
+        let c2 = single_g1::<Bn256>(&vkey, &a).unwrap();
         assert_eq!(c1, c2);
         let b = (0..n)
-            .map(|_| G1Projective::random(&mut rng).to_affine())
+            .map(|_| G1::random(&mut rng).to_affine())
             .collect::<Vec<_>>();
-        let c3 = single_g1::<Bls12>(&vkey, &b).unwrap();
+        let c3 = single_g1::<Bn256>(&vkey, &b).unwrap();
         assert!(c1 != c3);
     }
 
@@ -221,8 +221,8 @@ mod tests {
     fn test_commit_pair() {
         let n = 6;
         let mut rng = rand_chacha::ChaChaRng::seed_from_u64(0u64);
-        let h = G2Projective::generator();
-        let g = G1Projective::generator();
+        let h = G2::generator();
+        let g = G1::generator();
         let u = Fr::random(&mut rng);
         let v = Fr::random(&mut rng);
         let v1 = structured_generators_scalar_power(n, &h, &u);
@@ -230,20 +230,20 @@ mod tests {
         let w1 = structured_generators_scalar_power(2 * n, &g, &u);
         let w2 = structured_generators_scalar_power(2 * n, &g, &v);
 
-        let vkey = VKey::<Bls12> { a: v1, b: v2 };
-        let wkey = WKey::<Bls12> {
+        let vkey = VKey::<Bn256> { a: v1, b: v2 };
+        let wkey = WKey::<Bn256> {
             a: w1[n..].to_vec(),
             b: w2[n..].to_vec(),
         };
         let a = (0..n)
-            .map(|_| G1Projective::random(&mut rng).to_affine())
+            .map(|_| G1::random(&mut rng).to_affine())
             .collect::<Vec<_>>();
         let b = (0..n)
-            .map(|_| G2Projective::random(&mut rng).to_affine())
+            .map(|_| G2::random(&mut rng).to_affine())
             .collect::<Vec<_>>();
-        let c1 = pair::<Bls12>(&vkey, &wkey, &a, &b).unwrap();
-        let c2 = pair::<Bls12>(&vkey, &wkey, &a, &b).unwrap();
+        let c1 = pair::<Bn256>(&vkey, &wkey, &a, &b).unwrap();
+        let c2 = pair::<Bn256>(&vkey, &wkey, &a, &b).unwrap();
         assert_eq!(c1, c2);
-        pair::<Bls12>(&vkey, &wkey, &a[1..2], &b).expect_err("this should have failed");
+        pair::<Bn256>(&vkey, &wkey, &a[1..2], &b).expect_err("this should have failed");
     }
 }

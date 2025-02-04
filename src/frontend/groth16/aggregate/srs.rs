@@ -1,6 +1,6 @@
 use super::msm;
-use crate::groth16::aggregate::commit::*;
-use crate::groth16::multiscalar::{precompute_fixed_window, MultiscalarPrecompOwned, WINDOW_SIZE};
+use crate::frontend::groth16::aggregate::commit::*;
+use crate::frontend::groth16::multiscalar::{precompute_fixed_window, MultiscalarPrecompOwned, WINDOW_SIZE};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use digest::Digest;
 use ff::{Field, PrimeField, PrimeFieldBits};
@@ -12,7 +12,7 @@ use group::{
 use memmap2::Mmap;
 use pairing::Engine;
 use rayon::prelude::*;
-use sha2::Sha256;
+use sha3::Sha3_256;
 use std::convert::TryFrom;
 use std::io::{self, Error, ErrorKind, Read, Write};
 #[cfg(not(target_arch = "wasm32"))]
@@ -257,7 +257,7 @@ where
     pub fn hash(&self) -> Vec<u8> {
         let mut v = Vec::new();
         self.write(&mut v).expect("failed to compute hash");
-        Sha256::digest(&v).to_vec()
+        Sha3_256::digest(&v).to_vec()
     }
 
     pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
@@ -452,7 +452,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use blstrs::Bls12;
+    use halo2curves::bn256::Bn256;
     use rand_core::SeedableRng;
     use std::io::Cursor;
 
@@ -460,12 +460,12 @@ mod test {
     fn test_srs_invalid_length() {
         let mut rng = rand_chacha::ChaChaRng::seed_from_u64(0u64);
         let size = 8;
-        let srs = setup_fake_srs::<Bls12, _>(&mut rng, size);
+        let srs = setup_fake_srs::<Bn256, _>(&mut rng, size);
         let vec_len = srs.g_alpha_powers.len();
         let mut buffer = Vec::new();
         srs.write(&mut buffer).expect("writing to buffer failed");
         // tryingout normal operations
-        GenericSRS::<Bls12>::read(&mut Cursor::new(&buffer)).expect("can't read the srs");
+        GenericSRS::<Bn256>::read(&mut Cursor::new(&buffer)).expect("can't read the srs");
 
         // trying to read the first size
         let read_size = Cursor::new(&buffer).read_u32::<BigEndian>().unwrap() as usize;
@@ -480,7 +480,7 @@ mod test {
             .expect("failed to write invalid size");
         buffer.drain(0..4);
         new_buffer.append(&mut buffer);
-        GenericSRS::<Bls12>::read(&mut Cursor::new(&new_buffer))
+        GenericSRS::<Bn256>::read(&mut Cursor::new(&new_buffer))
             .expect_err("this should have failed");
     }
 }

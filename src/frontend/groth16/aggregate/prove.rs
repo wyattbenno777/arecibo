@@ -1,8 +1,8 @@
 use std::convert::TryFrom;
 use std::ops::{AddAssign, MulAssign};
 
-use blstrs::Compress;
 use ff::{Field, PrimeField};
+use group::GroupEncoding;
 use group::{prime::PrimeCurveAffine, Curve};
 use log::{debug, info};
 use rayon::prelude::*;
@@ -18,8 +18,8 @@ use super::{
     AggregateProof, AggregateProofAndInstance, GipaProof, KZGOpening, ProverSRS,
     ProverSRSInputAggregation, TippMippProof,
 };
-use crate::groth16::{aggregate::AggregateVersion, multiscalar::*, Proof};
-use bellpepper_core::SynthesisError;
+use crate::frontend::groth16::{aggregate::AggregateVersion, multiscalar::*, Proof};
+use crate::frontend::SynthesisError;
 use pairing::{Engine, MultiMillerLoop};
 
 /// Aggregate `n` zkSnark proofs, where `n` must be a power of two.
@@ -43,7 +43,7 @@ where
     E: MultiMillerLoop + std::fmt::Debug,
     E::Fr: Serialize,
     <E::Fr as PrimeField>::Repr: Send + Sync,
-    <E as Engine>::Gt: Compress + Serialize,
+    <E as Engine>::Gt: GroupEncoding + Serialize,
     E::G1: Serialize,
     E::G1Affine: Serialize,
     E::G2Affine: Serialize,
@@ -155,7 +155,7 @@ where
     E: MultiMillerLoop + std::fmt::Debug,
     E::Fr: Serialize,
     <E::Fr as PrimeField>::Repr: Send + Sync,
-    <E as Engine>::Gt: Compress + Serialize,
+    <E as Engine>::Gt: GroupEncoding + Serialize,
     E::G1: Serialize,
     E::G1Affine: Serialize,
     E::G2Affine: Serialize,
@@ -293,7 +293,7 @@ where
     E: MultiMillerLoop,
     E::Fr: Serialize,
     <E::Fr as PrimeField>::Repr: Send + Sync,
-    <E as Engine>::Gt: Compress + Serialize,
+    <E as Engine>::Gt: GroupEncoding + Serialize,
     E::G1: Serialize,
     E::G1Affine: Serialize,
     E::G2Affine: Serialize,
@@ -385,7 +385,7 @@ where
     E: MultiMillerLoop,
     E::Fr: Serialize,
     <E::Fr as PrimeField>::Repr: Sync,
-    <E as Engine>::Gt: Serialize,
+    <E as Engine>::Gt: GroupEncoding + Serialize,
     E::G1: Serialize,
     E::G1Affine: Serialize,
     E::G2Affine: Serialize,

@@ -33,7 +33,7 @@ fn deserialize_proof<'de, D: Deserializer<'de>, E: Engine>(d: D) -> Result<Proof
     impl<'de, E: Engine> Visitor<'de> for BytesVisitor<E> {
         type Value = Proof<E>;
 
-        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "a proof")
         }
         #[inline]
@@ -238,19 +238,19 @@ mod test_with_bls12_381 {
     use std::ops::MulAssign;
 
     use super::*;
-    use crate::groth16::{
+    use crate::frontend::groth16::{
         create_random_proof, generate_random_parameters, prepare_verifying_key, verify_proof,
         Parameters,
     };
-    use crate::{Circuit, ConstraintSystem, SynthesisError};
+    use crate::frontend::{Circuit, ConstraintSystem, SynthesisError};
     use bincode::{deserialize, serialize};
-    use blstrs::{Bls12, Scalar as Fr};
+    use halo2curves::bn256::{Bn256, Fr};
     use ff::{Field, PrimeField};
     use rand::thread_rng;
 
     #[test]
     fn test_size() {
-        assert_eq!(Proof::<Bls12>::size(), 192);
+        assert_eq!(Proof::<Bn256>::size(), 192);
     }
 
     #[test]
@@ -289,7 +289,7 @@ mod test_with_bls12_381 {
         let rng = &mut thread_rng();
 
         let params =
-            generate_random_parameters::<Bls12, _, _>(MySillyCircuit { a: None, b: None }, rng)
+            generate_random_parameters::<Bn256, _, _>(MySillyCircuit { a: None, b: None }, rng)
                 .unwrap();
 
         {
@@ -305,7 +305,7 @@ mod test_with_bls12_381 {
             assert!(params == de_params);
         }
 
-        let pvk = prepare_verifying_key::<Bls12>(&params.vk);
+        let pvk = prepare_verifying_key::<Bn256>(&params.vk);
 
         for _ in 0..100 {
             let a = Fr::random(&mut *rng);
@@ -343,7 +343,7 @@ mod test_with_bls12_381 {
 
             // Test serialization
             let serialized_proof = serialize(&proof).unwrap();
-            let de_proof: Proof<Bls12> = deserialize(&serialized_proof).unwrap();
+            let de_proof: Proof<Bn256> = deserialize(&serialized_proof).unwrap();
             assert_eq!(de_proof, proof);
         }
     }

@@ -6,7 +6,7 @@ use pairing::{Engine, MillerLoopResult, MultiMillerLoop};
 use rayon::prelude::*;
 
 use super::{multiscalar, PreparedVerifyingKey, Proof, VerifyingKey};
-use crate::{le_bytes_to_u64s, SynthesisError};
+use crate::frontend::{le_bytes_to_u64s, SynthesisError};
 
 /// Generate a prepared verifying key, required to verify a proofs.
 pub fn prepare_verifying_key<E: Engine + MultiMillerLoop>(

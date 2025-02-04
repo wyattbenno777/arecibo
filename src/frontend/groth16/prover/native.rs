@@ -6,7 +6,7 @@ use std::{
     time::Instant,
 };
 
-use bellpepper_core::{Circuit, ConstraintSystem, Index, SynthesisError, Variable};
+use crate::frontend::{Circuit, ConstraintSystem, Index, SynthesisError, Variable};
 use ec_gpu_gen::{
     multiexp_cpu::FullDensity,
     threadpool::{Worker, THREAD_POOL},
@@ -24,11 +24,10 @@ use rayon::iter::{
 use super::{ParameterSource, Proof, ProvingAssignment};
 #[cfg(any(feature = "cuda", feature = "opencl"))]
 use crate::gpu::PriorityLock;
-use crate::{
+use crate::frontend::{
     domain::EvaluationDomain,
     gpu::{GpuError, GpuName, LockedFftKernel, LockedMultiexpKernel},
-    multiexp::multiexp,
-    BELLMAN_VERSION,
+    groth16::multiexp::multiexp,
 };
 
 #[allow(clippy::type_complexity)]
@@ -45,8 +44,6 @@ where
     E::G1Affine: GpuName,
     E::G2Affine: GpuName,
 {
-    info!("Bellperson {} is being used!", BELLMAN_VERSION);
-
     let (start, mut provers, input_assignments, aux_assignments) =
         synthesize_circuits_batch(circuits)?;
 

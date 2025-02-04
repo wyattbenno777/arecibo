@@ -300,7 +300,7 @@ mod tests {
 
     use std::ops::Mul;
 
-    use blstrs::{G1Affine, G1Projective, Scalar as Fr};
+    use halo2curves::bn256  ::{G1Affine, G1, Fr};
     use ff::Field;
     use rand_core::SeedableRng;
     use rand_xorshift::XorShiftRng;
@@ -308,8 +308,8 @@ mod tests {
     fn multiscalar_naive(
         points: &[G1Affine],
         scalars: &[<Fr as PrimeField>::Repr],
-    ) -> G1Projective {
-        let mut acc = G1Projective::identity();
+    ) -> G1 {
+        let mut acc = G1::identity();
         for (scalar, point) in scalars.iter().zip(points.iter()) {
             let scalar = <Fr as PrimeField>::from_repr(*scalar).unwrap();
             acc.add_assign(&point.mul(scalar));
@@ -327,7 +327,7 @@ mod tests {
         for _ in 0..50 {
             for (num_inputs, window_size) in &[(8, 4), (12, 1), (10, 1), (20, 2)] {
                 let points: Vec<G1Affine> = (0..*num_inputs)
-                    .map(|_| G1Projective::random(&mut rng).to_affine())
+                    .map(|_| G1::random(&mut rng).to_affine())
                     .collect();
 
                 let scalars: Vec<<Fr as PrimeField>::Repr> = (0..*num_inputs)
@@ -358,7 +358,7 @@ mod tests {
         for _ in 0..50 {
             for (num_inputs, window_size) in &[(8, 4), (12, 1), (10, 1), (20, 2)] {
                 let points: Vec<G1Affine> = (0..*num_inputs)
-                    .map(|_| G1Projective::random(&mut rng).to_affine())
+                    .map(|_| G1::random(&mut rng).to_affine())
                     .collect();
 
                 let scalars: Vec<<Fr as PrimeField>::Repr> = (0..*num_inputs)

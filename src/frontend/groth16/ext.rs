@@ -1,8 +1,8 @@
-use bellpepper_core::{Circuit, SynthesisError};
+use crate::frontend::{Circuit, SynthesisError};
 
 use super::prover::{create_proof_batch_priority, create_random_proof_batch_priority};
 use super::{ParameterSource, Proof};
-use crate::gpu;
+use crate::frontend::gpu;
 use pairing::MultiMillerLoop;
 use rand_core::RngCore;
 

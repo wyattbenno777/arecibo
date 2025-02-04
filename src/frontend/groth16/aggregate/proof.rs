@@ -1,20 +1,18 @@
 use std::io::{Read, Write};
 
-use blstrs::Compress;
 use ff::PrimeField;
 use group::{prime::PrimeCurveAffine, Curve, GroupEncoding};
 use pairing::{Engine, MultiMillerLoop};
 use serde::{Deserialize, Serialize};
 
-use crate::groth16::aggregate::{commit, srs};
-use bellpepper_core::SynthesisError;
+use crate::frontend::groth16::aggregate::{commit, srs};
+use crate::frontend::SynthesisError;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AggregateProofAndInstance<E: Engine>
 where
     E: MultiMillerLoop,
-    <E as Engine>::Gt: Compress,
-{
+    <E as Engine>::Gt: GroupEncoding,{
     pub num_inputs: u32,
     #[serde(bound(
         serialize = "AggregateProof<E>: Serialize",
@@ -51,8 +49,7 @@ where
 impl<E> PartialEq for AggregateProofAndInstance<E>
 where
     E: MultiMillerLoop,
-    <E as Engine>::Gt: Compress,
-{
+    <E as Engine>::Gt: GroupEncoding,{
     fn eq(&self, other: &Self) -> bool {
         self.pi_agg == other.pi_agg
             && self.com_f == other.com_f
@@ -70,8 +67,7 @@ where
 pub struct AggregateProof<E>
 where
     E: MultiMillerLoop,
-    <E as Engine>::Gt: Compress,
-{
+    <E as Engine>::Gt: GroupEncoding,{
     /// commitment to A and B using the pair commitment scheme needed to verify
     /// TIPP relation.
     #[serde(bound(
@@ -103,12 +99,11 @@ where
 impl<E> PartialEq for AggregateProof<E>
 where
     E: MultiMillerLoop,
-    <E as Engine>::Gt: Compress,
-{
+    <E as Engine>::Gt: GroupEncoding,{
     fn eq(&self, other: &Self) -> bool {
         self.com_ab == other.com_ab
             && self.com_c == other.com_c
-            && self.ip_ab == other.ip_ab
+            && E::Gt::eq(&self.ip_ab, &other.ip_ab)
             && self.agg_c == other.agg_c
             && self.tmipp == other.tmipp
     }
@@ -117,7 +112,7 @@ where
 impl<E> AggregateProof<E>
 where
     E: MultiMillerLoop,
-    <E as Engine>::Gt: Compress,
+    <E as Engine>::Gt: GroupEncoding,
 {
     /// Performs some high level checks on the length of vectors and others to
     /// make sure all items in the proofs are consistent with each other.
@@ -157,15 +152,15 @@ where
     /// Writes the agggregated proof into the provided buffer.
     pub fn write(&self, mut out: impl Write) -> std::io::Result<()> {
         // com_ab
-        self.com_ab.0.write_compressed(&mut out)?;
-        self.com_ab.1.write_compressed(&mut out)?;
+        write_gt::<E::Gt, _>(&mut out, &self.com_ab.0)?;
+        write_gt::<E::Gt, _>(&mut out, &self.com_ab.1)?;
 
         // com_c
-        self.com_c.0.write_compressed(&mut out)?;
-        self.com_c.1.write_compressed(&mut out)?;
+        write_gt::<E::Gt, _>(&mut out, &self.com_c.0)?;
+        write_gt::<E::Gt, _>(&mut out, &self.com_c.1)?;
 
         // ip_ab
-        self.ip_ab.write_compressed(&mut out)?;
+        write_gt::<E::Gt, _>(&mut out, &self.ip_ab)?;
 
         // agg_c
         let agg_c = self.agg_c.to_affine().to_bytes();
@@ -186,18 +181,20 @@ where
         out.len()
     }
 
+
+
     pub fn read(mut source: impl Read) -> std::io::Result<Self> {
         let com_ab = (
-            <<E as Engine>::Gt as Compress>::read_compressed(&mut source)?,
-            <<E as Engine>::Gt as Compress>::read_compressed(&mut source)?,
+            read_gt::<E::Gt, _>(&mut source)?,
+            read_gt::<E::Gt, _>(&mut source)?,
         );
 
         let com_c = (
-            <<E as Engine>::Gt as Compress>::read_compressed(&mut source)?,
-            <<E as Engine>::Gt as Compress>::read_compressed(&mut source)?,
+            read_gt::<E::Gt, _>(&mut source)?,
+            read_gt::<E::Gt, _>(&mut source)?,
         );
 
-        let ip_ab = <<E as Engine>::Gt as Compress>::read_compressed(&mut source)?;
+        let ip_ab = read_gt::<E::Gt, _>(&mut source)?;
         let agg_c = read_affine::<E::G1Affine, _>(&mut source)?.to_curve();
 
         let tmipp = TippMippProof::read(&mut source)?;
@@ -218,7 +215,7 @@ where
 pub struct GipaProof<E>
 where
     E: MultiMillerLoop,
-{
+    <E as Engine>::Gt: GroupEncoding,{
     pub nproofs: u32,
     #[serde(bound(
         serialize = "<E as pairing::Engine>::Gt: Serialize",
@@ -272,6 +269,7 @@ where
 impl<E> PartialEq for GipaProof<E>
 where
     E: MultiMillerLoop,
+    <E as Engine>::Gt: GroupEncoding,
 {
     fn eq(&self, other: &Self) -> bool {
         self.nproofs == other.nproofs
@@ -294,7 +292,7 @@ fn log_proofs(nproofs: usize) -> usize {
 impl<E> GipaProof<E>
 where
     E: MultiMillerLoop,
-    <E as Engine>::Gt: Compress,
+    <E as Engine>::Gt: GroupEncoding,
 {
     /// Writes the  proof into the provided buffer.
     pub fn write(&self, mut out: impl Write) -> std::io::Result<()> {
@@ -305,33 +303,33 @@ where
         assert_eq!(self.comms_ab.len(), log_proofs);
         // comms_ab
         for (x, y) in &self.comms_ab {
-            x.0.write_compressed(&mut out)?;
-            x.1.write_compressed(&mut out)?;
-            y.0.write_compressed(&mut out)?;
-            y.1.write_compressed(&mut out)?;
+            write_gt::<E::Gt, _>(&mut out, &x.0)?;
+            write_gt::<E::Gt, _>(&mut out, &x.1)?;
+            write_gt::<E::Gt, _>(&mut out, &y.0)?;
+            write_gt::<E::Gt, _>(&mut out, &y.1)?;
         }
 
         assert_eq!(self.comms_c.len(), log_proofs);
         // comms_c
         for (x, y) in &self.comms_c {
-            x.0.write_compressed(&mut out)?;
-            x.1.write_compressed(&mut out)?;
-            y.0.write_compressed(&mut out)?;
-            y.1.write_compressed(&mut out)?;
+            write_gt::<E::Gt, _>(&mut out, &x.0)?;
+            write_gt::<E::Gt, _>(&mut out, &x.1)?;
+            write_gt::<E::Gt, _>(&mut out, &y.0)?;
+            write_gt::<E::Gt, _>(&mut out, &y.1)?;
         }
 
         assert_eq!(self.z_ab.len(), log_proofs);
         // z_ab
         for (x, y) in &self.z_ab {
-            x.write_compressed(&mut out)?;
-            y.write_compressed(&mut out)?;
+            write_gt::<E::Gt, _>(&mut out, &x)?;
+            write_gt::<E::Gt, _>(&mut out, &y)?;
         }
 
         assert_eq!(self.z_c.len(), log_proofs);
         // z_c
         for (x, y) in &self.z_c {
-            out.write_all(x.to_affine().to_bytes().as_ref())?;
-            out.write_all(y.to_affine().to_bytes().as_ref())?;
+            write_gt::<E::G1Affine, _>(&mut out, &x.to_affine())?;
+            write_gt::<E::G1Affine, _>(&mut out, &y.to_affine())?;
         }
 
         // final_a
@@ -370,11 +368,11 @@ where
         fn read_output<E, R>(mut source: R) -> std::io::Result<commit::Output<E>>
         where
             E: MultiMillerLoop,
-            <E as Engine>::Gt: Compress,
+            <E as Engine>::Gt: GroupEncoding,
             R: Read,
         {
-            let a = <<E as Engine>::Gt as Compress>::read_compressed(&mut source)?;
-            let b = <<E as Engine>::Gt as Compress>::read_compressed(&mut source)?;
+            let a = read_gt::<E::Gt, _>(&mut source)?;
+            let b = read_gt::<E::Gt, _>(&mut source)?;
             Ok((a, b))
         }
 
@@ -435,6 +433,7 @@ where
 pub struct TippMippProof<E>
 where
     E: MultiMillerLoop,
+    <E as Engine>::Gt: GroupEncoding,
 {
     #[serde(bound(
         serialize = "GipaProof<E>: Serialize",
@@ -456,6 +455,7 @@ where
 impl<E> PartialEq for TippMippProof<E>
 where
     E: MultiMillerLoop,
+    <E as Engine>::Gt: GroupEncoding,
 {
     fn eq(&self, other: &Self) -> bool {
         self.gipa == other.gipa
@@ -467,7 +467,7 @@ where
 impl<E> TippMippProof<E>
 where
     E: MultiMillerLoop,
-    <E as Engine>::Gt: Compress,
+    <E as Engine>::Gt: GroupEncoding,
 {
     /// Writes the  proof into the provided buffer.
     pub fn write(&self, mut out: impl Write) -> std::io::Result<()> {
@@ -508,7 +508,7 @@ where
 impl<E> AggregateProofAndInstance<E>
 where
     E: MultiMillerLoop,
-    <E as Engine>::Gt: Compress,
+    <E as Engine>::Gt: GroupEncoding,
 {
     pub fn parsing_check(&self) -> Result<(), SynthesisError> {
         self.pi_agg.parsing_check()?;
@@ -650,6 +650,31 @@ fn read_affine<G: PrimeCurveAffine, R: std::io::Read>(mut source: R) -> std::io:
     Ok(affine)
 }
 
+fn read_gt<G: GroupEncoding, R: std::io::Read>(mut reader: R) -> std::io::Result<G> {
+    let mut buf = G::Repr::default();
+    reader.read_exact(buf.as_mut())?;
+    let opt: Option<G> = G::from_bytes(&buf).into();
+    opt.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid Gt data"))
+}
+
+/// Writes a Gt point in its compressed form to the provided writer.
+///
+/// # Arguments
+///
+/// * `writer` - A mutable reference to anything implementing the `Write` trait.
+/// * `point` - A reference to the group element to be written.
+///
+/// # Returns
+///
+/// A `Result` which is `Ok` on success and contains an `io::Error` on failure.
+pub fn write_gt<G: GroupEncoding, W: std::io::Write>(
+    mut writer: W,
+    point: &G
+) -> std::io::Result<()> {
+    let bytes = point.to_bytes();
+    writer.write_all(bytes.as_ref())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -657,28 +682,28 @@ mod tests {
     use ff::Field;
     use group::Group;
 
-    use blstrs::{Bls12, G1Affine, G1Projective, G2Affine, G2Projective, Scalar};
+    use halo2curves::bn256::{Bn256, G1Affine, G1, G2Affine, G2, Fr as Scalar};
 
-    fn fake_proof() -> AggregateProof<Bls12> {
+    fn fake_proof() -> AggregateProof<Bn256> {
         // create pairing, as pairing results can be compressed
-        let p = G1Projective::generator().to_affine();
-        let q = G2Projective::generator().to_affine();
-        let a = Bls12::pairing(&p, &q);
+        let p = G1::generator().to_affine();
+        let q = G2::generator().to_affine();
+        let a = Bn256::pairing(&p, &q);
 
-        AggregateProof::<Bls12> {
+        AggregateProof::<Bn256> {
             com_ab: (a, a),
             com_c: (a, a),
             ip_ab: a,
-            agg_c: G1Projective::generator(),
-            tmipp: TippMippProof::<Bls12> {
+            agg_c: G1::generator(),
+            tmipp: TippMippProof::<Bn256> {
                 gipa: GipaProof {
                     nproofs: 4,
                     comms_ab: vec![((a, a), (a, a)), ((a, a), (a, a))],
                     comms_c: vec![((a, a), (a, a)), ((a, a), (a, a))],
                     z_ab: vec![(a, a), (a, a)],
                     z_c: vec![
-                        (G1Projective::generator(), G1Projective::generator()),
-                        (G1Projective::generator(), G1Projective::generator()),
+                        (G1::generator(), G1::generator()),
+                        (G1::generator(), G1::generator()),
                     ],
                     final_a: G1Affine::generator(),
                     final_b: G2Affine::generator(),
@@ -699,19 +724,19 @@ mod tests {
         proof.write(&mut buffer).unwrap();
         assert_eq!(buffer.len(), 8_212);
 
-        let out = AggregateProof::<Bls12>::read(std::io::Cursor::new(&buffer)).unwrap();
+        let out = AggregateProof::<Bn256>::read(std::io::Cursor::new(&buffer)).unwrap();
         assert_eq!(proof, out);
 
         let ser_proof = bincode::serialize(&proof).unwrap();
-        let des_proof: AggregateProof<Bls12> = bincode::deserialize(&ser_proof).unwrap();
+        let des_proof: AggregateProof<Bn256> = bincode::deserialize(&ser_proof).unwrap();
         assert_eq!(des_proof, proof);
     }
 
     #[test]
     fn test_proof_check() {
-        let p = G1Projective::generator().to_affine();
-        let q = G2Projective::generator().to_affine();
-        let a = Bls12::pairing(&p, &q);
+        let p = G1::generator().to_affine();
+        let q = G2::generator().to_affine();
+        let a = Bn256::pairing(&p, &q);
 
         let mut proof = fake_proof();
         proof.parsing_check().expect("proof should be valid");
@@ -729,13 +754,13 @@ mod tests {
         proof.parsing_check().expect_err("Proof should be invalid");
     }
 
-    fn fake_proof_instance() -> AggregateProofAndInstance<Bls12> {
+    fn fake_proof_instance() -> AggregateProofAndInstance<Bn256> {
         // create pairing, as pairing results can be compressed
-        let a = G1Projective::generator();
-        let b = G1Projective::generator();
+        let a = G1::generator();
+        let b = G1::generator();
         let c = Scalar::ZERO;
 
-        AggregateProofAndInstance::<Bls12> {
+        AggregateProofAndInstance::<Bn256> {
             num_inputs: 8,
             pi_agg: fake_proof(),
             com_f: vec![a, a, a, a],
@@ -754,12 +779,14 @@ mod tests {
         proof.write(&mut buffer).unwrap();
         assert_eq!(buffer.len(), 9_112);
 
-        let out = AggregateProofAndInstance::<Bls12>::read(std::io::Cursor::new(&buffer)).unwrap();
+        let out = AggregateProofAndInstance::<Bn256>::read(std::io::Cursor::new(&buffer)).unwrap();
         assert_eq!(proof, out);
 
         let ser_proof = bincode::serialize(&proof).unwrap();
-        let des_proof: AggregateProofAndInstance<Bls12> = bincode::deserialize(&ser_proof).unwrap();
+        let des_proof: AggregateProofAndInstance<Bn256> = bincode::deserialize(&ser_proof).unwrap();
         assert_eq!(des_proof, proof);
         des_proof.parsing_check().unwrap();
     }
 }
+
+

@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use ff::{Field, PrimeField};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
+use sha3::{Digest, Sha3_256};
 
 use pairing::Engine;
 
@@ -10,7 +10,7 @@ const PREFIX: &str = "snarkpack-v1";
 
 #[derive(Debug)]
 pub struct Transcript<E: Engine> {
-    hasher: Sha256,
+    hasher: Sha3_256,
     buffer: Vec<u8>,
     _e: PhantomData<E>,
 }
@@ -51,7 +51,7 @@ where
 
 impl<E: Engine> Transcript<E> {
     pub fn new(application_tag: &str) -> Self {
-        let mut hasher = sha2::Sha256::new();
+        let mut hasher = Sha3_256::new();
         hasher.update(PREFIX);
         hasher.update(application_tag);
 
@@ -112,17 +112,17 @@ impl<E: Engine> Transcript<E> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use blstrs::{Bls12, G1Affine, G2Affine, Scalar as Fr};
+    use halo2curves::bn256::{Bn256, G1Affine, G2Affine, Fr};
     use ff::Field;
     use group::prime::PrimeCurveAffine;
     use pairing::{MillerLoopResult, MultiMillerLoop};
 
     #[test]
     fn test_transcript() {
-        let mut t = Transcript::<Bls12>::new("test");
+        let mut t = Transcript::<Bn256>::new("test");
         let g1 = G1Affine::generator();
         let g2 = G2Affine::generator();
-        let gt = <Bls12 as MultiMillerLoop>::multi_miller_loop(&[(&g1, &g2.into())])
+        let gt = <Bn256 as MultiMillerLoop>::multi_miller_loop(&[(&g1, &g2.into())])
             .final_exponentiation();
 
         t = t.write(&g1).write(&g2).write(&gt).write(&Fr::ONE);

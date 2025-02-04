@@ -1,7 +1,6 @@
-use blstrs::Compress;
 use crossbeam_channel::bounded;
 use ff::{Field, PrimeField};
-use group::{prime::PrimeCurveAffine, Curve, Group};
+use group::{prime::PrimeCurveAffine, Curve, Group, GroupEncoding};
 use log::{debug, info};
 use pairing::{Engine, MultiMillerLoop};
 use rayon::prelude::*;
@@ -15,12 +14,12 @@ use super::{
     transcript::{Challenge, Transcript},
     AggregateProof, AggregateProofAndInstance, KZGOpening, VerifierSRS,
 };
-use crate::groth16::{
+use crate::frontend::groth16::{
     aggregate::AggregateVersion,
     multiscalar::{par_multiscalar, MultiscalarPrecomp, ScalarList},
     PreparedVerifyingKey,
 };
-use bellpepper_core::SynthesisError;
+use crate::frontend::SynthesisError;
 
 use std::default::Default;
 use std::ops::{AddAssign, MulAssign, SubAssign};
@@ -52,7 +51,7 @@ pub fn verify_aggregate_proof<E, R>(
 where
     E: MultiMillerLoop + std::fmt::Debug,
     E::Fr: Serialize,
-    <E as Engine>::Gt: Compress + Serialize,
+    <E as Engine>::Gt: GroupEncoding + Serialize,
     E::G1: Serialize,
     E::G1Affine: Serialize,
     E::G2Affine: Serialize,
@@ -220,7 +219,7 @@ pub fn verify_aggregate_proof_and_aggregate_instances<
 where
     E: MultiMillerLoop + std::fmt::Debug,
     E::Fr: Serialize,
-    <E as Engine>::Gt: Compress + Serialize,
+    <E as Engine>::Gt: GroupEncoding + Serialize,
     E::G1: Serialize,
     E::G1Affine: Serialize,
     E::G2Affine: Serialize,
@@ -414,7 +413,7 @@ fn verify_tipp_mipp<E, R>(
 ) where
     E: MultiMillerLoop,
     E::Fr: Serialize,
-    <E as Engine>::Gt: Compress + Serialize,
+    <E as Engine>::Gt: GroupEncoding + Serialize,
     E::G1: Serialize,
     E::G1Affine: Serialize,
     E::G2Affine: Serialize,
@@ -547,7 +546,7 @@ fn gipa_verify_tipp_mipp<E>(
 where
     E: MultiMillerLoop,
     E::Fr: Serialize,
-    <E as Engine>::Gt: Compress + Serialize,
+    <E as Engine>::Gt: GroupEncoding + Serialize,
     E::G1: Serialize,
     E::G1Affine: Serialize,
     E::G2Affine: Serialize,
@@ -735,7 +734,7 @@ where
                 Op::ZC(zc_r, c_inv),
             ]
         })
-        .fold(GipaTUZ::<E>::default, |mut res, op: Op<E>| {
+        .fold(GipaTUZ::<E>::default, |mut res, op: Op<'_, E>| {
             match op {
                 Op::TAB(tx, c) => {
                     let tx = *tx * c;

@@ -1,11 +1,8 @@
-#[cfg(not(feature = "cuda-supraseal"))]
 mod native;
-#[cfg(feature = "cuda-supraseal")]
-mod supraseal;
 
 use std::fmt;
 
-use bellpepper_core::{
+use crate::frontend::{
     Circuit, ConstraintSystem, Index, LinearCombination, SynthesisError, Variable,
 };
 use ec_gpu_gen::multiexp_cpu::DensityTracker;
@@ -13,12 +10,9 @@ use ff::{Field, PrimeField};
 use pairing::MultiMillerLoop;
 use rand_core::RngCore;
 
-#[cfg(not(feature = "cuda-supraseal"))]
 use self::native as prover;
-#[cfg(feature = "cuda-supraseal")]
-use self::supraseal as prover;
 use super::{ParameterSource, Proof};
-use crate::{gpu::GpuName, lc};
+use crate::frontend::{lc, gpu::GpuName};
 
 struct ProvingAssignment<Scalar: PrimeField> {
     // Density of queries
@@ -37,7 +31,7 @@ struct ProvingAssignment<Scalar: PrimeField> {
 }
 
 impl<Scalar: PrimeField> fmt::Debug for ProvingAssignment<Scalar> {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("ProvingAssignment")
             .field("a_aux_density", &self.a_aux_density)
             .field("b_input_density", &self.b_input_density)
@@ -124,6 +118,34 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for ProvingAssignment<Scalar> 
         self.b_input_density.add_element();
 
         Ok(Variable(Index::Input(self.input_assignment.len() - 1)))
+    }
+
+    fn alloc_precommitted<F, A, AR>(
+        &mut self,
+        _: A,
+        _: F,
+    ) -> Result<Variable, SynthesisError>
+    where
+        F: FnOnce() -> Result<Scalar, SynthesisError>,
+        A: FnOnce() -> AR,
+        AR: Into<String>,
+    {
+        // Provide logic or a placeholder:
+        unimplemented!("Implement alloc_precommitted for ProvingAssignment.")
+    }
+    
+    fn alloc_precommitted2<F, A, AR>(
+        &mut self,
+        _: A,
+        _: F,
+    ) -> Result<Variable, SynthesisError>
+    where
+        F: FnOnce() -> Result<Scalar, SynthesisError>,
+        A: FnOnce() -> AR,
+        AR: Into<String>,
+    {
+        // Provide logic or a placeholder:
+        unimplemented!("Implement alloc_precommitted2 for ProvingAssignment.")
     }
 
     fn enforce<A, AR, LA, LB, LC>(&mut self, _: A, a: LA, b: LB, c: LC)
@@ -257,7 +279,7 @@ where
 mod tests {
     use super::*;
 
-    use blstrs::Scalar as Fr;
+    use halo2curves::bn256::Fr;
     use rand::Rng;
     use rand_core::SeedableRng;
     use rand_xorshift::XorShiftRng;

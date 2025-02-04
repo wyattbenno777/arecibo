@@ -12,11 +12,9 @@ use rand_core::RngCore;
 
 use super::{Parameters, VerifyingKey};
 
-use crate::domain::EvaluationDomain;
-use crate::gpu;
-use bellpepper_core::{
-    Circuit, ConstraintSystem, Index, LinearCombination, SynthesisError, Variable,
-};
+use crate::frontend::domain::EvaluationDomain;
+use crate::frontend::gpu;
+use crate::frontend::{Circuit, ConstraintSystem, Index, LinearCombination, SynthesisError, Variable};
 use ec_gpu_gen::threadpool::Worker;
 
 /// Generates a random common reference string for
@@ -141,6 +139,8 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for KeypairAssembly<Scalar> {
                 match index {
                     Variable(Index::Input(id)) => inputs[id].push((*coeff, this_constraint)),
                     Variable(Index::Aux(id)) => aux[id].push((*coeff, this_constraint)),
+                    Variable(Index::Precommitted(id)) => unreachable!(),
+                    Variable(Index::Precommitted2(id)) => unreachable!(),
                 }
             }
         }
@@ -181,6 +181,34 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for KeypairAssembly<Scalar> {
 
     fn get_root(&mut self) -> &mut Self::Root {
         self
+    }
+
+    fn alloc_precommitted<F, A, AR>(
+        &mut self,
+        _: A,
+        _: F,
+    ) -> Result<Variable, SynthesisError>
+    where
+        F: FnOnce() -> Result<Scalar, SynthesisError>,
+        A: FnOnce() -> AR,
+        AR: Into<String>,
+    {
+        // Provide logic or a placeholder:
+        unimplemented!("Implement alloc_precommitted for KeypairAssembly.")
+    }
+
+    fn alloc_precommitted2<F, A, AR>(
+        &mut self,
+        _: A,
+        _: F,
+    ) -> Result<Variable, SynthesisError>
+    where
+        F: FnOnce() -> Result<Scalar, SynthesisError>,
+        A: FnOnce() -> AR,
+        AR: Into<String>,
+    {
+        // Provide logic or a placeholder:
+        unimplemented!("Implement alloc_precommitted2 for KeypairAssembly.")
     }
 }
 

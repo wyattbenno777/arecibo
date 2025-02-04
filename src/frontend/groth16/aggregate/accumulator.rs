@@ -5,7 +5,7 @@ use pairing::{Engine, MillerLoopResult, MultiMillerLoop};
 use rand_core::RngCore;
 use rayon::prelude::*;
 
-use bellpepper_core::SynthesisError;
+use crate::frontend::SynthesisError;
 use std::ops::Mul;
 use std::sync::{
     atomic::{AtomicBool, Ordering::SeqCst},
@@ -333,18 +333,18 @@ fn derive_non_zero<E: Engine, R: rand_core::RngCore>(rng: &mut R) -> E::Fr {
 #[cfg(test)]
 mod test {
     use super::*;
-    use blstrs::{Bls12, G1Projective, G2Projective};
+    use halo2curves::bn256::{Bn256, G1, G2};
     use group::Group;
     use rand_core::RngCore;
     use rand_core::SeedableRng;
 
-    fn gen_pairing_check<R: RngCore>(r: &mut R) -> PairingCheck<Bls12> {
-        let g1r = G1Projective::random(&mut *r).to_affine();
-        let g2r = G2Projective::random(&mut *r).to_affine();
-        let exp = Bls12::pairing(&g1r, &g2r);
-        let coeff = derive_non_zero::<Bls12, _>(r);
+    fn gen_pairing_check<R: RngCore>(r: &mut R) -> PairingCheck<Bn256> {
+        let g1r = G1::random(&mut *r).to_affine();
+        let g2r = G2::random(&mut *r).to_affine();
+        let exp = Bn256::pairing(&g1r, &g2r);
+        let coeff = derive_non_zero::<Bn256, _>(r);
         let tuple =
-            PairingCheck::<Bls12>::new_random_from_miller_inputs(coeff, &[(&g1r, &g2r)], &exp);
+            PairingCheck::<Bn256>::new_random_from_miller_inputs(coeff, &[(&g1r, &g2r)], &exp);
         assert!(tuple.verify());
         tuple
     }
@@ -357,7 +357,7 @@ mod test {
             .collect::<Vec<_>>();
         let final_tuple = tuples
             .iter()
-            .fold(PairingCheck::<Bls12>::new(), |mut acc, tu| {
+            .fold(PairingCheck::<Bn256>::new(), |mut acc, tu| {
                 acc.merge(tu);
                 acc
             });
