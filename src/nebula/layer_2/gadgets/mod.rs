@@ -1,7 +1,10 @@
-use super::nifs::{CycleFoldNIFS, CycleFoldRelaxedNIFS, PrimaryRelaxedNIFS};
+use super::nifs::CycleFoldNIFS;
 use crate::constants::NUM_CHALLENGE_BITS;
 use crate::cyclefold::gadgets::emulated::{self, AllocatedEmulPoint};
+use crate::frontend::num::AllocatedNum;
+use crate::frontend::{ConstraintSystem, SynthesisError};
 use crate::gadgets::{alloc_bignat_constant, le_bits_to_num, BigNat, Num};
+use crate::nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryRelaxedNIFS};
 use crate::traits::commitment::CommitmentTrait;
 use crate::traits::Group;
 use crate::traits::ROCircuitTrait;
@@ -11,8 +14,6 @@ use crate::{
   gadgets::AllocatedPoint,
   traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
 };
-use bellpepper_core::num::AllocatedNum;
-use bellpepper_core::{ConstraintSystem, SynthesisError};
 use itertools::Itertools;
 use r1cs::AllocatedRelaxedR1CSInstanceBn;
 

@@ -5,7 +5,6 @@ use crate::{
   errors::NovaError,
   traits::{AbsorbInROTrait, Engine, TranscriptReprTrait},
 };
-use abomonation::Abomonation;
 use core::{
   fmt::Debug,
   ops::{Add, Mul, MulAssign},
@@ -32,7 +31,6 @@ pub trait CommitmentTrait<E: Engine>:
   + TranscriptReprTrait<E::GE>
   + Serialize
   + for<'de> Deserialize<'de>
-  + Abomonation
   + AbsorbInROTrait<E>
   + Add<Self, Output = Self>
   + ScalarMul<E::Scalar>
@@ -81,8 +79,9 @@ pub trait CommitmentEngineTrait<E: Engine>: Clone + Send + Sync {
     + Send
     + Sync
     + Serialize
-    + for<'de> Deserialize<'de>
-    + Abomonation;
+    + for<'de> Deserialize<'de>;
+  /// Holds the type of the derandomization key
+  type DerandKey: Clone + Debug + Send + Sync + Serialize + for<'de> Deserialize<'de>;
 
   /// Holds the type of the commitment
   type Commitment: CommitmentTrait<E>;
@@ -90,48 +89,16 @@ pub trait CommitmentEngineTrait<E: Engine>: Clone + Send + Sync {
   /// Samples a new commitment key of a specified size
   fn setup(label: &'static [u8], n: usize) -> Self::CommitmentKey;
 
-  /// Commits to the provided vector using the provided generators
-  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar]) -> Self::Commitment;
-}
-
-/// A trait that defines additional methods specific to zk commitments
-pub trait ZKCommitmentEngineTrait<E: Engine>: CommitmentEngineTrait<E> {
-  /// Samples a new commitment key of a specified size
-  fn setup_exact(label: &'static [u8], n: usize) -> Self::CommitmentKey;
-
-  /// Samples a new commitment key (power of 2) but reuses the blinding generator of ck
-  fn setup_with_blinding(
-    label: &'static [u8],
-    n: usize,
-    h: &<<E as Engine>::GE as PrimeCurve>::Affine,
-  ) -> Self::CommitmentKey
-  where
-    E::GE: DlogGroup;
-
-  /// Samples a new commitment key of specific size but reuses the blinding generator of ck
-  fn setup_exact_with_blinding(
-    label: &'static [u8],
-    n: usize,
-    h: &<<E as Engine>::GE as PrimeCurve>::Affine,
-  ) -> Self::CommitmentKey
-  where
-    E::GE: DlogGroup;
-
-  /// Converts a commitment into generators (with no blinding generator)
-  fn from_preprocessed(com: Vec<<<E as Engine>::GE as PrimeCurve>::Affine>) -> Self::CommitmentKey
-  where
-    E::GE: DlogGroup;
-
-  /// Returns the generators of the commitment
-  fn get_gens(ck: &Self::CommitmentKey) -> Vec<<<E as Engine>::GE as PrimeCurve>::Affine>
-  where
-    E::GE: DlogGroup;
-
-  /// Returns the blinding generator of the commitment
-  fn get_blinding_gen(ck: &Self::CommitmentKey) -> <<E as Engine>::GE as PrimeCurve>::Affine
-  where
-    E::GE: DlogGroup;
+  /// Extracts the blinding generator
+  fn derand_key(ck: &Self::CommitmentKey) -> Self::DerandKey;
 
   /// Commits to the provided vector using the provided generators
-  fn zkcommit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment;
+  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment;
+
+  /// Remove given blind from commitment
+  fn derandomize(
+    dk: &Self::DerandKey,
+    commit: &Self::Commitment,
+    r: &E::Scalar,
+  ) -> Self::Commitment;
 }

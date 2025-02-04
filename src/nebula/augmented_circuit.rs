@@ -3,8 +3,8 @@
 use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
   gadgets::{
-    alloc_num_equals, alloc_scalar_as_base, alloc_zero, le_bits_to_num,
-    AllocatedRelaxedR1CSInstance,
+    alloc_num_equals, alloc_scalar_as_base, alloc_zero, conditionally_select,
+    conditionally_select_vec, le_bits_to_num, AllocatedRelaxedR1CSInstance,
   },
   traits::{
     commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
@@ -13,14 +13,8 @@ use crate::{
   Commitment,
 };
 
-use abomonation_derive::Abomonation;
-use bellpepper::gadgets::{
-  boolean::Boolean,
-  boolean_utils::{conditionally_select, conditionally_select_slice},
-  num::AllocatedNum,
-  Assignment,
-};
-use bellpepper_core::{boolean::AllocatedBit, ConstraintSystem, SynthesisError};
+use crate::frontend::gadgets::{boolean::Boolean, num::AllocatedNum, Assignment};
+use crate::frontend::{AllocatedBit, ConstraintSystem, SynthesisError};
 use ff::Field;
 use serde::{Deserialize, Serialize};
 
@@ -31,7 +25,7 @@ use crate::cyclefold::{
 
 use super::rs::StepCircuit;
 
-#[derive(Clone, Debug, PartialEq, Copy, Eq, Serialize, Deserialize, Abomonation)]
+#[derive(Clone, Debug, PartialEq, Copy, Eq, Serialize, Deserialize)]
 pub struct AugmentedCircuitParams {
   /// how many bits in each limb
   pub limb_width: usize,
@@ -69,6 +63,8 @@ where
 
   prev_IC: Option<E1::Scalar>,
   comm_omega_prev: Option<Commitment<E1>>,
+  r_i: Option<E1::Scalar>,
+  r_i_next: E1::Scalar,
 }
 
 impl<E1> AugmentedCircuitInputs<E1>
@@ -87,6 +83,8 @@ where
     W_new: Option<Commitment<E1>>,
     prev_IC: Option<E1::Scalar>,
     comm_omega_prev: Option<Commitment<E1>>,
+    r_i: Option<E1::Scalar>,
+    r_i_next: E1::Scalar,
   ) -> Self {
     Self {
       pp_digest,
@@ -100,6 +98,8 @@ where
       W_new,
       prev_IC,
       comm_omega_prev,
+      r_i,
+      r_i_next,
     }
   }
 }
@@ -151,6 +151,8 @@ where
       emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // W_new
       AllocatedNum<E1::Scalar>,                               // prev_IC
       emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // comm_omega_prev
+      AllocatedNum<E1::Scalar>,                               // r_i
+      AllocatedNum<E1::Scalar>,                               // r_i_next
     ),
     SynthesisError,
   > {
@@ -253,6 +255,13 @@ where
       self.params.n_limbs,
     )?;
 
+    let r_i = AllocatedNum::alloc(cs.namespace(|| "r_i"), || {
+      Ok(*self.inputs.get()?.r_i.as_ref().unwrap_or(&E1::Scalar::ZERO))
+    })?;
+    let r_i_next = AllocatedNum::alloc(cs.namespace(|| "r_i_next"), || {
+      Ok(self.inputs.get()?.r_i_next)
+    })?;
+
     Ok((
       pp_digest,
       i,
@@ -265,6 +274,8 @@ where
       W_new,
       prev_IC,
       comm_omega_prev,
+      r_i,
+      r_i_next,
     ))
   }
 
@@ -309,6 +320,7 @@ where
     W_new: emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>,
     arity: usize,
     prev_IC: &AllocatedNum<E1::Scalar>,
+    r_i: &AllocatedNum<E1::Scalar>,
   ) -> Result<
     (
       AllocatedRelaxedR1CSInstance<Dual<E1>, NIO_CYCLE_FOLD>,
@@ -324,7 +336,7 @@ where
     // Check u_i.x0
     let mut ro_p = <Dual<E1> as Engine>::ROCircuit::new(
       self.ro_consts.clone(),
-      3 + 2 * arity + 2 * NUM_FE_IN_EMULATED_POINT + 3,
+      4 + 2 * arity + 2 * NUM_FE_IN_EMULATED_POINT + 3,
     );
     ro_p.absorb(pp_digest);
     ro_p.absorb(i);
@@ -338,6 +350,7 @@ where
       .U
       .absorb_in_ro(cs.namespace(|| "absorb U_p"), &mut ro_p)?;
     ro_p.absorb(prev_IC);
+    ro_p.absorb(r_i);
     let hash_bits_p = ro_p.squeeze(cs.namespace(|| "primary hash bits"), NUM_HASH_BITS)?;
     let hash_p = le_bits_to_num(cs.namespace(|| "primary hash"), &hash_bits_p)?;
     let check_primary = alloc_num_equals(
@@ -349,13 +362,14 @@ where
     // Check u_i.x1
     let mut ro_c = <Dual<E1> as Engine>::ROCircuit::new(
       self.ro_consts.clone(),
-      1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS, // pp + i + W + E + u + X
+      1 + 1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS, // r_i + pp + i + W + E + u + X
     );
     ro_c.absorb(pp_digest);
     ro_c.absorb(i);
     data_c_1
       .U
       .absorb_in_ro(cs.namespace(|| "absorb U_c"), &mut ro_c)?;
+    ro_c.absorb(r_i);
     let hash_c_bits = ro_c.squeeze(cs.namespace(|| "cyclefold hash bits"), NUM_HASH_BITS)?;
     let hash_c = le_bits_to_num(cs.namespace(|| "cyclefold hash"), &hash_c_bits)?;
     let check_cyclefold = alloc_num_equals(
@@ -459,6 +473,8 @@ where
       W_new,
       prev_IC,
       comm_omega_prev,
+      r_i,
+      r_i_next,
     ) = self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
 
     let zero = alloc_zero(cs.namespace(|| "zero"));
@@ -485,6 +501,7 @@ where
       W_new,
       arity,
       &prev_IC,
+      &r_i,
     )?;
 
     let should_be_false = AllocatedBit::nor(
@@ -525,7 +542,7 @@ where
     );
 
     // Compute z_{i+1}
-    let z_input = conditionally_select_slice(
+    let z_input = conditionally_select_vec(
       cs.namespace(|| "select input to F"),
       &z_0,
       &z_i,
@@ -571,7 +588,7 @@ where
     // instance
     let mut ro_p = <Dual<E1> as Engine>::ROCircuit::new(
       self.ro_consts.clone(),
-      3 + 2 * arity + (2 * NUM_FE_IN_EMULATED_POINT + 3), // pp + IC + i + z_0 + z_next + (U_p)
+      4 + 2 * arity + (2 * NUM_FE_IN_EMULATED_POINT + 3), // pp + IC + i + z_0 + z_next + (U_p)
     );
     ro_p.absorb(&pp_digest);
     ro_p.absorb(&i_new);
@@ -583,6 +600,7 @@ where
     }
     Unew_p.absorb_in_ro(cs.namespace(|| "absorb Unew_p"), &mut ro_p)?;
     ro_p.absorb(&IC_i);
+    ro_p.absorb(&r_i_next);
 
     let hash_p_bits = ro_p.squeeze(cs.namespace(|| "hash_p_bits"), NUM_HASH_BITS)?;
     let hash_p = le_bits_to_num(cs.namespace(|| "hash_p"), &hash_p_bits)?;
@@ -591,14 +609,14 @@ where
     // instance
     let mut ro_c = <Dual<E1> as Engine>::ROCircuit::new(
       self.ro_consts,
-      1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS, // pp + i + W + E + u + X
+      1 + 1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS, // r_i + pp + i + W + E + u + X
     );
     ro_c.absorb(&pp_digest);
     ro_c.absorb(&i_new);
     Unew_c.absorb_in_ro(cs.namespace(|| "absorb Unew_c"), &mut ro_c)?;
+    ro_c.absorb(&r_i_next);
     let hash_c_bits = ro_c.squeeze(cs.namespace(|| "hash_c_bits"), NUM_HASH_BITS)?;
     let hash_c = le_bits_to_num(cs.namespace(|| "hash_c"), &hash_c_bits)?;
-
     hash_p.inputize(cs.namespace(|| "u_p.x[0] = hash_p"))?;
     hash_c.inputize(cs.namespace(|| "u_p.x[1] = hash_c"))?;
 

@@ -227,8 +227,13 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
       .par_iter()
       .map(|[Az, Bz, Cz]| {
         let (comm_Az, (comm_Bz, comm_Cz)) = rayon::join(
-          || E::CE::commit(ck, Az),
-          || rayon::join(|| E::CE::commit(ck, Bz), || E::CE::commit(ck, Cz)),
+          || E::CE::commit(ck, Az, &E::Scalar::ZERO),
+          || {
+            rayon::join(
+              || E::CE::commit(ck, Bz, &E::Scalar::ZERO),
+              || E::CE::commit(ck, Cz, &E::Scalar::ZERO),
+            )
+          },
         );
         [comm_Az, comm_Bz, comm_Cz]
       })
@@ -347,8 +352,10 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     let comms_L_row_col = polys_L_row_col
       .par_iter()
       .map(|[L_row, L_col]| {
-        let (comm_L_row, comm_L_col) =
-          rayon::join(|| E::CE::commit(ck, L_row), || E::CE::commit(ck, L_col));
+        let (comm_L_row, comm_L_col) = rayon::join(
+          || E::CE::commit(ck, L_row, &E::Scalar::ZERO),
+          || E::CE::commit(ck, L_col, &E::Scalar::ZERO),
+        );
         [comm_L_row, comm_L_col]
       })
       .collect::<Vec<_>>();

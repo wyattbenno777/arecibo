@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Main components:
 //! - `UniPoly`: an univariate dense polynomial in coefficient form (big endian),
 //! - `CompressedUniPoly`: a univariate dense polynomial, compressed (omitted linear term), in coefficient form (little endian),
@@ -111,7 +112,7 @@ impl<Scalar: PrimeField> UniPoly<Scalar> {
   }
 
   fn truncate_leading_zeros(&mut self) {
-    while self.coeffs.last().map_or(false, |c| c == &Scalar::ZERO) {
+    while self.coeffs.last() == Some(&Scalar::ZERO) {
       self.coeffs.pop();
     }
   }

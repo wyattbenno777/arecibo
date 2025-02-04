@@ -1,3 +1,4 @@
+use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use crate::traits::commitment::CommitmentTrait;
 use crate::traits::ROCircuitTrait;
 use crate::{
@@ -21,7 +22,6 @@ use crate::{
   r1cs::RelaxedR1CSInstance,
   traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
 };
-use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::Field;
 
 #[derive(Clone)]
@@ -47,11 +47,11 @@ where
     2
   }
   // TODO: complete all the checks in specified in Nebula 4.4.3
-  fn synthesize<CS: bellpepper_core::ConstraintSystem<E::Scalar>>(
+  fn synthesize<CS: ConstraintSystem<E::Scalar>>(
     &self,
     cs: &mut CS,
     z: &[AllocatedNum<E::Scalar>],
-  ) -> Result<Vec<AllocatedNum<E::Scalar>>, bellpepper_core::SynthesisError> {
+  ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
     //  check that Ci =? CIS // finalized proof starts with previous memory
     let C_i = z[0].clone();
     let C_IS = AllocatedNum::alloc(cs.namespace(|| "prev_IC"), || {

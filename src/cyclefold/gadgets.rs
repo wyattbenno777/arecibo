@@ -12,8 +12,8 @@ use crate::{
   traits::{commitment::CommitmentTrait, Engine, Group, ROCircuitTrait, ROConstantsCircuit},
 };
 
-use bellpepper::gadgets::Assignment;
-use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
+use crate::frontend::gadgets::Assignment;
+use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::Field;
 use itertools::Itertools;
 
@@ -218,13 +218,14 @@ impl<E: Engine> AllocatedCycleFoldData<E> {
 }
 
 pub mod emulated {
-  use bellpepper::gadgets::{boolean_utils::conditionally_select, Assignment};
-  use bellpepper_core::{
-    boolean::{AllocatedBit, Boolean},
+  use crate::frontend::gadgets::Assignment;
+  use crate::frontend::{
     num::AllocatedNum,
-    ConstraintSystem, SynthesisError,
+    ConstraintSystem, SynthesisError, {AllocatedBit, Boolean},
   };
 
+  use crate::gadgets::conditionally_select;
+  use crate::r1cs::RelaxedR1CSInstance;
   use crate::{
     constants::{NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT},
     gadgets::{
@@ -232,7 +233,6 @@ pub mod emulated {
       conditionally_select_bignat, f_to_nat, le_bits_to_num, BigNat,
     },
     traits::{commitment::CommitmentTrait, Engine, Group, ROCircuitTrait, ROConstantsCircuit},
-    RelaxedR1CSInstance,
   };
 
   use super::FoldingData;

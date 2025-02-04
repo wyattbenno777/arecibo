@@ -1,12 +1,11 @@
 //! This module implements various low-level gadgets
 use super::nonnative::bignat::{nat_to_limbs, BigNat};
-use crate::traits::Engine;
-use bellpepper::gadgets::Assignment;
-use bellpepper_core::{
-  boolean::{AllocatedBit, Boolean},
+use crate::frontend::gadgets::Assignment;
+use crate::frontend::{
   num::AllocatedNum,
-  ConstraintSystem, LinearCombination, SynthesisError,
+  ConstraintSystem, LinearCombination, SynthesisError, {AllocatedBit, Boolean},
 };
+use crate::traits::Engine;
 use ff::{Field, PrimeField, PrimeFieldBits};
 use num_bigint::BigInt;
 
@@ -401,4 +400,47 @@ pub fn select_num_or_one<F: PrimeField, CS: ConstraintSystem<F>>(
   );
 
   Ok(c)
+}
+
+/// If condition return a otherwise b
+pub fn conditionally_select<F: PrimeField, CS: ConstraintSystem<F>>(
+  mut cs: CS,
+  a: &AllocatedNum<F>,
+  b: &AllocatedNum<F>,
+  condition: &Boolean,
+) -> Result<AllocatedNum<F>, SynthesisError> {
+  let c = AllocatedNum::alloc(cs.namespace(|| "conditional select result"), || {
+    if *condition.get_value().get()? {
+      Ok(*a.get_value().get()?)
+    } else {
+      Ok(*b.get_value().get()?)
+    }
+  })?;
+
+  // a * condition + b*(1-condition) = c ->
+  // a * condition - b*condition = c - b
+  cs.enforce(
+    || "conditional select constraint",
+    |lc| lc + a.get_variable() - b.get_variable(),
+    |_| condition.lc(CS::one(), F::ONE),
+    |lc| lc + c.get_variable() - b.get_variable(),
+  );
+
+  Ok(c)
+}
+
+/// If condition return a otherwise b
+pub fn conditionally_select_vec<F: PrimeField, CS: ConstraintSystem<F>>(
+  mut cs: CS,
+  a: &[AllocatedNum<F>],
+  b: &[AllocatedNum<F>],
+  condition: &Boolean,
+) -> Result<Vec<AllocatedNum<F>>, SynthesisError> {
+  a.iter()
+    .zip(b.iter())
+    .enumerate()
+    .map(|(i, (a, b))| {
+      conditionally_select(cs.namespace(|| format!("select_{i}")), a, b, condition)
+    })
+    .collect::<Result<Vec<AllocatedNum<F>>, SynthesisError>>()
 }

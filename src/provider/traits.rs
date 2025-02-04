@@ -42,6 +42,9 @@ pub trait DlogGroup:
 
   /// Returns the affine coordinates (x, y, infinity) for the point
   fn to_coordinates(&self) -> (<Self as Group>::Base, <Self as Group>::Base, bool);
+
+  /// Returns a group element from a preprocessed group element
+  fn group(p: &Self::AffineExt) -> Self;
 }
 
 /// This implementation behaves in ways specific to the halo2curves suite of curves in:
@@ -98,6 +101,10 @@ macro_rules! impl_traits {
         }
         #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
         cpu_best_msm(bases, scalars)
+      }
+
+      fn group(p: &Self::AffineExt) -> Self {
+        $name::Point::from(*p)
       }
 
       fn from_label(label: &'static [u8], n: usize) -> Vec<Self::Affine> {

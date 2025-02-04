@@ -4,24 +4,19 @@
 //! Specifically, we implement sparse matrix / dense vector multiplication
 //! to compute the `A z`, `B z`, and `C z` in Nova.
 
-use std::cmp::Ordering;
-use std::collections::BTreeSet;
-
-use abomonation::Abomonation;
-use abomonation_derive::Abomonation;
 use ff::PrimeField;
 use itertools::Itertools as _;
 use rand_core::{CryptoRng, RngCore};
 use rayon::prelude::*;
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
+use std::collections::BTreeSet;
 
 /// CSR format sparse matrix, We follow the names used by scipy.
 /// Detailed explanation here: <https://stackoverflow.com/questions/52299420/scipy-csr-matrix-understand-indptr>
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Abomonation)]
-#[abomonation_bounds(where <F as PrimeField>::Repr: Abomonation)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SparseMatrix<F: PrimeField> {
-  #[abomonate_with(Vec<F::Repr>)]
   /// all non-zero values in the matrix
   pub data: Vec<F>,
   /// column indices
@@ -275,7 +270,7 @@ pub struct Iter<'a, F: PrimeField> {
   nnz: usize,
 }
 
-impl<'a, F: PrimeField> Iterator for Iter<'a, F> {
+impl<F: PrimeField> Iterator for Iter<'_, F> {
   type Item = (usize, usize, F);
 
   fn next(&mut self) -> Option<Self::Item> {

@@ -1,32 +1,35 @@
 //! This module implements a SNARK that proves the correct execution of an incremental computation
 use std::sync::Arc;
 
-use crate::cyclefold::util::{absorb_primary_relaxed_r1cs, FoldingData};
-use crate::traits::commitment::CommitmentEngineTrait;
-
 use super::augmented_circuit::{AugmentedCircuit, AugmentedCircuitInputs, AugmentedCircuitParams};
 use super::ic::IC;
-use super::nifs::{PrimaryNIFS, NIFS};
-use crate::Commitment;
+use super::nifs::{PrimaryNIFS, PrimaryRelaxedNIFS, NIFS};
+use super::traits::impl_rs_fields_trait;
+use crate::cyclefold::util::{absorb_primary_relaxed_r1cs, FoldingData};
+use crate::digest::SimpleDigestible;
+use crate::frontend::num::AllocatedNum;
+use crate::frontend::{ConstraintSystem, SynthesisError};
+use crate::nebula::traits::RecursiveSNARKFieldsTrait;
+use crate::traits::commitment::CommitmentEngineTrait;
 use crate::{
-  bellpepper::{
+  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
+  cyclefold::circuit::CycleFoldCircuit,
+  errors::NovaError,
+  frontend::{
     r1cs::{NovaShape, NovaWitness},
     shape_cs::ShapeCS,
     solver::SatisfyingAssignment,
   },
-  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
-  cyclefold::circuit::CycleFoldCircuit,
-  errors::NovaError,
   gadgets::scalar_as_base,
   r1cs::{CommitmentKeyHint, R1CSInstance, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},
-  CommitmentKey, DigestComputer, R1CSWithArity, ROConstants, SimpleDigestible,
+  CommitmentKey, DigestComputer, ROConstants,
 };
-use bellpepper_core::num::AllocatedNum;
-use bellpepper_core::{ConstraintSystem, SynthesisError};
+use crate::{Commitment, R1CSWithArity};
 use ff::Field;
 use ff::PrimeField;
 use once_cell::sync::OnceCell;
+use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 
 /// The public parameters used in the CycleFold recursive SNARK proof and verification
@@ -87,7 +90,7 @@ where
     );
     let mut cs: ShapeCS<E1> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
-    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape_and_key(ck_hint_primary);
+    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape(ck_hint_primary);
     let ck_primary = Arc::new(ck_primary);
     let circuit_shape_primary = R1CSWithArity::new(r1cs_shape_primary, F_arity_primary);
 
@@ -95,7 +98,7 @@ where
     let mut cs: ShapeCS<Dual<E1>> = ShapeCS::new();
     let circuit_cyclefold: CycleFoldCircuit<E1> = CycleFoldCircuit::default();
     let _ = circuit_cyclefold.synthesize(&mut cs);
-    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape_and_key(ck_hint_cyclefold);
+    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape(ck_hint_cyclefold);
     let ck_cyclefold = Arc::new(ck_cyclefold);
     let circuit_shape_cyclefold = R1CSWithArity::new(r1cs_shape_cyclefold, 0);
 
@@ -183,6 +186,9 @@ where
 
   // outputs
   pub(in crate::nebula) zi: Vec<E1::Scalar>,
+
+  // makes Nova simulataable
+  r_i: E1::Scalar,
 }
 
 impl<E1> RecursiveSNARK<E1>
@@ -212,6 +218,7 @@ where
     //
     // Get the new instance-witness pair to be folded into running instance
     let mut cs_primary = SatisfyingAssignment::<E1>::new();
+    let r_i = E1::Scalar::random(&mut OsRng);
     let inputs_primary: AugmentedCircuitInputs<E1> = AugmentedCircuitInputs::new(
       scalar_as_base::<E1>(pp.digest()),
       <Dual<E1> as Engine>::Base::from(0u64),
@@ -224,6 +231,8 @@ where
       None,
       None,
       None,
+      None,
+      r_i,
     );
     let circuit_primary = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
@@ -267,6 +276,9 @@ where
       // running Cyclefold instance, witness pair
       r_U_cyclefold,
       r_W_cyclefold,
+
+      // makes Nova simulatable
+      r_i,
     })
   }
 
@@ -327,10 +339,8 @@ where
     let data_c_W = FoldingData::new(U_secondary_temp, nifs.l_u_cyclefold_W, nifs.comm_T2);
 
     // 2. compute (ui+1, wi+1) ← trace(F ′, (vk, Ui, ui, (i, z0, zi), ωi, T )),
-    let mut cs_primary = SatisfyingAssignment::<E1>::with_capacity(
-      pp.circuit_shape_primary.r1cs_shape.num_io + 1,
-      pp.circuit_shape_primary.r1cs_shape.num_vars,
-    );
+    let mut cs_primary = SatisfyingAssignment::<E1>::new();
+    let r_next = E1::Scalar::random(&mut OsRng);
     let inputs_primary: AugmentedCircuitInputs<E1> = AugmentedCircuitInputs::new(
       scalar_as_base::<E1>(pp.digest()),
       <Dual<E1> as Engine>::Base::from(self.i as u64),
@@ -343,6 +353,8 @@ where
       Some(W_new),
       Some(self.prev_IC),
       Some(self.comm_omega_prev),
+      Some(self.r_i),
+      r_next,
     );
     let circuit_primary: AugmentedCircuit<'_, E1, C> = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
@@ -377,7 +389,7 @@ where
 
     // Update number of steps proven
     self.i += 1;
-
+    self.r_i = r_next;
     Ok(())
   }
 
@@ -414,7 +426,7 @@ where
     let (hash_primary, hash_cyclefold) = {
       let mut hasher_p = <Dual<E1> as Engine>::RO::new(
         pp.ro_consts.clone(),
-        3 + 2 * pp.F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3, // (digest, num_steps, prev_IC) + 2 * arity "(z0, zi)" + U
+        4 + 2 * pp.F_arity_primary + 2 * NUM_FE_IN_EMULATED_POINT + 3, // (digest, num_steps, prev_IC, r_i) + 2 * arity "(z0, zi)" + U
       );
       hasher_p.absorb(pp.digest());
       hasher_p.absorb(E1::Scalar::from(num_steps as u64));
@@ -426,17 +438,18 @@ where
       }
       absorb_primary_relaxed_r1cs::<E1, Dual<E1>>(&self.r_U_primary, &mut hasher_p);
       hasher_p.absorb(self.prev_IC);
+      hasher_p.absorb(self.r_i);
       let hash_primary = hasher_p.squeeze(NUM_HASH_BITS);
 
       let mut hasher_c = <Dual<E1> as Engine>::RO::new(
         pp.ro_consts.clone(),
-        1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
+        1 + 1 + 1 + 3 + 3 + 1 + NIO_CYCLE_FOLD * BN_N_LIMBS,
       );
       hasher_c.absorb(pp.digest());
       hasher_c.absorb(E1::Scalar::from(num_steps as u64));
       self.r_U_cyclefold.absorb_in_ro(&mut hasher_c);
+      hasher_c.absorb(self.r_i);
       let hash_cyclefold = hasher_c.squeeze(NUM_HASH_BITS);
-
       (hash_primary, hash_cyclefold)
     };
 
@@ -553,10 +566,14 @@ where
       RelaxedR1CSInstance<E1>,
       RelaxedR1CSWitness<E1>,
       PrimaryNIFS<E1>,
+      PrimaryRelaxedNIFS<E1>,
+      E1::Scalar,
+      E1::Scalar,
+      RelaxedR1CSInstance<E1>,
     ),
     NovaError,
   > {
-    let (nifs, (U, W), _) = PrimaryNIFS::prove(
+    let (nifs, (U_f, W_f), _) = PrimaryNIFS::prove(
       &*pp.ck_primary,
       &pp.ro_consts,
       &pp.digest(),
@@ -564,7 +581,45 @@ where
       (&self.r_U_primary, &self.r_W_primary),
       (&self.l_u_primary, &self.l_w_primary),
     )?;
-    Ok((U, W, nifs))
+
+    // Fold random instance and witness
+    let (random_U, random_W) = pp
+      .circuit_shape_primary
+      .r1cs_shape
+      .sample_random_instance_witness(&pp.ck_primary)?;
+    let (nifs_r, (U, W), _) = PrimaryRelaxedNIFS::prove(
+      &*pp.ck_primary,
+      &pp.ro_consts,
+      &pp.digest(),
+      &pp.circuit_shape_primary.r1cs_shape,
+      (&U_f, &W_f),
+      (&random_U, &random_W),
+    )?;
+
+    let (derandom_W, wit_blind, err_blind) = W.derandomize();
+    let derandom_U = U.derandomize(&E1::CE::derand_key(&pp.ck_primary), &wit_blind, &err_blind);
+    Ok((
+      derandom_U, derandom_W, nifs, nifs_r, wit_blind, err_blind, random_U,
+    ))
+  }
+
+  /// Get the secondary curve part of the running instance
+  pub fn secondary_rs_part_derandomized(
+    &self,
+    pp: &PublicParams<E1>,
+  ) -> (
+    RelaxedR1CSInstance<Dual<E1>>,
+    RelaxedR1CSWitness<Dual<E1>>,
+    <Dual<E1> as Engine>::Scalar,
+    <Dual<E1> as Engine>::Scalar,
+  ) {
+    let (derandom_W, wit_blind, err_blind) = self.r_W_cyclefold.derandomize();
+    let derandom_U = self.r_U_cyclefold.derandomize(
+      &<Dual<E1> as Engine>::CE::derand_key(&pp.ck_cyclefold),
+      &wit_blind,
+      &err_blind,
+    );
+    (derandom_U, derandom_W, wit_blind, err_blind)
   }
 }
 
@@ -592,18 +647,18 @@ pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
   where
     E: Engine<Scalar = F>,
   {
-    E::CE::commit(ck, &self.non_deterministic_advice())
+    E::CE::commit(ck, &self.non_deterministic_advice(), &E::Scalar::ZERO)
   }
 }
 
+impl_rs_fields_trait!(RecursiveSNARK);
+
 #[cfg(test)]
 mod test {
-  use std::marker::PhantomData;
-
-  use bellpepper_core::num::AllocatedNum;
-
   use super::*;
+  use crate::frontend::num::AllocatedNum;
   use crate::{provider::Bn256EngineIPA, traits::snark::default_ck_hint};
+  use std::marker::PhantomData;
 
   #[derive(Clone)]
   struct SquareCircuit<F> {
