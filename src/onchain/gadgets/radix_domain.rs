@@ -1,4 +1,4 @@
-use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
+use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::PrimeField;
 
 #[derive(Clone, Debug)]

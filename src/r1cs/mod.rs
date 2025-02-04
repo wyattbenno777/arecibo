@@ -644,6 +644,7 @@ impl<E: Engine> R1CSWitness<E> {
   pub fn default(S: &R1CSShape<E>) -> Self {
     Self {
       W: vec![E::Scalar::ZERO; S.num_vars],
+      r_W: E::Scalar::ZERO,
     }
   }
 

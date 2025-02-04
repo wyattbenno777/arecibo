@@ -1,9 +1,9 @@
 //! Nova verifier
 use askama::Template;
-use bellpepper_core::num::AllocatedNum;
+use crate::frontend::num::AllocatedNum;
 
-use super::g16;
-use super::g16::Groth16Verifier;
+use super::groth16;
+use super::groth16::Groth16Verifier;
 use super::kzg;
 use super::kzg::KZG10Verifier;
 use crate::onchain::utils::HeaderInclusion;
@@ -154,7 +154,7 @@ impl NovaCycleFoldVerifierKey {
     /// Create a new NovaCycleFoldVerifierKey
     pub fn new(
         pp_hash: Fr,
-        vkey_g16: g16::VerifyingKey<Bn256>,
+        vkey_g16: groth16::VerifyingKey,
         vkey_kzg: kzg::VerifierKey<Bn256>,
         crs_points: Vec<G1Affine>,
         z_len: usize,

@@ -12,7 +12,7 @@ use crate::{
   r1cs::RelaxedR1CSInstance,
   traits::{AbsorbInROTrait, CurveCycleEquipped,  ROTrait, ROCircuitTrait},
 };
-use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
+use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::PrimeField;
 use radix_domain::{AllocatedEvaluations, AllocatedRadix2Domain};
 
@@ -36,20 +36,21 @@ impl KZGChallengesGadget {
     (rw, re)
   }
 
-  pub fn get_challenges_gadget<CS, E: CurveCycleEquipped>(
+  pub fn get_challenges_gadget<CS, RO, E: CurveCycleEquipped>(
     mut cs: CS,
-    ro: &mut E::ROCircuit,
+    ro: &mut RO,
     U_i: AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
   ) -> Result<(AllocatedNum<E::Scalar>, AllocatedNum<E::Scalar>), SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
+    RO: ROCircuitTrait<E::Scalar>,
   {
     U_i.comm_W.absorb_in_ro(cs.namespace(|| "absorb_W"), ro)?;
-    let rw = ROCircuitTrait::squeeze(ro, cs.namespace(|| "squeeze_W"), 128)?;
+    let rw = ro.squeeze(cs.namespace(|| "squeeze_W"), 128)?;
     let alloc_rw = le_bits_to_num(cs.namespace(|| "bits_to_num"), &rw)?;
 
     U_i.comm_E.absorb_in_ro(cs.namespace(|| "absorb_E"), ro)?;
-    let re = ROCircuitTrait::squeeze(ro, cs.namespace(|| "squeeze_E"), 128)?;
+    let re = ro.squeeze(cs.namespace(|| "squeeze_E"), 128)?;
     let alloc_re = le_bits_to_num(cs.namespace(|| "bits_to_num"), &re)?;
     Ok((alloc_rw, alloc_re))
   }
