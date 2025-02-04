@@ -302,7 +302,7 @@ mod tests {
 
     use halo2curves::bn256  ::{G1Affine, G1, Fr};
     use ff::Field;
-    use rand_core::SeedableRng;
+    use rand::SeedableRng;
     use rand_xorshift::XorShiftRng;
 
     fn multiscalar_naive(
