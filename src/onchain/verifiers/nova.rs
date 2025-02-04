@@ -22,7 +22,7 @@ pub struct NovaCycleFoldVerifierKey {
     z_len: usize,
 }
 
-// TODO: Remove this nasty hack
+// TODO: Remove this hack to display Fr
 #[derive(Default, Serialize, Deserialize, Debug, Clone)]
 struct DisplayFr(Fr);
 

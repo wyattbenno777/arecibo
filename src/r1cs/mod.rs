@@ -640,6 +640,13 @@ impl<E: Engine> R1CSResult<E> {
 }
 
 impl<E: Engine> R1CSWitness<E> {
+  /// Produces a default `R1CSWitness` given an `R1CSShape`
+  pub fn default(S: &R1CSShape<E>) -> Self {
+    Self {
+      W: vec![E::Scalar::ZERO; S.num_vars],
+    }
+  }
+
   /// A method to create a witness object using a vector of scalars
   pub fn new(S: &R1CSShape<E>, W: Vec<E::Scalar>) -> Result<Self, NovaError> {
     if S.num_vars != W.len() {
@@ -659,6 +666,13 @@ impl<E: Engine> R1CSWitness<E> {
 }
 
 impl<E: Engine> R1CSInstance<E> {
+  pub fn default(S: &R1CSShape<E>) -> Self {
+    let comm_W = Commitment::<E>::default();
+    Self {
+      comm_W,
+      X: vec![E::Scalar::ZERO; S.num_io],
+    }
+  }
   /// A method to create an instance object using constituent elements
   pub fn new(
     S: &R1CSShape<E>,

@@ -3,6 +3,7 @@
 //! Most of the code is ported from https://github.com/argumentcomputer/bellpepper.
 
 pub mod gadgets;
+pub mod groth16;
 
 mod constraint_system;
 mod lc;

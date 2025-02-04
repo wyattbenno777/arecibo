@@ -1,8 +1,12 @@
 #![allow(non_snake_case)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(unused_mut)]
 
 
 use crate::gadgets::le_bits_to_num;
 use crate::onchain::utils::{evaluate_polynomial, lagrange_interpolation, nth_root_of_unity};
+use crate::traits::Dual;
 use crate::{
   cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance,
   r1cs::RelaxedR1CSInstance,
@@ -35,10 +39,10 @@ impl KZGChallengesGadget {
   pub fn get_challenges_gadget<CS, E: CurveCycleEquipped>(
     mut cs: CS,
     ro: &mut E::ROCircuit,
-    U_i: AllocatedEmulRelaxedR1CSInstance<E>,
-  ) -> Result<(AllocatedNum<E::Base>, AllocatedNum<E::Base>), SynthesisError>
+    U_i: AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
+  ) -> Result<(AllocatedNum<E::Scalar>, AllocatedNum<E::Scalar>), SynthesisError>
   where
-    CS: ConstraintSystem<E::Base>,
+    CS: ConstraintSystem<E::Scalar>,
   {
     U_i.comm_W.absorb_in_ro(cs.namespace(|| "absorb_W"), ro)?;
     let rw = ROCircuitTrait::squeeze(ro, cs.namespace(|| "squeeze_W"), 128)?;
@@ -66,17 +70,17 @@ impl EvalGadget {
 
   pub fn evaluate_gadget<CS, E: CurveCycleEquipped>(    
     mut cs: CS, 
-    mut v: Vec<AllocatedNum<E::Base>>, 
-    point: &AllocatedNum<E::Base>
-  ) -> Result<AllocatedNum<E::Base>, SynthesisError> 
+    mut v: Vec<AllocatedNum<E::Scalar>>, 
+    point: &AllocatedNum<E::Scalar>
+  ) -> Result<AllocatedNum<E::Scalar>, SynthesisError> 
   where
-    CS: ConstraintSystem<E::Base> 
+    CS: ConstraintSystem<E::Scalar> 
   {
-    let alloc_zero = AllocatedNum::alloc(&mut cs, || Ok(E::Base::from(0)))?;
+    let alloc_zero = AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(0)))?;
     v.resize(v.len().next_power_of_two(), alloc_zero);
     let n = v.len() as usize;
-    let gen = nth_root_of_unity::<E::Base>(n).ok_or(SynthesisError::PolynomialDegreeTooLarge)?; // TODO: Use a better error
-    let alloc_one = AllocatedNum::alloc(&mut cs, || Ok(E::Base::from(1)))?;
+    let gen = nth_root_of_unity::<E::Scalar>(n).ok_or(SynthesisError::PolynomialDegreeTooLarge)?; // TODO: Use a better error
+    let alloc_one = AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(1)))?;
     let log2_v = usize::BITS - v.len().leading_zeros() - 1;
     let domain = AllocatedRadix2Domain::new(&mut cs, gen, log2_v as u64, alloc_one)?;
 

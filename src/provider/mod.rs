@@ -35,6 +35,7 @@ use bn256_grumpkin::bn256;
 use halo2curves::bn256::Bn256;
 use pasta_curves::{pallas, vesta};
 use serde::{Deserialize, Serialize};
+use pairing::{MultiMillerLoop, MillerLoopResult};
 
 use self::kzg_commitment::KZGCommitmentEngine;
 
@@ -92,6 +93,26 @@ impl Engine for Bn256EngineKZG {
   type TE = Keccak256Transcript<Self>;
   type CE = KZGCommitmentEngine<Bn256>;
 }
+
+impl MultiMillerLoop for Bn256EngineKZG {
+  type G2Prepared = Self::G2;
+  type Result = MillerLoopResult;
+
+  fn multi_miller_loop(terms: &[(&Self::GE, &Self::G2Prepared)]) -> Self::Result {
+      // Convert the terms into the format expected by halo2curves' multi_miller_loop
+      let terms: Vec<(G1Affine, G2Prepared)> = terms
+          .iter()
+          .map(|(p, q)| ((*p).clone(), (*q).clone()))
+          .collect();
+
+      // Call the multi_miller_loop function from halo2curves
+      let result = multi_miller_loop(&terms);
+
+      // Return the result as a MillerLoopResult
+      MillerLoopResult(result)
+  }
+}
+
 
 impl CurveCycleEquipped for Bn256EngineIPA {
   type Secondary = GrumpkinEngine;

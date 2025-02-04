@@ -19,6 +19,7 @@ use crate::{
   traits::{CurveCycleEquipped, Dual, Engine, ROTrait, ROConstants, ROCircuitTrait},
 };
 use bellpepper_core::boolean::AllocatedBit;
+use bellperson::Circuit;
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use super::gadgets::{KZGChallengesGadget, EvalGadget};
 
@@ -26,7 +27,6 @@ use super::gadgets::{KZGChallengesGadget, EvalGadget};
 pub struct DeciderCircuit<E>
 where
   E: CurveCycleEquipped,
-  // E::GE: DlogGroup<ScalarExt = E::Scalar>,
 {
   /// Constraint system of the Augmented Function circuit
   pub arith: R1CSShape<E>,
@@ -87,7 +87,6 @@ fn hash_U_i<E: CurveCycleEquipped, CS: ConstraintSystem<E::Scalar>>(
 impl<E> DeciderCircuit<E>
 where
   E: CurveCycleEquipped,
-  // E::GE: DlogGroup<ScalarExt = E::Scalar>,
 {
   pub fn default(
     arith: &R1CSShape<E>,
@@ -171,10 +170,14 @@ where
     })
   }
 
-  pub fn synthesize<CS: ConstraintSystem<E::Scalar>>(
-    &self,
+}
+
+impl<E> Circuit<E::Scalar> for DeciderCircuit<E> 
+  where
+    E: CurveCycleEquipped {
+  fn synthesize<CS: ConstraintSystem<E::Scalar>>(
+    self,
     cs: &mut CS,
-    z: &[AllocatedNum<E::Scalar>],
   ) -> Result<(), SynthesisError> {
     // let arith = AllocatedR1CSInstance::alloc(cs, Some(self.arith))?;
 

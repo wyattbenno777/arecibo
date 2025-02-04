@@ -11,11 +11,11 @@ pub const GPL3_SDPX_IDENTIFIER: &str = "// SPDX-License-Identifier: GPL-3.0";
 /// MIT SDPX License identifier
 pub const MIT_SDPX_IDENTIFIER: &str = "// SPDX-License-Identifier: MIT";
 
-pub mod g16;
+pub mod groth16;
 pub mod kzg;
 pub mod nova;
 
-pub use g16::Groth16VerifierKey;
+pub use groth16::Groth16VerifierKey;
 pub use kzg::KZG10VerifierKey;
 
 use serde::{Serialize, de::DeserializeOwned};

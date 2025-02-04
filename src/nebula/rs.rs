@@ -163,29 +163,29 @@ where
   E1: CurveCycleEquipped,
 {
   // Input
-  z0: Vec<E1::Scalar>,
+  pub(crate) z0: Vec<E1::Scalar>,
 
   // primary circuit data
-  r_W_primary: RelaxedR1CSWitness<E1>,
+  pub(crate) r_W_primary: RelaxedR1CSWitness<E1>,
   pub(crate) r_U_primary: RelaxedR1CSInstance<E1>,
-  l_w_primary: R1CSWitness<E1>,
+  pub(crate) l_w_primary: R1CSWitness<E1>,
   pub(crate) l_u_primary: R1CSInstance<E1>,
 
   // Number of recursive steps proven
-  i: usize,
+  pub(crate) i: usize,
 
   // incremental commitment of previous invokation of step circuit
-  pub(in crate::nebula) prev_IC: E1::Scalar,
+  pub(crate) prev_IC: E1::Scalar,
 
   // commitment to non-deterministic advice
-  pub(in crate::nebula) comm_omega_prev: Commitment<E1>, // supposed to be contained in self.l_u_primary // corresponds to comm_W in self.l_u_primary
+  pub(crate) comm_omega_prev: Commitment<E1>, // supposed to be contained in self.l_u_primary // corresponds to comm_W in self.l_u_primary
 
   // cyclefold circuit data
-  r_W_cyclefold: RelaxedR1CSWitness<Dual<E1>>,
-  pub(in crate::nebula) r_U_cyclefold: RelaxedR1CSInstance<Dual<E1>>,
+  pub(crate) r_W_cyclefold: RelaxedR1CSWitness<Dual<E1>>,
+  pub(crate) r_U_cyclefold: RelaxedR1CSInstance<Dual<E1>>,
 
   // outputs
-  pub(in crate::nebula) zi: Vec<E1::Scalar>,
+  pub(in crate) zi: Vec<E1::Scalar>,
 
   // makes Nova simulataable
   r_i: E1::Scalar,
