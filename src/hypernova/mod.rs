@@ -1,1 +1,1 @@
-//! Implementation of Hypernova
+//! Implementation of commitment-carrying Hypernova
