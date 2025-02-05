@@ -76,6 +76,38 @@ impl<F: Field> DensePolynomial<F> {
             self.coeffs.pop();
         }
     }
+
+    pub fn quot_rem(self, divisor: &DensePolynomial<F>) -> (DensePolynomial<F>, DensePolynomial<F>) {
+        if self.is_zero() {
+            (DensePolynomial::zero(), self)
+        } else if divisor.is_zero() {
+            panic!("Dividing by zero polynomial")
+        } else if self.degree() < divisor.degree() {
+            (DensePolynomial::zero(), self)
+        } else {
+            // Now we know that self.degree() >= divisor.degree();
+            let mut quotient = vec![F::ZERO; self.degree() - divisor.degree() + 1];
+            let mut remainder: DensePolynomial<F> = self.clone();
+            // Can unwrap here because we know self is not zero.
+            let divisor_leading_inv = divisor.coeffs.last().unwrap().invert().unwrap();
+            while !remainder.is_zero() && remainder.degree() >= divisor.degree() {
+                let mut cur_q_coeff = *remainder.coeffs.last().unwrap();
+                cur_q_coeff.mul_assign(&divisor_leading_inv);
+                let cur_q_degree = remainder.degree() - divisor.degree();
+                quotient[cur_q_degree] = cur_q_coeff;
+
+                for (i, div_coeff) in divisor.coeffs.iter().enumerate() {
+                    let mut x = cur_q_coeff;
+                    x.mul_assign(div_coeff);
+                    remainder.coeffs[cur_q_degree + i].sub_assign(&x);
+                }
+                while let Some(true) = remainder.coeffs.last().map(|c| c.is_zero().into()) {
+                    remainder.coeffs.pop();
+                }
+            }
+            (DensePolynomial::from_coeffs(quotient), remainder)
+        }
+    }
 }
 
 impl<'a, 'b, F: Field> Sub<&'a DensePolynomial<F>> for &'b DensePolynomial<F> {
@@ -113,34 +145,6 @@ impl<'a, 'b, F: Field> Div<&'a DensePolynomial<F>> for &'b DensePolynomial<F> {
     type Output = DensePolynomial<F>;
 
     fn div(self, divisor: &'a DensePolynomial<F>) -> DensePolynomial<F> {
-        if self.is_zero() {
-            DensePolynomial::zero()
-        } else if divisor.is_zero() {
-            panic!("Dividing by zero polynomial")
-        } else if self.degree() < divisor.degree() {
-            DensePolynomial::zero()
-        } else {
-            // Now we know that self.degree() >= divisor.degree();
-            let mut quotient = vec![F::ZERO; self.degree() - divisor.degree() + 1];
-            let mut remainder: DensePolynomial<F> = self.clone();
-            // Can unwrap here because we know self is not zero.
-            let divisor_leading_inv = divisor.coeffs.last().unwrap().invert().unwrap();
-            while !remainder.is_zero() && remainder.degree() >= divisor.degree() {
-                let mut cur_q_coeff = *remainder.coeffs.last().unwrap();
-                cur_q_coeff.mul_assign(&divisor_leading_inv);
-                let cur_q_degree = remainder.degree() - divisor.degree();
-                quotient[cur_q_degree] = cur_q_coeff;
-
-                for (i, div_coeff) in divisor.coeffs.iter().enumerate() {
-                    let mut x = cur_q_coeff;
-                    x.mul_assign(div_coeff);
-                    remainder.coeffs[cur_q_degree + i].sub_assign(&x);
-                }
-                while let Some(true) = remainder.coeffs.last().map(|c| c.is_zero().into()) {
-                    remainder.coeffs.pop();
-                }
-            }
-            DensePolynomial::from_coeffs(quotient)
-        }
+        self.clone().quot_rem(divisor).0
     }
 }

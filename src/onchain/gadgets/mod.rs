@@ -3,15 +3,12 @@
 #![allow(unused_variables)]
 #![allow(unused_mut)]
 
-
 use crate::gadgets::le_bits_to_num;
 use crate::onchain::utils::{evaluate_polynomial, lagrange_interpolation, nth_root_of_unity};
 use crate::traits::Dual;
-use crate::{
-  cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance,
-  r1cs::RelaxedR1CSInstance,
-  traits::{AbsorbInROTrait, CurveCycleEquipped,  ROTrait, ROCircuitTrait},
-};
+use crate::cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance;
+use crate::r1cs::RelaxedR1CSInstance;
+use crate::traits::{AbsorbInROTrait, CurveCycleEquipped, ROTrait, ROCircuitTrait};
 use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::PrimeField;
 use radix_domain::{AllocatedEvaluations, AllocatedRadix2Domain};

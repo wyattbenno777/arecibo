@@ -12,7 +12,7 @@ mod accumulator;
 mod commit;
 mod inner_product;
 mod msm;
-mod poly;
+pub mod poly;
 mod proof;
 mod prove;
 mod srs;
