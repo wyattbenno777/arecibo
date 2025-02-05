@@ -139,8 +139,8 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for KeypairAssembly<Scalar> {
                 match index {
                     Variable(Index::Input(id)) => inputs[id].push((*coeff, this_constraint)),
                     Variable(Index::Aux(id)) => aux[id].push((*coeff, this_constraint)),
-                    Variable(Index::Precommitted(id)) => unreachable!(),
-                    Variable(Index::Precommitted2(id)) => unreachable!(),
+                    Variable(Index::Precommitted(_id)) => unreachable!(),
+                    Variable(Index::Precommitted2(_id)) => unreachable!(),
                 }
             }
         }

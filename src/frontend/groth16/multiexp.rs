@@ -7,7 +7,6 @@ use ff::PrimeField;
 use group::prime::PrimeCurveAffine;
 
 use crate::frontend::gpu;
-pub use ec_gpu_gen::multiexp_cpu::DensityTracker;
 
 /// Perform multi-exponentiation. The caller is responsible for ensuring the
 /// query size is the same as the number of exponents.

@@ -232,7 +232,6 @@ impl<E: Engine> Proof<E> {
 
 // As most tests are about the parameter serialization, hence it doesn't matter for SupraSeal, as
 // there the parameter handling is in their C++ code base.
-#[cfg(not(feature = "cuda-supraseal"))]
 #[cfg(test)]
 mod test_with_bls12_381 {
     use std::ops::MulAssign;

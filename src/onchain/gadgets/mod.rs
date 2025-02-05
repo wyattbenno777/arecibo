@@ -37,7 +37,7 @@ impl KZGChallengesGadget {
   }
 
   pub fn get_challenges_gadget<CS, RO, E: CurveCycleEquipped>(
-    mut cs: CS,
+    cs: &mut CS,
     ro: &mut RO,
     U_i: AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
   ) -> Result<(AllocatedNum<E::Scalar>, AllocatedNum<E::Scalar>), SynthesisError>

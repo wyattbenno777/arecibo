@@ -18,9 +18,11 @@ use crate::{
   r1cs::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{CurveCycleEquipped, Dual, Engine, ROTrait, ROConstants, ROCircuitTrait},
 };
-use bellpepper_core::boolean::AllocatedBit;
-use bellperson::Circuit;
-use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
+use crate::frontend::{
+  AllocatedBit,
+  num::AllocatedNum, 
+  Circuit,
+  ConstraintSystem, SynthesisError};
 use super::gadgets::{KZGChallengesGadget, EvalGadget};
 
 // TODO: Add ZK
@@ -282,24 +284,24 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
 
     // Step 7.1: Check correct computation of the KZG challenges.
     //           - cE ≡ H(E.{x, y}), cW ≡ H(W.{x, y}).
-    // let (alloc_rw, alloc_re) = KZGChallengesGadget::get_challenges_gadget(
-    //   cs, 
-    //   // &mut ro, 
-    //   U_i1)?;
+    let (alloc_rw, alloc_re) = KZGChallengesGadget::get_challenges_gadget::<CS, _, E>(
+      cs, 
+      &mut ro, 
+      U_i1)?;
 
-    // cs.enforce(
-    //   || "cW ≡ H(W.{x, y})",
-    //   |lc| lc,
-    //   |lc| lc,
-    //   |lc| lc + kzg_challenges[0].get_variable() - alloc_rw.get_variable(),
-    // );
+    cs.enforce(
+      || "cW ≡ H(W.{x, y})",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + kzg_challenges[0].get_variable() - alloc_rw.get_variable(),
+    );
 
-    // cs.enforce(
-    //   || "cE ≡ H(E.{x, y})",
-    //   |lc| lc,
-    //   |lc| lc,
-    //   |lc| lc + kzg_challenges[1].get_variable() - alloc_re.get_variable(),
-    // );
+    cs.enforce(
+      || "cE ≡ H(E.{x, y})",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + kzg_challenges[1].get_variable() - alloc_re.get_variable(),
+    );
 
     // Step 7.2: Verify that the KZG evaluations are correct:
     for ((v, c), e) in vec![W_i1.W]

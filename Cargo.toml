@@ -83,6 +83,7 @@ asm = ["halo2curves/asm"]
 portable = ["grumpkin-msm/portable"]
 cuda = ["grumpkin-msm/cuda"]
 flamegraph = ["pprof/flamegraph", "pprof/criterion"]
+opencl = []
 
 [profile.dev-ci]
 inherits = "dev"
