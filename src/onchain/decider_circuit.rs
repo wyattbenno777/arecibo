@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 #![allow(unused_mut)]
+use crate::constants::{BN_LIMB_WIDTH, BN_N_LIMBS};
 use crate::frontend::gpu::GpuName;
 use crate::gadgets::le_bits_to_num;
 use crate::provider::traits::DlogGroup;
@@ -214,12 +215,11 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
       .collect::<Result<Vec<_>, SynthesisError>>()?;
 
     let u_i: AllocatedEmulR1CSInstance<Dual<E>> = AllocatedEmulR1CSInstance::alloc(
-      cs.namespace(|| "u_i"), Some(&self.u_i), 1, 2)?;
+      cs.namespace(|| "u_i"), Some(&self.u_i), BN_LIMB_WIDTH, BN_N_LIMBS)?;
     let U_i: AllocatedEmulRelaxedR1CSInstance<Dual<E>> = AllocatedEmulRelaxedR1CSInstance::alloc(
       cs.namespace(|| "U_i"),
       Some(&self.U_i),
-      1, // TODO: Pass a right number
-      2, // TODO: Pass a right number
+      BN_LIMB_WIDTH, BN_N_LIMBS
     )?;
     // here (U_i1, W_i1) = NIFS.P( (U_i,W_i), (u_i,w_i))
     // let U_i1_commitments = Vec::<NonNativeAffineVar<C1>>::new_input(cs.clone(), || {
@@ -227,20 +227,22 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
     // })?;
 
     let U_i1: AllocatedEmulRelaxedR1CSInstance<Dual<E>> = AllocatedEmulRelaxedR1CSInstance::alloc(
-      cs.namespace(|| "U_i1"), Some(&self.U_i1), 1, 2)?;
+      cs.namespace(|| "U_i1"), Some(&self.U_i1), BN_LIMB_WIDTH, BN_N_LIMBS)?;
     let W_i1: AllocatedEmulRelaxedR1CSWitness<Dual<E>> = AllocatedEmulRelaxedR1CSWitness::alloc(
       cs.namespace(|| "W_i1"), Some(&self.W_i1))?;
 
     // U_i1.get_commitments().enforce_equal(&U_i1_commitments)?;
 
-    let cf_U_i: AllocatedRelaxedR1CSInstance<Dual<E>, 2> = AllocatedRelaxedR1CSInstance::alloc(
-      cs.namespace(|| "cf_U_i"), Some(&self.cf_U_i), 1, 2)?;
+    // let cf_U_i: AllocatedRelaxedR1CSInstance<Dual<E>, BN_N_LIMBS> = AllocatedRelaxedR1CSInstance::alloc(
+    //   cs.namespace(|| "cf_U_i"), Some(&self.cf_U_i), BN_LIMB_WIDTH, BN_N_LIMBS)?;
 
     let kzg_challenges: Vec<AllocatedNum<E::Scalar>> = self
       .kzg_challenges
       .iter()
       .map(|x| AllocatedNum::alloc(cs.namespace(|| "kzg_challenges"), || Ok(*x)))
       .collect::<Result<Vec<_>, SynthesisError>>()?;
+
+    println!("kzg_challenges len: {:?}", kzg_challenges.len());
 
     let kzg_evaluations: Vec<AllocatedNum<E::Scalar>> = self
       .kzg_evaluations
@@ -250,8 +252,11 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
 
       let mut ro = <Dual<E> as Engine>::ROCircuit::new(
         ROConstantsCircuit::<Dual<E>>::default(),
-        19,
+        23 + z_0.len() + z_i.len(),
       );
+
+    println!("z_0 len: {:?}", z_0.len());
+    println!("z_i len: {:?}", z_i.len());
   
     // Step 1: Enforce U_{n+1} and W_{n+1} satisfy r1cs
     // Nova has no need for this, since we are checking if an r1cs relation 
@@ -298,11 +303,11 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
     //           - cE ≡ H(E.{x, y}), cW ≡ H(W.{x, y}).
     let mut ro_1 = <Dual<E> as Engine>::ROCircuit::new(
       ROConstantsCircuit::<Dual<E>>::default(),
-      5,
+      9,
     );
     let mut ro_2 = <Dual<E> as Engine>::ROCircuit::new(
       ROConstantsCircuit::<Dual<E>>::default(),
-      5,
+      9,
     );
     let (alloc_rw, alloc_re) = KZGChallengesGadget::get_challenges_gadget::<CS, _, E>(
       cs, 

@@ -57,7 +57,7 @@ impl Decider {
       &pp.circuit_shape_cyclefold.r1cs_shape,
       ROConstants::<Bn256EngineKZG>::default(),
       pp_hash,
-      2, // TODO: Set correct value
+      1, 
       // TODO: Set correct value
       2, // Nebula's running CommittedInstance contains 2 commitments
       (&*pp.ck_primary, &*pp.ck_cyclefold),

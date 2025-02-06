@@ -495,13 +495,24 @@ where
         &worker,
     );
 
-    // Don't allow any elements be unconstrained, so that
-    // the L query is always fully dense.
-    // for e in l_affine.iter() {
-    //     if e.is_identity().into() {
-    //         return Err(SynthesisError::UnconstrainedVariable);
-    //     }
-    // }
+    // Count and log positions of identity elements in l_affine
+    let mut identity_positions = Vec::new();
+    let mut identity_count = 0;
+    for (i, e) in l_affine.iter().enumerate() {
+        if e.is_identity().into() {
+            identity_positions.push(i);
+            identity_count += 1;
+        }
+    }
+    println!("Found {} identity elements among {} elements", identity_count, l_affine.len());
+    for e in l_affine.iter() {
+        if e.is_identity().into() {
+            // println!("l_affine identity: {:?}", e);
+            return Err(SynthesisError::UnconstrainedVariable);
+        } else {
+            // println!("l_affine not identity: {:?}", e);
+        }
+    }
 
     let g1 = g1.to_affine();
     let g2 = g2.to_affine();
