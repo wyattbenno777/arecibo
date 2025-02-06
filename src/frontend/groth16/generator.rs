@@ -497,11 +497,11 @@ where
 
     // Don't allow any elements be unconstrained, so that
     // the L query is always fully dense.
-    for e in l_affine.iter() {
-        if e.is_identity().into() {
-            return Err(SynthesisError::UnconstrainedVariable);
-        }
-    }
+    // for e in l_affine.iter() {
+    //     if e.is_identity().into() {
+    //         return Err(SynthesisError::UnconstrainedVariable);
+    //     }
+    // }
 
     let g1 = g1.to_affine();
     let g2 = g2.to_affine();

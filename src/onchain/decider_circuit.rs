@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 #![allow(unused_mut)]
+use crate::frontend::gpu::GpuName;
 use crate::gadgets::le_bits_to_num;
 use crate::provider::traits::DlogGroup;
 use crate::traits::ROConstantsCircuit;
@@ -89,6 +90,7 @@ fn hash_U_i<E: CurveCycleEquipped, CS: ConstraintSystem<E::Scalar>>(
 impl<E> DeciderCircuit<E>
 where
   E: CurveCycleEquipped,
+  E::Scalar: GpuName,
 {
   pub fn default(
     arith: &R1CSShape<E>,
@@ -124,12 +126,17 @@ where
 
   pub fn new(pp: &PublicParams<E>, rs: RecursiveSNARK<E>) -> Result<Self, NovaError> {
     let ro_consts = ROConstants::<E>::default(); // TODO: Not sure if this is OK
-    let mut ro = <E as Engine>::RO::new(
+    let mut ro_1 = <E as Engine>::RO::new(
       ROConstants::<E>::default(),
-      42,
+      3,
+    );
+    let mut ro_2 = <E as Engine>::RO::new(
+      ROConstants::<E>::default(),
+      3,
     );
 
     // TODO: Do I need to run an iteration for IS and FS in Nebula?
+    println!("DeciderCircuit::new: 1. Compute the U_i+1, W_i+1");
     // 1. Compute the U_{i+1}, W_{i+1}
     let (nifs, (r_U_primary, r_W_primary), (r_U_cyclefold, r_W_cyclefold), rho, _U_secondary_temp) =
       NIFS::<E>::prove(
@@ -145,8 +152,11 @@ where
         (&rs.r_U_cyclefold, &rs.r_W_cyclefold),
       )?;
 
-    let (rw, re) = KZGChallengesGadget::get_challenges_native(&mut ro, r_U_primary.clone());
+    println!("DeciderCircuit::new: 2. Compute the KZG challenges");
+    let (rw, re) = KZGChallengesGadget::get_challenges_native(&mut ro_1, &mut ro_2, r_U_primary.clone());
+    println!("DeciderCircuit::new: 3. Compute the KZG evaluations");
     let rw_eval = EvalGadget::evaluate_native(r_W_primary.clone().W, rw);
+    println!("DeciderCircuit::new: 4. Compute the KZG evaluations");
     let re_eval = EvalGadget::evaluate_native(r_W_primary.clone().E, re);
 
     Ok(Self {
@@ -176,10 +186,12 @@ where
 
 impl<E> Circuit<E::Scalar> for DeciderCircuit<E> 
   where
-    E: CurveCycleEquipped {
-  fn synthesize<CS: ConstraintSystem<E::Scalar>>(
-    self,
-    cs: &mut CS,
+    E: CurveCycleEquipped,
+    E::Scalar: GpuName,
+  {
+    fn synthesize<CS: ConstraintSystem<E::Scalar>>(
+      self,
+      cs: &mut CS,
   ) -> Result<(), SynthesisError> {
     // let arith = AllocatedR1CSInstance::alloc(cs, Some(self.arith))?;
 
@@ -238,7 +250,7 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
 
       let mut ro = <Dual<E> as Engine>::ROCircuit::new(
         ROConstantsCircuit::<Dual<E>>::default(),
-        42,
+        19,
       );
   
     // Step 1: Enforce U_{n+1} and W_{n+1} satisfy r1cs
@@ -284,9 +296,18 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
 
     // Step 7.1: Check correct computation of the KZG challenges.
     //           - cE ≡ H(E.{x, y}), cW ≡ H(W.{x, y}).
+    let mut ro_1 = <Dual<E> as Engine>::ROCircuit::new(
+      ROConstantsCircuit::<Dual<E>>::default(),
+      5,
+    );
+    let mut ro_2 = <Dual<E> as Engine>::ROCircuit::new(
+      ROConstantsCircuit::<Dual<E>>::default(),
+      5,
+    );
     let (alloc_rw, alloc_re) = KZGChallengesGadget::get_challenges_gadget::<CS, _, E>(
       cs, 
-      &mut ro, 
+      &mut ro_1, 
+      &mut ro_2,
       U_i1)?;
 
     cs.enforce(

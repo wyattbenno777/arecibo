@@ -3,13 +3,16 @@
 #![allow(unused_variables)]
 #![allow(unused_mut)]
 
-use crate::gadgets::le_bits_to_num;
-use crate::onchain::utils::{evaluate_polynomial, lagrange_interpolation, nth_root_of_unity};
-use crate::traits::Dual;
-use crate::cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance;
-use crate::r1cs::RelaxedR1CSInstance;
-use crate::traits::{AbsorbInROTrait, CurveCycleEquipped, ROTrait, ROCircuitTrait};
-use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
+use crate::{
+  cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance,
+  frontend::{
+    domain::EvaluationDomain, gpu::GpuName, num::AllocatedNum, ConstraintSystem, SynthesisError,
+  },
+  gadgets::le_bits_to_num,
+  r1cs::RelaxedR1CSInstance,
+  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, ROCircuitTrait, ROTrait},
+};
+use ec_gpu_gen::threadpool::Worker;
 use ff::PrimeField;
 use radix_domain::{AllocatedEvaluations, AllocatedRadix2Domain};
 
@@ -21,33 +24,35 @@ pub struct KZGChallengesGadget {}
 
 impl KZGChallengesGadget {
   pub fn get_challenges_native<E: CurveCycleEquipped>(
-    ro: &mut E::RO,
+    ro_1: &mut E::RO,
+    ro_2: &mut E::RO,
     U_i: RelaxedR1CSInstance<E>,
   ) -> (E::Scalar, E::Scalar) {
-    U_i.comm_W.absorb_in_ro(ro);
-    let rw = ROTrait::squeeze(ro, 128); //TODO: Choose right number
+    U_i.comm_W.absorb_in_ro(ro_1);
+    let rw = ROTrait::squeeze(ro_1, 128); //TODO: Choose right number
 
-    U_i.comm_E.absorb_in_ro(ro);
-    let re = ROTrait::squeeze(ro, 128); //TODO: Choose right number
+    U_i.comm_E.absorb_in_ro(ro_2);
+    let re = ROTrait::squeeze(ro_2, 128); //TODO: Choose right number
 
     (rw, re)
   }
 
   pub fn get_challenges_gadget<CS, RO, E: CurveCycleEquipped>(
     cs: &mut CS,
-    ro: &mut RO,
+    ro_1: &mut RO,
+    ro_2: &mut RO,
     U_i: AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
   ) -> Result<(AllocatedNum<E::Scalar>, AllocatedNum<E::Scalar>), SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
     RO: ROCircuitTrait<E::Scalar>,
   {
-    U_i.comm_W.absorb_in_ro(cs.namespace(|| "absorb_W"), ro)?;
-    let rw = ro.squeeze(cs.namespace(|| "squeeze_W"), 128)?;
+    U_i.comm_W.absorb_in_ro(cs.namespace(|| "absorb_W"), ro_1)?;
+    let rw = ro_1.squeeze(cs.namespace(|| "squeeze_W"), 128)?;
     let alloc_rw = le_bits_to_num(cs.namespace(|| "bits_to_num"), &rw)?;
 
-    U_i.comm_E.absorb_in_ro(cs.namespace(|| "absorb_E"), ro)?;
-    let re = ro.squeeze(cs.namespace(|| "squeeze_E"), 128)?;
+    U_i.comm_E.absorb_in_ro(cs.namespace(|| "absorb_E"), ro_2)?;
+    let re = ro_2.squeeze(cs.namespace(|| "squeeze_E"), 128)?;
     let alloc_re = le_bits_to_num(cs.namespace(|| "bits_to_num"), &re)?;
     Ok((alloc_rw, alloc_re))
   }
@@ -59,30 +64,52 @@ impl KZGChallengesGadget {
 pub struct EvalGadget {}
 
 impl EvalGadget {
-  pub fn evaluate_native<F: PrimeField>(mut v: Vec<F>, point: F) -> F {
+  pub fn evaluate_native<F: PrimeField + GpuName>(mut v: Vec<F>, point: F) -> F {
     v.resize(v.len().next_power_of_two(), F::ZERO);
-    let p = lagrange_interpolation(v);
-    let eval = evaluate_polynomial(p, point);
+    // Create an evaluation domain from the coefficients
+    let mut domain = EvaluationDomain::from_coeffs(v).expect("Failed to create evaluation domain");
+
+    // Perform FFT to transform the polynomial into evaluation form
+    let worker = Worker::new(); // Assuming you have a worker for parallel computation
+    domain.fft(&worker, &mut None).expect("FFT failed");
+
+    // Evaluate the polynomial at the given point
+    let eval = domain.evaluate_at(point);
+
     eval
   }
 
-  pub fn evaluate_gadget<CS, E: CurveCycleEquipped>(    
-    mut cs: CS, 
-    mut v: Vec<AllocatedNum<E::Scalar>>, 
-    point: &AllocatedNum<E::Scalar>
-  ) -> Result<AllocatedNum<E::Scalar>, SynthesisError> 
+  pub fn evaluate_gadget<CS, E: CurveCycleEquipped>(
+    mut cs: CS,
+    mut v: Vec<AllocatedNum<E::Scalar>>,
+    point: &AllocatedNum<E::Scalar>,
+  ) -> Result<AllocatedNum<E::Scalar>, SynthesisError>
   where
-    CS: ConstraintSystem<E::Scalar> 
+    CS: ConstraintSystem<E::Scalar>,
+    E::Scalar: GpuName,
   {
-    let alloc_zero = AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(0)))?;
-    v.resize(v.len().next_power_of_two(), alloc_zero);
-    let n = v.len() as usize;
-    let gen = nth_root_of_unity::<E::Scalar>(n).ok_or(SynthesisError::PolynomialDegreeTooLarge)?; // TODO: Use a better error
-    let alloc_one = AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(1)))?;
-    let log2_v = usize::BITS - v.len().leading_zeros() - 1;
-    let domain = AllocatedRadix2Domain::new(&mut cs, gen, log2_v as u64, alloc_one)?;
+    // Convert AllocatedNum to native field elements
+    let mut native_v: Vec<E::Scalar> = v
+      .iter()
+      .map(|num| num.get_value().unwrap_or(E::Scalar::from(0)))
+      .collect();
 
-    let alloc_evaluations = AllocatedEvaluations::from_vec_and_domain(v, domain, true);
-    alloc_evaluations.interpolate_and_evaluate(&mut cs, point)
+    // Resize to the next power of two
+    native_v.resize(native_v.len().next_power_of_two(), E::Scalar::from(0));
+
+    // Create an evaluation domain from the coefficients
+    let mut domain =
+      EvaluationDomain::from_coeffs(native_v).expect("Failed to create evaluation domain");
+
+    // Perform FFT to transform the polynomial into evaluation form
+    let worker = Worker::new();
+    domain.fft(&worker, &mut None).expect("FFT failed");
+
+    // Evaluate the polynomial at the given point
+    let point_value = point.get_value().unwrap_or(E::Scalar::from(0));
+    let eval = domain.evaluate_at(point_value);
+
+    // Convert the result back to AllocatedNum
+    AllocatedNum::alloc(&mut cs, || Ok(eval))
   }
 }

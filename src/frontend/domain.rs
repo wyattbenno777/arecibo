@@ -79,6 +79,18 @@ impl<F: PrimeField + gpu::GpuName> EvaluationDomain<F> {
         })
     }
 
+    pub fn evaluate_at(&self, point: F) -> F {
+        let mut result = F::ZERO;
+        let mut power_of_x = F::ONE;
+
+        for &coeff in &self.coeffs {
+            result += coeff * power_of_x;
+            power_of_x *= point;
+        }
+
+        result
+    }
+
     pub fn fft(
         &mut self,
         worker: &Worker,
