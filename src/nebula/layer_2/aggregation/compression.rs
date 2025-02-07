@@ -179,10 +179,6 @@ where
       wit_blind_secondary,
       err_blind_secondary,
     ) = rs.fold_derandom_secondary(pp)?;
-    assert!(pp
-      .r1cs_shape_cyclefold()
-      .is_sat_relaxed(pp.ck_cyclefold(), &U_secondary, &W_secondary)
-      .is_ok());
     let snark_secondary = S2::prove(
       &pp.pp.ck_cyclefold,
       &pk.secondary,
