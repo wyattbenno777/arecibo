@@ -1,10 +1,15 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 #![allow(unused_mut)]
+use ff::PrimeField;
+
 use crate::constants::{BN_LIMB_WIDTH, BN_N_LIMBS};
+use crate::cyclefold::gadgets::emulated::AllocatedEmulPoint;
 use crate::frontend::gpu::GpuName;
+use crate::frontend::{Index, Variable};
 use crate::gadgets::le_bits_to_num;
 use crate::provider::traits::DlogGroup;
+use crate::traits::commitment::CommitmentTrait;
 use crate::traits::ROConstantsCircuit;
 use crate::CommitmentKey;
 use crate::{
@@ -66,6 +71,118 @@ where
   pub kzg_evaluations: Vec<E::Scalar>,
 }
 
+pub fn mimc<S: PrimeField>(mut xl: S, mut xr: S, constants: &[S]) -> S {
+  assert_eq!(constants.len(), MIMC_ROUNDS);
+
+  for c in constants {
+      let mut tmp1 = xl;
+      tmp1.add_assign(c);
+      let mut tmp2 = tmp1.square();
+      tmp2.mul_assign(&tmp1);
+      tmp2.add_assign(&xr);
+      xr = xl;
+      xl = tmp2;
+  }
+
+  xl
+}
+pub const MIMC_ROUNDS: usize = 322;
+
+/// This is our demo circuit for proving knowledge of the
+/// preimage of a MiMC hash invocation.
+#[allow(clippy::upper_case_acronyms)]
+pub struct MiMCDemo<'a, S: PrimeField> {
+  pub xl: Option<S>,
+  pub xr: Option<S>,
+  pub constants: &'a [S],
+}
+
+/// Our demo circuit implements this `Circuit` trait which
+/// is used during paramgen and proving in order to
+/// synthesize the constraint system.
+impl<'a, S: PrimeField> Circuit<S> for MiMCDemo<'a, S> {
+  fn synthesize<CS: ConstraintSystem<S>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+      assert_eq!(self.constants.len(), MIMC_ROUNDS);
+
+      // Allocate the first component of the preimage.
+      let mut xl_value = self.xl;
+      let mut xl = cs.alloc(
+          || "preimage xl",
+          || xl_value.ok_or(SynthesisError::AssignmentMissing),
+      )?;
+
+      // Allocate the second component of the preimage.
+      let mut xr_value = self.xr;
+      let mut xr = cs.alloc(
+          || "preimage xr",
+          || xr_value.ok_or(SynthesisError::AssignmentMissing),
+      )?;
+
+      for i in 0..MIMC_ROUNDS {
+          // xL, xR := xR + (xL + Ci)^3, xL
+          let cs = &mut cs.namespace(|| format!("round {}", i));
+
+          // tmp = (xL + Ci)^2
+          let tmp_value = xl_value.map(|mut e| {
+              e.add_assign(&self.constants[i]);
+              e.square()
+          });
+          let tmp = cs.alloc(
+              || "tmp",
+              || tmp_value.ok_or(SynthesisError::AssignmentMissing),
+          )?;
+
+          cs.enforce(
+              || "tmp = (xL + Ci)^2",
+              |lc| lc + xl + (self.constants[i], CS::one()),
+              |lc| lc + xl + (self.constants[i], CS::one()),
+              |lc| lc + tmp,
+          );
+
+          // new_xL = xR + (xL + Ci)^3
+          // new_xL = xR + tmp * (xL + Ci)
+          // new_xL - xR = tmp * (xL + Ci)
+          let new_xl_value = xl_value.map(|mut e| {
+              e.add_assign(&self.constants[i]);
+              e.mul_assign(&tmp_value.unwrap());
+              e.add_assign(&xr_value.unwrap());
+              e
+          });
+
+          let new_xl = if i == (MIMC_ROUNDS - 1) {
+              // This is the last round, xL is our image and so
+              // we allocate a public input.
+              cs.alloc_input(
+                  || "image",
+                  || new_xl_value.ok_or(SynthesisError::AssignmentMissing),
+              )?
+          } else {
+              cs.alloc(
+                  || "new_xl",
+                  || new_xl_value.ok_or(SynthesisError::AssignmentMissing),
+              )?
+          };
+
+          cs.enforce(
+              || "new_xL = xR + (xL + Ci)^3",
+              |lc| lc + tmp,
+              |lc| lc + xl + (self.constants[i], CS::one()),
+              |lc| lc + new_xl - xr,
+          );
+
+          // xR = xL
+          xr = xl;
+          xr_value = xl_value;
+
+          // xL = new_xL
+          xl = new_xl;
+          xl_value = new_xl_value;
+      }
+
+      Ok(())
+  }
+}
+
 
 fn hash_U_i<E: CurveCycleEquipped, CS: ConstraintSystem<E::Scalar>>(
     cs: &mut CS,
@@ -87,6 +204,17 @@ fn hash_U_i<E: CurveCycleEquipped, CS: ConstraintSystem<E::Scalar>>(
     U_i.absorb_in_ro(cs.namespace(|| "U_i"), ro)?;
     ROCircuitTrait::squeeze(ro, cs.namespace(|| "squeeze"), 128)
 }
+
+fn hash_cf_U_i<E: CurveCycleEquipped, CS: ConstraintSystem<E::Scalar>>(
+    cs: &mut CS,
+    ro: &mut <Dual<E> as Engine>::ROCircuit,
+    cf_U_i: &AllocatedRelaxedR1CSInstance<Dual<E>, BN_N_LIMBS>,
+    pp_hash: &AllocatedNum<E::Scalar>,
+) -> Result<Vec<AllocatedBit>, SynthesisError> {
+    ROCircuitTrait::absorb(ro, pp_hash);
+    cf_U_i.absorb_in_ro(cs.namespace(|| "cf_U_i"), ro)?;
+    ROCircuitTrait::squeeze(ro, cs.namespace(|| "squeeze"), 128)
+  }
 
 impl<E> DeciderCircuit<E>
 where
@@ -214,27 +342,37 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
       .map(|(i, val)| AllocatedNum::alloc(cs.namespace(|| format!("z_i_{}", i)), || Ok(*val)))
       .collect::<Result<Vec<_>, SynthesisError>>()?;
 
-    let u_i: AllocatedEmulR1CSInstance<Dual<E>> = AllocatedEmulR1CSInstance::alloc(
-      cs.namespace(|| "u_i"), Some(&self.u_i), BN_LIMB_WIDTH, BN_N_LIMBS)?;
+    // We don't need to check u_i.W
+    let u_i_x0 = AllocatedNum::alloc(cs.namespace(|| "allocate x0"), || {
+      Ok(self.u_i.X[0])
+    })?;
+
+    let u_i_x1 = AllocatedNum::alloc(cs.namespace(|| "allocate x1"), || {
+      Ok(self.u_i.X[1])
+    })?;
+
     let U_i: AllocatedEmulRelaxedR1CSInstance<Dual<E>> = AllocatedEmulRelaxedR1CSInstance::alloc(
       cs.namespace(|| "U_i"),
       Some(&self.U_i),
       BN_LIMB_WIDTH, BN_N_LIMBS
     )?;
     // here (U_i1, W_i1) = NIFS.P( (U_i,W_i), (u_i,w_i))
-    // let U_i1_commitments = Vec::<NonNativeAffineVar<C1>>::new_input(cs.clone(), || {
-    //     Ok(self.U_i1.get_commitments())
-    // })?;
-
     let U_i1: AllocatedEmulRelaxedR1CSInstance<Dual<E>> = AllocatedEmulRelaxedR1CSInstance::alloc(
       cs.namespace(|| "U_i1"), Some(&self.U_i1), BN_LIMB_WIDTH, BN_N_LIMBS)?;
-    let W_i1: AllocatedEmulRelaxedR1CSWitness<Dual<E>> = AllocatedEmulRelaxedR1CSWitness::alloc(
-      cs.namespace(|| "W_i1"), Some(&self.W_i1))?;
+    
+    // We don't need to check W_i1.E
+    let W_i1_W = self.W_i1.W.iter().map(|x| {
+      AllocatedNum::alloc(
+        cs.namespace(|| "allocate W_i1.W"),
+        || Ok(*x)
+      )
+    }).collect::<Result<Vec<_>, _>>()?;
 
+    // I don't think this is necessary
     // U_i1.get_commitments().enforce_equal(&U_i1_commitments)?;
 
-    // let cf_U_i: AllocatedRelaxedR1CSInstance<Dual<E>, BN_N_LIMBS> = AllocatedRelaxedR1CSInstance::alloc(
-    //   cs.namespace(|| "cf_U_i"), Some(&self.cf_U_i), BN_LIMB_WIDTH, BN_N_LIMBS)?;
+    let cf_U_i: AllocatedRelaxedR1CSInstance<Dual<E>, BN_N_LIMBS> = AllocatedRelaxedR1CSInstance::alloc(
+      cs.namespace(|| "cf_U_i"), Some(&self.cf_U_i), BN_LIMB_WIDTH, BN_N_LIMBS)?;
 
     let kzg_challenges: Vec<AllocatedNum<E::Scalar>> = self
       .kzg_challenges
@@ -249,14 +387,6 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
       .iter()
       .map(|x| AllocatedNum::alloc(cs.namespace(|| "kzg_evaluations"), || Ok(*x)))
       .collect::<Result<Vec<_>, SynthesisError>>()?;
-
-      let mut ro = <Dual<E> as Engine>::ROCircuit::new(
-        ROConstantsCircuit::<Dual<E>>::default(),
-        23 + z_0.len() + z_i.len(),
-      );
-
-    println!("z_0 len: {:?}", z_0.len());
-    println!("z_i len: {:?}", z_i.len());
   
     // Step 1: Enforce U_{n+1} and W_{n+1} satisfy r1cs
     // Nova has no need for this, since we are checking if an r1cs relation 
@@ -269,7 +399,11 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
 
     // Step 3: Verify the hash conditions:
     //         un.x0 == H(n, z0, zn, Un) and un.x1 == H(U_EC,n).
-    let hash_bits = hash_U_i::<E, CS>(
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(
+      ROConstantsCircuit::<Dual<E>>::default(),
+      23 + self.z_0.len() + self.z_i.len(),
+    );
+    let U_i_hash_bits = hash_U_i::<E, CS>(
       cs, 
       &mut ro, 
       &U_i, 
@@ -277,13 +411,30 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
       &i, 
       &z_0, 
       &z_i)?;
-    let alloc_hash = le_bits_to_num(cs.namespace(|| "bits_to_num"), &hash_bits)?;
+    let U_i_hash = le_bits_to_num(cs.namespace(|| "bits_to_num"), &U_i_hash_bits)?;
 
     cs.enforce(
       || "u_i.x[0] == H(i, z_0, z_i, U_i)",
       |lc| lc,
       |lc| lc,
-      |lc| lc + u_i.x0.get_variable() - alloc_hash.get_variable(),
+      |lc| lc + u_i_x0.get_variable() - U_i_hash.get_variable(),
+    );
+
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(
+      ROConstantsCircuit::<Dual<E>>::default(),
+      24,
+    );
+    let cf_U_i_hash_bits = hash_cf_U_i::<E, CS>(
+      cs, 
+      &mut ro, 
+      &cf_U_i, 
+      &pp_hash)?;
+    let cf_U_i_hash = le_bits_to_num(cs.namespace(|| "bits_to_num"), &cf_U_i_hash_bits)?;
+    cs.enforce(
+      || "u_i.x[1] == H(U_EC, i)",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + u_i_x1.get_variable() - cf_U_i_hash.get_variable(),
     );
     // Step 4: Commitments verification for U_{EC,n}.{E, W} with respect to W_{EC,n}.{E, W}.
     //         - Pedersen commitments are used for this.
@@ -329,18 +480,25 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
       |lc| lc + kzg_challenges[1].get_variable() - alloc_re.get_variable(),
     );
 
+    for w in &W_i1_W {
+      cs.enforce(
+        || "Trivial constraint",
+        |lc| lc + w.get_variable(),
+        |lc| lc,
+        |lc| lc,
+      );
+    }
     // Step 7.2: Verify that the KZG evaluations are correct:
-    for ((v, c), e) in vec![W_i1.W]
-      .iter() 
-      .zip(&kzg_challenges)
+    for (c, e) in kzg_challenges
+      .iter()
       .zip(&kzg_evaluations)
     {
-      let eval = EvalGadget::evaluate_gadget::<&mut CS, E>(cs, v.clone(), c)?;
+      let eval = EvalGadget::evaluate_gadget::<&mut CS, E>(cs, &W_i1_W, c)?;
       cs.enforce(
         || "evalW == pW(cW)",
         |lc| lc,
-        |lc| lc + eval.get_variable(),
-        |lc| lc + e.get_variable(),
+        |lc| lc,
+        |lc| lc + e.get_variable() - eval.get_variable(),
       );
     }
 

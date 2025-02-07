@@ -14,10 +14,10 @@ use crate::{
 use halo2curves::bn256::{Bn256, Fr};
 use rand::RngCore;
 use crate::frontend::groth16::{create_random_proof, generate_random_parameters, Parameters};
-use super::decider_circuit::DeciderCircuit;
+use super::decider_circuit::{DeciderCircuit, MiMCDemo, MIMC_ROUNDS};
 use crate::traits::evaluation::EvaluationEngineTrait;
 // use crate::traits::commitment::CommitmentEngineTrait;
-
+use ff::Field;
 /// A type that holds the prover key for [`CompressedSNARK`]
 #[derive(Clone)]
 pub struct ProverKey {
@@ -65,6 +65,23 @@ impl Decider {
 
     let (kzg_pk, kzg_vk) =
     EvaluationEngine::<Bn256, Bn256EngineKZG>::setup(pp.ck_primary.clone());
+
+    // Generate the MiMC round constants
+    let constants = (0..MIMC_ROUNDS)
+        .map(|_| Fr::from(7))
+        .collect::<Vec<_>>();
+
+    //   // Create parameters for our circuit
+    //   let params = {
+    //     let c = MiMCDemo {
+    //         xl: None,
+    //         xr: None,
+    //         constants: &constants,
+    //     };
+
+    //     generate_random_parameters::<Bn256EngineKZG, _, _>(c, rng).unwrap()
+    // };
+  
     // get the Groth16 specific setup for the circuit
     let params = generate_random_parameters::<Bn256EngineKZG, _, _>(circuit, rng).unwrap();
 

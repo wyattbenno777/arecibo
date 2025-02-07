@@ -50,6 +50,13 @@ impl KZGChallengesGadget {
     U_i.comm_W.absorb_in_ro(cs.namespace(|| "absorb_W"), ro_1)?;
     let rw = ro_1.squeeze(cs.namespace(|| "squeeze_W"), 128)?;
     let alloc_rw = le_bits_to_num(cs.namespace(|| "bits_to_num"), &rw)?;
+    // Trivial constraint to ensure that the variables are used 
+    cs.enforce(
+      || "Trivial constraint",
+      |lc| lc + U_i.x0.get_variable() + U_i.x1.get_variable() + U_i.u.get_variable(),
+      |lc| lc,
+      |lc| lc,
+    );
 
     U_i.comm_E.absorb_in_ro(cs.namespace(|| "absorb_E"), ro_2)?;
     let re = ro_2.squeeze(cs.namespace(|| "squeeze_E"), 128)?;
@@ -81,7 +88,7 @@ impl EvalGadget {
 
   pub fn evaluate_gadget<CS, E: CurveCycleEquipped>(
     mut cs: CS,
-    mut v: Vec<AllocatedNum<E::Scalar>>,
+    v: &Vec<AllocatedNum<E::Scalar>>,
     point: &AllocatedNum<E::Scalar>,
   ) -> Result<AllocatedNum<E::Scalar>, SynthesisError>
   where
