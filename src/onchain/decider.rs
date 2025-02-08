@@ -66,22 +66,6 @@ impl Decider {
     let (kzg_pk, kzg_vk) =
     EvaluationEngine::<Bn256, Bn256EngineKZG>::setup(pp.ck_primary.clone());
 
-    // Generate the MiMC round constants
-    let constants = (0..MIMC_ROUNDS)
-        .map(|_| Fr::from(7))
-        .collect::<Vec<_>>();
-
-    //   // Create parameters for our circuit
-    //   let params = {
-    //     let c = MiMCDemo {
-    //         xl: None,
-    //         xr: None,
-    //         constants: &constants,
-    //     };
-
-    //     generate_random_parameters::<Bn256EngineKZG, _, _>(c, rng).unwrap()
-    // };
-  
     // get the Groth16 specific setup for the circuit
     let params = generate_random_parameters::<Bn256EngineKZG, _, _>(circuit, rng).unwrap();
 
@@ -148,20 +132,20 @@ impl Decider {
     } = vk;
     // 6.2. Fold the commitments
     // TODO
-  //   let U_final_commitments = unimplemented!();
+    let U_final_commitments = unimplemented!();
 
-  //   let public_input = [
-  //     &[pp_hash, i][..],
-  //     &z_0,
-  //     &z_i,
-  //     &U_final_commitments.inputize_nonnative(),
-  //     &self.kzg_challenges[..],
-  //     self.kzg_proofs.iter().map(|p| p.eval).collect::<Vec<_>>(),
-  //     // &proof.cmT.inputize_nonnative(),
-  // ]
-  // .concat();
+    let public_input = [
+      &[pp_hash, i][..],
+      &z_0,
+      &z_i,
+      &U_final_commitments.inputize_nonnative(),
+      &self.kzg_challenges[..],
+      self.kzg_proofs.iter().map(|p| p.eval).collect::<Vec<_>>(),
+      // &proof.cmT.inputize_nonnative(),
+  ]
+  .concat();
 
-  // let snark_v = verify_proof(&groth16_vk, &self.groth16_proof, &public_input)?;
+  let snark_v = verify_proof(&groth16_vk, &self.groth16_proof, &public_input)?;
     Ok(())
   }
 }
