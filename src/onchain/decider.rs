@@ -14,10 +14,9 @@ use crate::{
 use halo2curves::bn256::{Bn256, Fr};
 use rand::RngCore;
 use crate::frontend::groth16::{create_random_proof, generate_random_parameters, Parameters};
-use super::decider_circuit::{DeciderCircuit, MiMCDemo, MIMC_ROUNDS};
+use super::decider_circuit::DeciderCircuit;
 use crate::traits::evaluation::EvaluationEngineTrait;
 // use crate::traits::commitment::CommitmentEngineTrait;
-use ff::Field;
 /// A type that holds the prover key for [`CompressedSNARK`]
 #[derive(Clone)]
 pub struct ProverKey {
@@ -125,27 +124,27 @@ impl Decider {
     z_0: Vec<Fr>,
     z_i: Vec<Fr>,
   ) -> Result<(), NovaError> {
-    let VerifierKey {
-      groth16_vk,
-      pp_hash,
-      kzg_vk,
-    } = vk;
-    // 6.2. Fold the commitments
-    // TODO
-    let U_final_commitments = unimplemented!();
+  //   let VerifierKey {
+  //     groth16_vk,
+  //     pp_hash,
+  //     kzg_vk,
+  //   } = vk;
+  //   // 6.2. Fold the commitments
+  //   // TODO
+  //   let U_final_commitments = unimplemented!();
 
-    let public_input = [
-      &[pp_hash, i][..],
-      &z_0,
-      &z_i,
-      &U_final_commitments.inputize_nonnative(),
-      &self.kzg_challenges[..],
-      self.kzg_proofs.iter().map(|p| p.eval).collect::<Vec<_>>(),
-      // &proof.cmT.inputize_nonnative(),
-  ]
-  .concat();
+  //   let public_input = [
+  //     &[pp_hash, i][..],
+  //     &z_0,
+  //     &z_i,
+  //     &U_final_commitments.inputize_nonnative(),
+  //     &self.kzg_challenges[..],
+  //     self.kzg_proofs.iter().map(|p| p.eval).collect::<Vec<_>>(),
+  //     // &proof.cmT.inputize_nonnative(),
+  // ]
+  // .concat();
 
-  let snark_v = verify_proof(&groth16_vk, &self.groth16_proof, &public_input)?;
+  // let snark_v = verify_proof(&groth16_vk, &self.groth16_proof, &public_input)?;
     Ok(())
   }
 }

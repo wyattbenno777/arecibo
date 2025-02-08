@@ -71,22 +71,6 @@ where
   pub kzg_evaluations: Vec<E::Scalar>,
 }
 
-pub fn mimc<S: PrimeField>(mut xl: S, mut xr: S, constants: &[S]) -> S {
-  assert_eq!(constants.len(), MIMC_ROUNDS);
-
-  for c in constants {
-      let mut tmp1 = xl;
-      tmp1.add_assign(c);
-      let mut tmp2 = tmp1.square();
-      tmp2.mul_assign(&tmp1);
-      tmp2.add_assign(&xr);
-      xr = xl;
-      xl = tmp2;
-  }
-
-  xl
-}
-
 fn hash_U_i<E: CurveCycleEquipped, CS: ConstraintSystem<E::Scalar>>(
     cs: &mut CS,
     ro: &mut <Dual<E> as Engine>::ROCircuit,
