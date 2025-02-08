@@ -3,7 +3,7 @@
 use crate::{
   frontend::groth16::{self, verify_proof}, 
   provider::{hyperkzg::EvaluationEngine, kzg_commitment::{KZGCommitmentEngine, KZGProof, KZGProverKey, KZGVerifierKey}, Bn256EngineKZG}, 
-  traits::Engine
+  traits::Engine, Commitment
 };
 use crate::
   errors::NovaError;
@@ -123,6 +123,8 @@ impl Decider {
     i: Fr,
     z_0: Vec<Fr>,
     z_i: Vec<Fr>,
+    U_commitments: (Commitment<Bn256EngineKZG>, Commitment<Bn256EngineKZG>),
+    u_commitments: Commitment<Bn256EngineKZG>,
   ) -> Result<(), NovaError> {
   //   let VerifierKey {
   //     groth16_vk,

@@ -14,9 +14,6 @@ use crate::{
 };
 use ec_gpu_gen::threadpool::Worker;
 use ff::PrimeField;
-use radix_domain::{AllocatedEvaluations, AllocatedRadix2Domain};
-
-pub mod radix_domain;
 
 /// Gadget that computes the KZG challenges.
 /// It also offers the rust native implementation compatible with the gadget.
