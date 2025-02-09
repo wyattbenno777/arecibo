@@ -30,8 +30,6 @@ use crate::{
 use crate::{CommitmentKey, R1CSWithArity};
 use ff::Field;
 use std::marker::PhantomData;
-use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
-use tracing_texray::TeXRayLayer;
 
 // Proving Engine
 type E = PallasEngine;
@@ -39,7 +37,6 @@ type F = <E as Engine>::Scalar;
 
 #[test]
 fn test_folding_ivc_proofs() -> Result<(), NovaError> {
-  tracing_init();
   tracing_texray::examine(tracing::info_span!("sim_orchestrator_node"))
     .in_scope(sim_orchestrator_node)
 }
@@ -613,19 +610,4 @@ where
   fn non_deterministic_advice(&self) -> Vec<E::Scalar> {
     vec![]
   }
-}
-
-fn tracing_init() {
-  // Create an EnvFilter that filters out spans below the 'info' level
-  let filter = EnvFilter::new("arecibo=info");
-
-  // Create a TeXRayLayer
-  let texray_layer = TeXRayLayer::new(); // Optional: Only show spans longer than 100ms
-
-  // Set up the global subscriber
-  let subscriber = Registry::default()
-    .with(filter)
-    .with(fmt::layer())
-    .with(texray_layer);
-  tracing::subscriber::set_global_default(subscriber).expect("Failed to set global subscriber");
 }

@@ -77,8 +77,7 @@ where
     ]);
 
     sponge.start(parameter, None, acc);
-    assert_eq!(self.num_absorbs, self.state.len());
-    SpongeAPI::absorb(&mut sponge, self.num_absorbs as u32, &self.state, acc);
+    SpongeAPI::absorb(&mut sponge, self.state.len() as u32, &self.state, acc);
     let hash = SpongeAPI::squeeze(&mut sponge, 1, acc);
     sponge.finish(acc).unwrap();
 
@@ -93,6 +92,41 @@ where
       coeff += coeff;
     }
     res
+  }
+
+  /// Compute a challenge by hashing the current state
+  fn squeeze_vec(&mut self, num_bits: usize, len: usize) -> Vec<Scalar> {
+    // check if we have squeezed already
+    assert!(!self.squeezed, "Cannot squeeze again after squeezing");
+    self.squeezed = true;
+
+    let mut sponge = Sponge::new_with_constants(&self.constants.0, Simplex);
+    let acc = &mut ();
+    let parameter = IOPattern(vec![
+      SpongeOp::Absorb(self.num_absorbs as u32),
+      SpongeOp::Squeeze(len as u32),
+    ]);
+
+    sponge.start(parameter, None, acc);
+    SpongeAPI::absorb(&mut sponge, self.state.len() as u32, &self.state, acc);
+    let hash = SpongeAPI::squeeze(&mut sponge, len as u32, acc);
+    sponge.finish(acc).unwrap();
+
+    // Only return `num_bits`
+    let mut res_vec = Vec::with_capacity(len);
+    for hash_val in hash.iter().take(len) {
+      let bits = hash_val.to_le_bits();
+      let mut res = Scalar::ZERO;
+      let mut coeff = Scalar::ONE;
+      for bit in bits[..num_bits].into_iter() {
+        if *bit {
+          res += coeff;
+        }
+        coeff += coeff;
+      }
+      res_vec.push(res);
+    }
+    res_vec
   }
 }
 

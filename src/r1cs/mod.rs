@@ -7,6 +7,7 @@ use crate::{
   digest::{DigestComputer, SimpleDigestible},
   errors::NovaError,
   gadgets::{f_to_nat, nat_to_limbs, scalar_as_base},
+  hypernova::error::HyperNovaError,
   traits::{
     commitment::CommitmentEngineTrait, AbsorbInROTrait, Engine, ROTrait, TranscriptReprTrait,
   },
@@ -14,6 +15,7 @@ use crate::{
 };
 use core::cmp::max;
 use ff::Field;
+use itertools::Itertools;
 use once_cell::sync::OnceCell;
 use rand_core::{CryptoRng, OsRng, RngCore};
 
@@ -48,8 +50,8 @@ pub struct R1CSResult<E: Engine> {
 /// A type that holds a witness for a given R1CS instance
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct R1CSWitness<E: Engine> {
-  W: Vec<E::Scalar>,
-  r_W: E::Scalar,
+  pub(crate) W: Vec<E::Scalar>,
+  pub(crate) r_W: E::Scalar,
 }
 
 /// A type that holds an R1CS instance
@@ -656,6 +658,18 @@ impl<E: Engine> R1CSWitness<E> {
   pub fn commit(&self, ck: &CommitmentKey<E>) -> Commitment<E> {
     CE::<E>::commit(ck, &self.W, &self.r_W)
   }
+
+  /// Folds an incoming `R1CSWitness` into the current one
+  pub fn fold(&self, W2: &R1CSWitness<E>, rho: E::Scalar) -> Result<Self, NovaError> {
+    let (W1, r_W1) = (&self.W, &self.r_W);
+    let (W2, r_W2) = (&W2.W, &W2.r_W);
+    if W1.len() != W2.len() {
+      return Err(NovaError::InvalidWitnessLength);
+    }
+    let W = zip_with!((W1.par_iter(), W2), |a, b| *a + rho * *b).collect::<Vec<E::Scalar>>();
+    let r_W = *r_W1 + rho * r_W2;
+    Ok(Self { W, r_W })
+  }
 }
 
 impl<E: Engine> R1CSInstance<E> {
@@ -952,6 +966,58 @@ impl<E: Engine> AbsorbInROTrait<E> for RelaxedR1CSInstance<E> {
         ro.absorb(scalar_as_base::<E>(limb));
       }
     }
+  }
+}
+
+/// A type that holds an R1CS instance
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct LR1CSInstance<E: Engine> {
+  pub(crate) comm_W: Commitment<E>,
+  pub(crate) X: Vec<E::Scalar>,
+  /// (Random) evaluation point
+  pub(crate) rx: Vec<E::Scalar>,
+  /// Evaluation targets
+  pub(crate) vs: Vec<E::Scalar>,
+  pub(crate) u: E::Scalar,
+}
+
+impl<E> LR1CSInstance<E>
+where
+  E: Engine,
+{
+  /// Fold and [`LR1CSInstance`] with an [`R1CSInstance`]
+  pub fn fold(
+    &self,
+    U2: &R1CSInstance<E>,
+    rho: E::Scalar,
+    rx: &[E::Scalar],
+    sigmas: &[E::Scalar],
+    thetas: &[E::Scalar],
+  ) -> Result<Self, NovaError> {
+    let (X1, u1, comm_W_1) = (&self.X, self.u, &self.comm_W);
+    let (X2, comm_W_2) = (&U2.X, &U2.comm_W);
+    if self.rx.len() != rx.len() {
+      return Err(HyperNovaError::InvalidTargets.into());
+    }
+    if sigmas.len() != thetas.len() {
+      return Err(HyperNovaError::InvalidTargets.into());
+    }
+    let comm_W = *comm_W_1 + *comm_W_2 * rho;
+    let u = u1 + rho;
+    let X = zip_with!((X1.par_iter(), X2), |a, b| *a + rho * *b).collect::<Vec<E::Scalar>>();
+    let vs: Vec<E::Scalar> = sigmas
+      .iter()
+      .zip_eq(thetas.iter())
+      .map(|(sigma, theta)| *sigma + *theta * rho)
+      .collect();
+    Ok(Self {
+      comm_W,
+      X,
+      rx: self.rx.clone(),
+      vs,
+      u,
+    })
   }
 }
 
