@@ -2,6 +2,8 @@
 mod sparse;
 pub(crate) mod util;
 
+use crate::spartan::math::Math;
+use crate::spartan::polys::multilinear::MultilinearPolynomial;
 use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
   digest::{DigestComputer, SimpleDigestible},
@@ -18,7 +20,6 @@ use ff::Field;
 use itertools::Itertools;
 use once_cell::sync::OnceCell;
 use rand_core::{CryptoRng, OsRng, RngCore};
-
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -378,6 +379,32 @@ impl<E: Engine> R1CSShape<E> {
     Ok(())
   }
 
+  /// Checks if the R1CS instance is satisfiable given a witness and its shape
+  pub fn is_sat_linearized(
+    &self,
+    ck: &CommitmentKey<E>,
+    U: &LR1CSInstance<E>,
+    W: &R1CSWitness<E>,
+  ) -> Result<(), NovaError> {
+    assert_eq!(W.W.len(), self.num_vars);
+    assert_eq!(U.X.len(), self.num_io);
+
+    let (mut Az, mut Bz, mut Cz) = self.multiply_witness(&W.W, &U.u, &U.X)?;
+    Az.resize(self.num_vars * 2, E::Scalar::ZERO);
+    Bz.resize(self.num_vars * 2, E::Scalar::ZERO);
+    Cz.resize(self.num_vars * 2, E::Scalar::ZERO);
+    assert_eq!(U.vs[0], MultilinearPolynomial::new(Az).evaluate(&U.rx));
+    assert_eq!(U.vs[1], MultilinearPolynomial::new(Bz).evaluate(&U.rx));
+    assert_eq!(U.vs[2], MultilinearPolynomial::new(Cz).evaluate(&U.rx));
+
+    // verify if comm_W is a commitment to W
+    if U.comm_W != CE::<E>::commit(ck, &W.W, &W.r_W) {
+      return Err(NovaError::UnSat);
+    }
+
+    Ok(())
+  }
+
   /// A method to compute a commitment to the cross-term `T` given a
   /// Relaxed R1CS instance-witness pair and an R1CS instance-witness pair
   pub fn commit_T(
@@ -669,6 +696,21 @@ impl<E: Engine> R1CSWitness<E> {
     let W = zip_with!((W1.par_iter(), W2), |a, b| *a + rho * *b).collect::<Vec<E::Scalar>>();
     let r_W = *r_W1 + rho * r_W2;
     Ok(Self { W, r_W })
+  }
+
+  /// Produces a default `RelaxedR1CSWitness` given an `R1CSShape`
+  pub fn default(S: &R1CSShape<E>) -> Self {
+    Self {
+      W: vec![E::Scalar::ZERO; S.num_vars],
+      r_W: E::Scalar::ZERO,
+    }
+  }
+
+  /// Pads the provided witness to the correct length
+  pub fn pad(&self, S: &R1CSShape<E>) -> Self {
+    let mut W = self.W.clone();
+    W.extend(vec![E::Scalar::ZERO; S.num_vars - W.len()]);
+    Self { W, r_W: self.r_W }
   }
 }
 
@@ -986,6 +1028,18 @@ impl<E> LR1CSInstance<E>
 where
   E: Engine,
 {
+  /// Produces a default [`LR1CSInstance]` given `R1CSShape`
+  pub fn default(S: &R1CSShape<E>) -> Self {
+    let comm_W = Commitment::<E>::default();
+    Self {
+      comm_W,
+      u: E::Scalar::ZERO,
+      X: vec![E::Scalar::ZERO; S.num_io],
+      rx: vec![E::Scalar::random(&mut OsRng); S.num_cons.log_2() + 1],
+      vs: vec![E::Scalar::ZERO; 3],
+    }
+  }
+
   /// Fold and [`LR1CSInstance`] with an [`R1CSInstance`]
   pub fn fold(
     &self,
@@ -998,7 +1052,7 @@ where
     let (X1, u1, comm_W_1) = (&self.X, self.u, &self.comm_W);
     let (X2, comm_W_2) = (&U2.X, &U2.comm_W);
     if self.rx.len() != rx.len() {
-      return Err(HyperNovaError::InvalidTargets.into());
+      return Err(HyperNovaError::InvalidEvaluationPoint.into());
     }
     if sigmas.len() != thetas.len() {
       return Err(HyperNovaError::InvalidTargets.into());
@@ -1014,7 +1068,7 @@ where
     Ok(Self {
       comm_W,
       X,
-      rx: self.rx.clone(),
+      rx: rx.to_vec(),
       vs,
       u,
     })

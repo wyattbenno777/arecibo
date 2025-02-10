@@ -72,7 +72,7 @@ where
     let mut sponge = Sponge::new_with_constants(&self.constants.0, Simplex);
     let acc = &mut ();
     let parameter = IOPattern(vec![
-      SpongeOp::Absorb(self.num_absorbs as u32),
+      SpongeOp::Absorb(self.state.len() as u32),
       SpongeOp::Squeeze(1u32),
     ]);
 
@@ -103,7 +103,7 @@ where
     let mut sponge = Sponge::new_with_constants(&self.constants.0, Simplex);
     let acc = &mut ();
     let parameter = IOPattern(vec![
-      SpongeOp::Absorb(self.num_absorbs as u32),
+      SpongeOp::Absorb(self.state.len() as u32),
       SpongeOp::Squeeze(len as u32),
     ]);
 
