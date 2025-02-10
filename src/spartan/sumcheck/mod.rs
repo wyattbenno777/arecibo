@@ -1,10 +1,13 @@
+use crate::constants::{DEFAULT_ABSORBS, NUM_CHALLENGE_BITS};
 use crate::errors::NovaError;
 
+use crate::gadgets::scalar_as_base;
 use crate::spartan::polys::{
   multilinear::MultilinearPolynomial,
   univariate::{CompressedUniPoly, UniPoly},
 };
-
+use crate::traits::{AbsorbInROTrait, CurveCycleEquipped, ROConstants};
+use crate::traits::{Dual, ROTrait};
 use crate::traits::{Engine, TranscriptEngineTrait};
 
 use ff::Field;
@@ -58,6 +61,54 @@ impl<E: Engine> SumcheckProof<E> {
 
       //derive the verifier's challenge for the next round
       let r_i = transcript.squeeze(b"c")?;
+
+      r.push(r_i);
+
+      // evaluate the claimed degree-ell polynomial at r_i
+      e = poly.evaluate(&r_i);
+    }
+
+    Ok((e, r))
+  }
+
+  pub fn verify_poseidon(
+    &self,
+    claim: E::Scalar,
+    num_rounds: usize,
+    degree_bound: usize,
+    ro: <Dual<E> as Engine>::RO,
+    ro_consts: &ROConstants<Dual<E>>,
+  ) -> Result<(E::Scalar, Vec<E::Scalar>), NovaError>
+  where
+    E: CurveCycleEquipped,
+  {
+    let mut e = claim;
+    let mut r: Vec<E::Scalar> = Vec::new();
+    let mut ro = ro;
+    // verify that there is a univariate polynomial for each round
+    if self.compressed_polys.len() != num_rounds {
+      return Err(NovaError::InvalidSumcheckProof);
+    }
+
+    for i in 0..self.compressed_polys.len() {
+      let poly = self.compressed_polys[i].decompress(&e);
+
+      // verify degree bound
+      if poly.degree() != degree_bound {
+        return Err(NovaError::InvalidSumcheckProof);
+      }
+
+      // we do not need to check if poly(0) + poly(1) = e, as
+      // decompress() call above already ensures that holds
+      debug_assert_eq!(poly.eval_at_zero() + poly.eval_at_one(), e);
+
+      // append the prover's message to the transcript
+      <UniPoly<E::Scalar> as AbsorbInROTrait<Dual<E>>>::absorb_in_ro(&poly, &mut ro);
+
+      //derive the verifier's challenge for the next round
+      let r_i = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
+      ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
+      ro.absorb(r_i);
 
       r.push(r_i);
 
@@ -555,11 +606,14 @@ impl<E: Engine> SumcheckProof<E> {
     poly_E: &mut MultilinearPolynomial<E::Scalar>,
     poly_F: &mut MultilinearPolynomial<E::Scalar>,
     comb_func: F,
-    transcript: &mut E::TE,
+    ro: <Dual<E> as Engine>::RO,
+    ro_consts: &ROConstants<Dual<E>>,
   ) -> Result<(Self, Vec<E::Scalar>, Vec<E::Scalar>), NovaError>
   where
     F: Fn(E::Scalar, E::Scalar, E::Scalar, E::Scalar, E::Scalar, E::Scalar) -> E::Scalar + Sync,
+    E: CurveCycleEquipped,
   {
+    let mut ro = ro;
     let mut r: Vec<E::Scalar> = Vec::new();
     let mut polys: Vec<CompressedUniPoly<E::Scalar>> = Vec::new();
     let mut claim_per_round = claim;
@@ -581,10 +635,12 @@ impl<E: Engine> SumcheckProof<E> {
       };
 
       // append the prover's message to the transcript
-      transcript.absorb(b"p", &poly);
+      <UniPoly<E::Scalar> as AbsorbInROTrait<Dual<E>>>::absorb_in_ro(&poly, &mut ro);
 
       //derive the verifier's challenge for the next round
-      let r_i = transcript.squeeze(b"c")?;
+      let r_i = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
+      ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
+      ro.absorb(r_i);
       r.push(r_i);
       polys.push(poly.compress());
 

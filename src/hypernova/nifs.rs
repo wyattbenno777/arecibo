@@ -11,7 +11,7 @@ use crate::{
   constants::DEFAULT_ABSORBS,
   cyclefold::util::absorb_primary_r1cs,
   r1cs::{LR1CSInstance, R1CSInstance, R1CSShape, R1CSWitness},
-  traits::{CurveCycleEquipped, Dual, Engine, ROConstants, TranscriptEngineTrait},
+  traits::{CurveCycleEquipped, Dual, Engine, ROConstants},
 };
 use ff::Field;
 
@@ -51,6 +51,10 @@ where
         .map(|b| scalar_as_base::<Dual<E>>(*b))
         .collect::<Vec<_>>()
     };
+    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
+    for b in beta.iter() {
+      ro.absorb(*b);
+    }
 
     // Helper function for resizing polynomials
     let pad_poly = |mut vec: Vec<E::Scalar>| {
@@ -118,7 +122,8 @@ where
       &mut poly_Cz,
       &mut poly_beta,
       comb_func,
-      &mut E::TE::new(b"transcript"), // TODO: customized this to use poseidonRO for verifier circuit
+      ro,
+      ro_consts,
     )?;
 
     // Compute sigmas and thetas
@@ -164,12 +169,16 @@ where
         .map(|b| scalar_as_base::<Dual<E>>(*b))
         .collect::<Vec<_>>()
     };
+    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
+    for b in beta.iter() {
+      ro.absorb(*b);
+    }
 
     // Verify sumcheck proof
     let claim = U1.vs[0] + gamma * U1.vs[1] + gamma * gamma * U1.vs[2];
     let (new_claim, rx_p) = self
       .sc
-      .verify(claim, num_rounds, 3, &mut E::TE::new(b"transcript"))?;
+      .verify_poseidon(claim, num_rounds, 3, ro, ro_consts)?;
     let e1 = EqPolynomial::new(U1.rx.to_vec()).evaluate(&rx_p);
     let cl = (self.sigmas[0] + gamma * self.sigmas[1] + gamma * gamma * self.sigmas[2]) * e1;
     let e2 = EqPolynomial::new(beta).evaluate(&rx_p);
