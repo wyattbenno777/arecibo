@@ -34,7 +34,6 @@ where
   // Internal State
   state: Vec<Base>,
   constants: PoseidonConstantsCircuit<Base>,
-  num_absorbs: usize,
   squeezed: bool,
   _p: PhantomData<Scalar>,
 }
@@ -47,11 +46,10 @@ where
   type CircuitRO = PoseidonROCircuit<Base>;
   type Constants = PoseidonConstantsCircuit<Base>;
 
-  fn new(constants: PoseidonConstantsCircuit<Base>, num_absorbs: usize) -> Self {
+  fn new(constants: PoseidonConstantsCircuit<Base>, _num_absorbs: usize) -> Self {
     Self {
       state: Vec::new(),
       constants,
-      num_absorbs,
       squeezed: false,
       _p: PhantomData,
     }

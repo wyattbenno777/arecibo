@@ -14,8 +14,6 @@ use crate::{
   traits::{CurveCycleEquipped, Dual, Engine, ROConstants, TranscriptEngineTrait},
 };
 use ff::Field;
-use rayon::iter::IntoParallelIterator;
-use rayon::iter::ParallelIterator;
 
 /// A SNARK that holds the proof of a step of an incremental computation
 pub struct NIFS<E: CurveCycleEquipped> {
@@ -53,23 +51,27 @@ where
         .map(|b| scalar_as_base::<Dual<E>>(*b))
         .collect::<Vec<_>>()
     };
+    // Helper function for resizing vectors
+    let pad_poly = |mut vec: Vec<E::Scalar>| {
+      vec.resize(S.num_vars * 2, E::Scalar::ZERO);
+      vec
+    };
 
     // Compute L_j = eq(rx, y) • H_j(y)
     let z1 = [W1.W.as_slice(), [U1.u].as_slice(), U1.X.as_slice()].concat();
     let mut poly_ABC = {
-      let (mut evals_A, mut evals_B, mut evals_C) = S.multiply_vec(&z1)?;
-      evals_A.resize(S.num_vars * 2, E::Scalar::ZERO);
-      evals_B.resize(S.num_vars * 2, E::Scalar::ZERO);
-      evals_C.resize(S.num_vars * 2, E::Scalar::ZERO);
-      let evals_ABC = (0..evals_A.len())
-        .into_par_iter()
-        .map(|i| (evals_A[i] + gamma * evals_B[i] + gamma * gamma * evals_C[i]))
-        .collect::<Vec<E::Scalar>>();
+      let (evals_A, evals_B, evals_C) = S.multiply_vec(&z1)?;
+      let evals_ABC = pad_poly(evals_A)
+        .into_iter()
+        .zip(pad_poly(evals_B))
+        .zip(pad_poly(evals_C))
+        .map(|((a, b), c)| a + gamma * b + gamma * gamma * c)
+        .collect::<Vec<_>>();
       MultilinearPolynomial::new(evals_ABC)
     };
-    let evals_rx = EqPolynomial::evals_from_points(&U1.rx);
-    let mut evals_rx = MultilinearPolynomial::new(evals_rx);
-    let L_comb_func = |abc: E::Scalar, e: E::Scalar| -> E::Scalar { abc * e };
+    let eq_eval_rx = EqPolynomial::evals_from_points(&U1.rx);
+    let mut eq_rx = MultilinearPolynomial::new(eq_eval_rx);
+    let L_comb_func = |abc: E::Scalar, eq: E::Scalar| -> E::Scalar { abc * eq };
 
     // Q = eq(beta, x) • G(x)
     let z2 = [
@@ -82,14 +84,11 @@ where
     let gamma_cubed = gamma * gamma * gamma;
     let mut poly_beta = MultilinearPolynomial::new(eq_beta.evals());
     let (mut poly_Az, mut poly_Bz, mut poly_Cz) = {
-      let (mut poly_Az, mut poly_Bz, mut poly_Cz) = S.multiply_vec(&z2)?;
-      poly_Az.resize(S.num_vars * 2, E::Scalar::ZERO);
-      poly_Bz.resize(S.num_vars * 2, E::Scalar::ZERO);
-      poly_Cz.resize(S.num_vars * 2, E::Scalar::ZERO);
+      let (poly_Az, poly_Bz, poly_Cz) = S.multiply_vec(&z2)?;
       (
-        MultilinearPolynomial::new(poly_Az),
-        MultilinearPolynomial::new(poly_Bz),
-        MultilinearPolynomial::new(poly_Cz),
+        MultilinearPolynomial::new(pad_poly(poly_Az)),
+        MultilinearPolynomial::new(pad_poly(poly_Bz)),
+        MultilinearPolynomial::new(pad_poly(poly_Cz)),
       )
     };
     let Q_comb_func = |a: E::Scalar, b: E::Scalar, c: E::Scalar, eq: E::Scalar| -> E::Scalar {
@@ -99,49 +98,37 @@ where
     // sumcheck
     let comb_func =
       |L_abc: E::Scalar,
-       L_e: E::Scalar,
+       L_eq: E::Scalar,
        Q_a: E::Scalar,
        Q_b: E::Scalar,
        Q_c: E::Scalar,
        Q_eq: E::Scalar|
-       -> E::Scalar { L_comb_func(L_abc, L_e) + Q_comb_func(Q_a, Q_b, Q_c, Q_eq) };
+       -> E::Scalar { L_comb_func(L_abc, L_eq) + Q_comb_func(Q_a, Q_b, Q_c, Q_eq) };
     let claim = U1.vs[0] + gamma * U1.vs[1] + gamma * gamma * U1.vs[2];
     let (sc, rx_p, _) = SumcheckProof::<E>::prove_cubic_hypernova(
       claim,
       s,
       &mut poly_ABC,
-      &mut evals_rx,
+      &mut eq_rx,
       &mut poly_Az,
       &mut poly_Bz,
       &mut poly_Cz,
       &mut poly_beta,
       comb_func,
-      &mut E::TE::new(b"transcript"), // TODO: change to use poseidonRO
+      &mut E::TE::new(b"transcript"), // TODO: customized this to use poseidonRO for verifier circuit
     )?;
 
-    // Send over sigmas and thetas
-    let sigmas = {
-      let (mut poly_Az, mut poly_Bz, mut poly_Cz) = S.multiply_vec(&z1)?;
-      poly_Az.resize(S.num_vars * 2, E::Scalar::ZERO);
-      poly_Bz.resize(S.num_vars * 2, E::Scalar::ZERO);
-      poly_Cz.resize(S.num_vars * 2, E::Scalar::ZERO);
-      vec![
-        MultilinearPolynomial::new(poly_Az).evaluate(&rx_p),
-        MultilinearPolynomial::new(poly_Bz).evaluate(&rx_p),
-        MultilinearPolynomial::new(poly_Cz).evaluate(&rx_p),
-      ]
+    // Compute sigmas and thetas
+    let claimed_vals = |z: &[E::Scalar]| -> Result<Vec<E::Scalar>, NovaError> {
+      let (poly_Az, poly_Bz, poly_Cz) = S.multiply_vec(z)?;
+      Ok(vec![
+        MultilinearPolynomial::new(pad_poly(poly_Az)).evaluate(&rx_p),
+        MultilinearPolynomial::new(pad_poly(poly_Bz)).evaluate(&rx_p),
+        MultilinearPolynomial::new(pad_poly(poly_Cz)).evaluate(&rx_p),
+      ])
     };
-    let thetas = {
-      let (mut poly_Az, mut poly_Bz, mut poly_Cz) = S.multiply_vec(&z2)?;
-      poly_Az.resize(S.num_vars * 2, E::Scalar::ZERO);
-      poly_Bz.resize(S.num_vars * 2, E::Scalar::ZERO);
-      poly_Cz.resize(S.num_vars * 2, E::Scalar::ZERO);
-      vec![
-        MultilinearPolynomial::new(poly_Az).evaluate(&rx_p),
-        MultilinearPolynomial::new(poly_Bz).evaluate(&rx_p),
-        MultilinearPolynomial::new(poly_Cz).evaluate(&rx_p),
-      ]
-    };
+    let sigmas = claimed_vals(&z1)?;
+    let thetas = claimed_vals(&z2)?;
 
     // Output the folded instance, witness pair
     let U = U1.fold(U2, rho, &rx_p, &sigmas, &thetas)?;
@@ -152,7 +139,7 @@ where
   /// Verify a fold
   pub fn verify(
     &self,
-    s: usize,
+    num_rounds: usize,
     ro_consts: &ROConstants<Dual<E>>,
     pp_digest: &E::Scalar,
     U1: &LR1CSInstance<E>,
@@ -168,7 +155,7 @@ where
     let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(gamma);
     let beta = {
-      ro.squeeze_vec(NUM_CHALLENGE_BITS, s)
+      ro.squeeze_vec(NUM_CHALLENGE_BITS, num_rounds)
         .iter()
         .map(|b| scalar_as_base::<Dual<E>>(*b))
         .collect::<Vec<_>>()
@@ -176,7 +163,7 @@ where
     let claim = U1.vs[0] + gamma * U1.vs[1] + gamma * gamma * U1.vs[2];
     let (new_claim, rx_p) = self
       .sc
-      .verify(claim, s, 3, &mut E::TE::new(b"transcript"))?;
+      .verify(claim, num_rounds, 3, &mut E::TE::new(b"transcript"))?;
     let e1 = EqPolynomial::new(U1.rx.to_vec()).evaluate(&rx_p);
     let cl = (self.sigmas[0] + gamma * self.sigmas[1] + gamma * gamma * self.sigmas[2]) * e1;
     let e2 = EqPolynomial::new(beta).evaluate(&rx_p);
