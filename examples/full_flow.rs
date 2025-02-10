@@ -121,7 +121,6 @@ fn main() {
   let (pk, vk) = Decider::setup(&rs_pp, &mut rng).unwrap();
   println!("Decider::setup: took {:?}", start.elapsed());
   let start = Instant::now();
-  println!("Decider::prove: 1. creating proof");
   let proof = Decider::prove(&rs_pp, &pk, &recursive_snark, &mut rng);
   match &proof {
     Ok(_) => println!("CompressedSNARK::prove: Ok, took {:?}", start.elapsed()),

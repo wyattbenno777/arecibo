@@ -94,9 +94,7 @@ impl Decider {
   where
     R: RngCore,
   {
-    println!("Decider::prove: 2. creating circuit");
     let circuit = DeciderCircuit::<Bn256EngineKZG>::new(pp, rs.clone())?;
-    println!("Decider::prove: 3. circuit created");
     // TODO: Do we need D::Proof?
     let rho = circuit.randomness;
     let kzg_challenges = circuit.kzg_challenges.clone();
@@ -105,9 +103,7 @@ impl Decider {
       .iter()
       .map(|c| KZGCommitmentEngine::prove_with_challenge(&pk.kzg_pk, *c, &circuit.W_i1.W[..]))
       .collect::<Result<Vec<_>, _>>()?;
-    println!("Decider::prove: creating proof");
     let groth16_proof = create_random_proof(circuit, &pk.groth16_pk, rng)?;
-    println!("Decider::prove: proof created");
     Ok(Self {
       groth16_proof,
       rho,
@@ -150,8 +146,8 @@ impl Decider {
       &z_0[..],
       &z_i[..],
       // &U_final_commitments.inputize_nonnative(),
-      &self.kzg_challenges[..],
-      &self.kzg_proofs.iter().map(|p| p.eval).collect::<Vec<_>>()[..],
+      // &self.kzg_challenges[..],
+      // &self.kzg_proofs.iter().map(|p| p.eval).collect::<Vec<_>>()[..],
       // &proof.cmT.inputize_nonnative(),
     ]
     .concat();

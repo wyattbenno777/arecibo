@@ -514,7 +514,6 @@ where
     let g1 = g1.to_affine();
     let g2 = g2.to_affine();
 
-    println!("ic_affine: {:?}", ic_affine);
     let vk = VerifyingKey::<E> {
         alpha_g1: g1.mul(alpha).to_affine(),
         beta_g1: g1.mul(beta).to_affine(),
