@@ -163,13 +163,13 @@ where
   E1: CurveCycleEquipped,
 {
   // Input
-  pub(crate) z0: Vec<E1::Scalar>,
+  pub z0: Vec<E1::Scalar>,
 
   // primary circuit data
   pub(crate) r_W_primary: RelaxedR1CSWitness<E1>,
-  pub(crate) r_U_primary: RelaxedR1CSInstance<E1>,
+  pub r_U_primary: RelaxedR1CSInstance<E1>,
   pub(crate) l_w_primary: R1CSWitness<E1>,
-  pub(crate) l_u_primary: R1CSInstance<E1>,
+  pub l_u_primary: R1CSInstance<E1>,
 
   // Number of recursive steps proven
   pub(crate) i: usize,
@@ -185,7 +185,7 @@ where
   pub(crate) r_U_cyclefold: RelaxedR1CSInstance<Dual<E1>>,
 
   // outputs
-  pub(in crate) zi: Vec<E1::Scalar>,
+  pub zi: Vec<E1::Scalar>,
 
   // makes Nova simulataable
   r_i: E1::Scalar,

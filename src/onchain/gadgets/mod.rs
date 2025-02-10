@@ -10,7 +10,7 @@ use crate::{
   },
   gadgets::le_bits_to_num,
   r1cs::RelaxedR1CSInstance,
-  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, ROCircuitTrait, ROTrait},
+  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, ROCircuitTrait, ROTrait}, Commitment,
 };
 use ec_gpu_gen::threadpool::Worker;
 use ff::PrimeField;
@@ -115,5 +115,25 @@ impl EvalGadget {
 
     // Convert the result back to AllocatedNum
     AllocatedNum::alloc(&mut cs, || Ok(eval))
+  }
+}
+
+pub struct DeciderNovaGadget {}
+
+impl DeciderNovaGadget {
+  pub fn fold_group_elements_native<E: CurveCycleEquipped>(
+    U_commitments: (Commitment<E>, Commitment<E>),
+    u_commitments: Commitment<E>,
+    // cmT: Commitment<E>,
+    r: E::Scalar,
+  ) -> Result<(Commitment<E>, Commitment<E>), SynthesisError> {
+    let U_cmW = U_commitments.0;
+    let U_cmE = U_commitments.1;
+    let u_cmW = u_commitments;
+    // *comm_E_1 + *comm_T * *r;
+    let cmW = U_cmW + u_cmW * r;
+    let cmE = U_cmE; // + cmT * r;
+
+    Ok((cmW, cmE))
   }
 }

@@ -507,16 +507,14 @@ where
     println!("Found {} identity elements among {} elements", identity_count, l_affine.len());
     for e in l_affine.iter() {
         if e.is_identity().into() {
-            // println!("l_affine identity: {:?}", e);
             return Err(SynthesisError::UnconstrainedVariable);
-        } else {
-            // println!("l_affine not identity: {:?}", e);
-        }
+        } 
     }
 
     let g1 = g1.to_affine();
     let g2 = g2.to_affine();
 
+    println!("ic_affine: {:?}", ic_affine);
     let vk = VerifyingKey::<E> {
         alpha_g1: g1.mul(alpha).to_affine(),
         beta_g1: g1.mul(beta).to_affine(),

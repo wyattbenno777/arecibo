@@ -1,21 +1,25 @@
 //! Implements components to enable the compression-step for IVC proofs
 
+use super::{decider_circuit::DeciderCircuit, gadgets::DeciderNovaGadget};
 use crate::{
-  frontend::groth16::{self, verify_proof}, 
-  provider::{hyperkzg::EvaluationEngine, kzg_commitment::{KZGCommitmentEngine, KZGProof, KZGProverKey, KZGVerifierKey}, Bn256EngineKZG}, 
-  traits::Engine, Commitment
-};
-use crate::
-  errors::NovaError;
-use crate::{
-  nebula::rs::{PublicParams, RecursiveSNARK},
-  traits::ROConstants,
+  errors::NovaError,
+  frontend::groth16::{
+    self, create_random_proof, generate_random_parameters, verify_proof, Parameters,
+  },
+  nebula::{
+    nifs::NIFS,
+    rs::{PublicParams, RecursiveSNARK},
+  },
+  provider::{
+    hyperkzg::EvaluationEngine,
+    kzg_commitment::{KZGCommitmentEngine, KZGProof, KZGProverKey, KZGVerifierKey},
+    Bn256EngineKZG,
+  },
+  traits::{evaluation::EvaluationEngineTrait, Engine, ROConstants},
+  Commitment,
 };
 use halo2curves::bn256::{Bn256, Fr};
 use rand::RngCore;
-use crate::frontend::groth16::{create_random_proof, generate_random_parameters, Parameters};
-use super::decider_circuit::DeciderCircuit;
-use crate::traits::evaluation::EvaluationEngineTrait;
 // use crate::traits::commitment::CommitmentEngineTrait;
 /// A type that holds the prover key for [`CompressedSNARK`]
 #[derive(Clone)]
@@ -46,24 +50,23 @@ impl Decider {
   pub fn setup<R>(
     pp: &PublicParams<Bn256EngineKZG>,
     rng: &mut R,
-  ) -> Result<(ProverKey, VerifierKey), NovaError> 
+  ) -> Result<(ProverKey, VerifierKey), NovaError>
   where
     R: RngCore,
-    {
+  {
     let pp_hash = pp.digest();
     let circuit = DeciderCircuit::<Bn256EngineKZG>::default(
       &pp.circuit_shape_primary.r1cs_shape,
       &pp.circuit_shape_cyclefold.r1cs_shape,
       ROConstants::<Bn256EngineKZG>::default(),
       pp_hash,
-      1, 
+      1, // TODO: Parameterize
       // TODO: Set correct value
       2, // Nebula's running CommittedInstance contains 2 commitments
       (&*pp.ck_primary, &*pp.ck_cyclefold),
     );
 
-    let (kzg_pk, kzg_vk) =
-    EvaluationEngine::<Bn256, Bn256EngineKZG>::setup(pp.ck_primary.clone());
+    let (kzg_pk, kzg_vk) = EvaluationEngine::<Bn256, Bn256EngineKZG>::setup(pp.ck_primary.clone());
 
     // get the Groth16 specific setup for the circuit
     let params = generate_random_parameters::<Bn256EngineKZG, _, _>(circuit, rng).unwrap();
@@ -87,8 +90,10 @@ impl Decider {
     pk: &ProverKey,
     rs: &RecursiveSNARK<Bn256EngineKZG>,
     rng: &mut R,
-  ) -> Result<Self, NovaError> 
-  where R: RngCore {
+  ) -> Result<Self, NovaError>
+  where
+    R: RngCore,
+  {
     println!("Decider::prove: 2. creating circuit");
     let circuit = DeciderCircuit::<Bn256EngineKZG>::new(pp, rs.clone())?;
     println!("Decider::prove: 3. circuit created");
@@ -96,14 +101,9 @@ impl Decider {
     let rho = circuit.randomness;
     let kzg_challenges = circuit.kzg_challenges.clone();
 
-    let kzg_proofs = kzg_challenges.iter()
-      .map(|c| {          
-        KZGCommitmentEngine::prove_with_challenge(
-            &pk.kzg_pk,
-            *c,
-            &circuit.W_i1.W[..]
-          )
-      })
+    let kzg_proofs = kzg_challenges
+      .iter()
+      .map(|c| KZGCommitmentEngine::prove_with_challenge(&pk.kzg_pk, *c, &circuit.W_i1.W[..]))
       .collect::<Result<Vec<_>, _>>()?;
     println!("Decider::prove: creating proof");
     let groth16_proof = create_random_proof(circuit, &pk.groth16_pk, rng)?;
@@ -125,28 +125,52 @@ impl Decider {
     z_i: Vec<Fr>,
     U_commitments: (Commitment<Bn256EngineKZG>, Commitment<Bn256EngineKZG>),
     u_commitments: Commitment<Bn256EngineKZG>,
+    // nifs_proof: NIFS<Bn256EngineKZG>,
   ) -> Result<(), NovaError> {
-  //   let VerifierKey {
-  //     groth16_vk,
-  //     pp_hash,
-  //     kzg_vk,
-  //   } = vk;
-  //   // 6.2. Fold the commitments
-  //   // TODO
-  //   let U_final_commitments = unimplemented!();
+    let VerifierKey {
+      groth16_vk,
+      pp_hash,
+      kzg_vk,
+    } = vk;
 
-  //   let public_input = [
-  //     &[pp_hash, i][..],
-  //     &z_0,
-  //     &z_i,
-  //     &U_final_commitments.inputize_nonnative(),
-  //     &self.kzg_challenges[..],
-  //     self.kzg_proofs.iter().map(|p| p.eval).collect::<Vec<_>>(),
-  //     // &proof.cmT.inputize_nonnative(),
-  // ]
-  // .concat();
+    let prepared_groth16_vk = groth16::prepare_verifying_key(&groth16_vk);
 
-  // let snark_v = verify_proof(&groth16_vk, &self.groth16_proof, &public_input)?;
+    //   // 6.2. Fold the commitments
+    //   // TODO
+    let U_final_commitments = DeciderNovaGadget::fold_group_elements_native::<Bn256EngineKZG>(
+      U_commitments,
+      u_commitments,
+      // nifs_proof.comm_T,
+      self.rho,
+    );
+
+    let public_inputs = [
+      &[pp_hash],
+      &[i],
+      &z_0[..],
+      &z_i[..],
+      // &U_final_commitments.inputize_nonnative(),
+      &self.kzg_challenges[..],
+      &self.kzg_proofs.iter().map(|p| p.eval).collect::<Vec<_>>()[..],
+      // &proof.cmT.inputize_nonnative(),
+    ]
+    .concat();
+
+
+    let snark_v = verify_proof(&prepared_groth16_vk, &self.groth16_proof, &public_inputs[..])?;
+
+    if !snark_v {
+      return Err(NovaError::ProofVerifyError);
+    }
+    // TODO: 7.3 Verify KZG proofs
+    //   for ((cm, &c), pi) in U_final_commitments
+    //   .iter()
+    //   .zip(&proof.kzg_challenges)
+    //   .zip(&proof.kzg_proofs)
+    // {
+    //   // we're at the Ethereum EVM case, so the CS1 is KZG commitments
+    //   CS1::verify_with_challenge(&cs_vp, c, cm, pi)?;
+    // }
     Ok(())
   }
 }
@@ -183,5 +207,3 @@ impl Decider {
 //     .concat(),
 //   )
 // }
-
-

@@ -56,7 +56,7 @@ pub struct R1CSWitness<E: Engine> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct R1CSInstance<E: Engine> {
-  pub(crate) comm_W: Commitment<E>,
+  pub comm_W: Commitment<E>,
   pub(crate) X: Vec<E::Scalar>,
 }
 
@@ -73,10 +73,10 @@ pub struct RelaxedR1CSWitness<E: Engine> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct RelaxedR1CSInstance<E: Engine> {
-  pub(crate) comm_W: Commitment<E>,
-  pub(crate) comm_E: Commitment<E>,
-  pub(crate) X: Vec<E::Scalar>,
-  pub(crate) u: E::Scalar,
+  pub comm_W: Commitment<E>,
+  pub comm_E: Commitment<E>,
+  pub X: Vec<E::Scalar>,
+  pub u: E::Scalar,
 }
 
 /// A type for functions that hints commitment key sizing by returning the floor of the number of required generators.

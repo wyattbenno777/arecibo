@@ -16,7 +16,7 @@ use arecibo::{
   traits::{snark::RelaxedR1CSSNARKTrait, Engine},
 };
 use ff::Field;
-use halo2curves::bn256::Bn256;
+use halo2curves::bn256::{Bn256, Fr};
 
 use rand::thread_rng;
 use std::time::Instant;
@@ -117,13 +117,13 @@ fn main() {
 
   let mut rng = thread_rng();
   let start = Instant::now();
-  // let (pk, vk) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
+  
   let (pk, vk) = Decider::setup(&rs_pp, &mut rng).unwrap();
   println!("Decider::setup: took {:?}", start.elapsed());
   let start = Instant::now();
   println!("Decider::prove: 1. creating proof");
-  let res = Decider::prove(&rs_pp, &pk, &recursive_snark, &mut rng);
-  match &res {
+  let proof = Decider::prove(&rs_pp, &pk, &recursive_snark, &mut rng);
+  match &proof {
     Ok(_) => println!("CompressedSNARK::prove: Ok, took {:?}", start.elapsed()),
     Err(e) => println!(
       "CompressedSNARK::prove: Error: {:?}, took {:?}",
@@ -131,7 +131,20 @@ fn main() {
       start.elapsed()
     ),
   }
-  assert!(res.is_ok());
+  assert!(proof.is_ok());
+
+  let start = Instant::now();
+  let res = Decider::verify(
+    &proof.unwrap(),
+     vk, 
+     Fr::from(num_steps as u64), 
+     z0, 
+     recursive_snark.zi, 
+     (recursive_snark.r_U_primary.comm_W, recursive_snark.r_U_primary.comm_E), 
+     recursive_snark.l_u_primary.comm_W);
+  println!("Decider::verify: {:?}, took {:?}", res.is_ok(), start.elapsed());
+
+  res.unwrap();
   // let compressed_snark = res.unwrap();
 
   // let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());

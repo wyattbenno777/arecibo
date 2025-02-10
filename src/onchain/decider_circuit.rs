@@ -211,22 +211,22 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
   ) -> Result<(), SynthesisError> {
     // let arith = AllocatedR1CSInstance::alloc(cs, Some(self.arith))?;
 
-    let pp_hash = AllocatedNum::alloc(cs.namespace(|| "pp_hash"), || Ok(self.pp_hash))?;
+    let pp_hash = AllocatedNum::alloc_input(cs.namespace(|| "pp_hash"), || Ok(self.pp_hash))?;
 
-    let i = AllocatedNum::alloc(cs.namespace(|| "i"), || Ok(E::Scalar::from(self.i as u64)))?;
+    let i = AllocatedNum::alloc_input(cs.namespace(|| "i"), || Ok(E::Scalar::from(self.i as u64)))?;
 
     let z_0: Vec<AllocatedNum<E::Scalar>> = self
       .z_0
       .iter()
       .enumerate()
-      .map(|(i, val)| AllocatedNum::alloc(cs.namespace(|| format!("z_0_{}", i)), || Ok(*val)))
+      .map(|(i, val)| AllocatedNum::alloc_input(cs.namespace(|| format!("z_0_{}", i)), || Ok(*val)))
       .collect::<Result<Vec<_>, SynthesisError>>()?;
 
     let z_i: Vec<AllocatedNum<E::Scalar>> = self
       .z_i
       .iter()
       .enumerate()
-      .map(|(i, val)| AllocatedNum::alloc(cs.namespace(|| format!("z_i_{}", i)), || Ok(*val)))
+      .map(|(i, val)| AllocatedNum::alloc_input(cs.namespace(|| format!("z_i_{}", i)), || Ok(*val)))
       .collect::<Result<Vec<_>, SynthesisError>>()?;
 
     // We don't need to check u_i.W
@@ -264,7 +264,7 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
     let kzg_challenges: Vec<AllocatedNum<E::Scalar>> = self
       .kzg_challenges
       .iter()
-      .map(|x| AllocatedNum::alloc(cs.namespace(|| "kzg_challenges"), || Ok(*x)))
+      .map(|x| AllocatedNum::alloc_input(cs.namespace(|| "kzg_challenges"), || Ok(*x)))
       .collect::<Result<Vec<_>, SynthesisError>>()?;
 
     println!("kzg_challenges len: {:?}", kzg_challenges.len());
@@ -272,7 +272,7 @@ impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
     let kzg_evaluations: Vec<AllocatedNum<E::Scalar>> = self
       .kzg_evaluations
       .iter()
-      .map(|x| AllocatedNum::alloc(cs.namespace(|| "kzg_evaluations"), || Ok(*x)))
+      .map(|x| AllocatedNum::alloc_input(cs.namespace(|| "kzg_evaluations"), || Ok(*x)))
       .collect::<Result<Vec<_>, SynthesisError>>()?;
   
     // Step 1: Enforce U_{n+1} and W_{n+1} satisfy r1cs
