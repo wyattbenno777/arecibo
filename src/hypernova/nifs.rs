@@ -51,7 +51,8 @@ where
         .map(|b| scalar_as_base::<Dual<E>>(*b))
         .collect::<Vec<_>>()
     };
-    // Helper function for resizing vectors
+
+    // Helper function for resizing polynomials
     let pad_poly = |mut vec: Vec<E::Scalar>| {
       vec.resize(S.num_vars * 2, E::Scalar::ZERO);
       vec
