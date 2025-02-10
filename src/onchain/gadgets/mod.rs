@@ -4,13 +4,9 @@
 #![allow(unused_mut)]
 
 use crate::{
-  cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance,
-  frontend::{
+  constants::NUM_HASH_BITS, cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance, frontend::{
     domain::EvaluationDomain, gpu::GpuName, num::AllocatedNum, ConstraintSystem, SynthesisError,
-  },
-  gadgets::le_bits_to_num,
-  r1cs::RelaxedR1CSInstance,
-  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, ROCircuitTrait, ROTrait}, Commitment,
+  }, gadgets::le_bits_to_num, r1cs::RelaxedR1CSInstance, traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, ROCircuitTrait, ROTrait}, Commitment
 };
 use ec_gpu_gen::threadpool::Worker;
 use ff::PrimeField;
@@ -26,10 +22,10 @@ impl KZGChallengesGadget {
     U_i: RelaxedR1CSInstance<E>,
   ) -> (E::Scalar, E::Scalar) {
     U_i.comm_W.absorb_in_ro(ro_1);
-    let rw = ROTrait::squeeze(ro_1, 128); //TODO: Choose right number
+    let rw = ro_1.squeeze(NUM_HASH_BITS); 
 
     U_i.comm_E.absorb_in_ro(ro_2);
-    let re = ROTrait::squeeze(ro_2, 128); //TODO: Choose right number
+    let re = ro_2.squeeze(NUM_HASH_BITS);
 
     (rw, re)
   }
@@ -45,8 +41,13 @@ impl KZGChallengesGadget {
     RO: ROCircuitTrait<E::Scalar>,
   {
     U_i.comm_W.absorb_in_ro(cs.namespace(|| "absorb_W"), ro_1)?;
-    let rw = ro_1.squeeze(cs.namespace(|| "squeeze_W"), 128)?;
+    let rw = ro_1.squeeze(cs.namespace(|| "squeeze_W"), NUM_HASH_BITS)?;
     let alloc_rw = le_bits_to_num(cs.namespace(|| "bits_to_num"), &rw)?;
+
+    U_i.comm_E.absorb_in_ro(cs.namespace(|| "absorb_E"), ro_2)?;
+    let re = ro_2.squeeze(cs.namespace(|| "squeeze_E"), NUM_HASH_BITS)?;
+    let alloc_re = le_bits_to_num(cs.namespace(|| "bits_to_num"), &re)?;
+
     // Trivial constraint to ensure that the variables are used 
     cs.enforce(
       || "Trivial constraint",
@@ -54,10 +55,6 @@ impl KZGChallengesGadget {
       |lc| lc,
       |lc| lc,
     );
-
-    U_i.comm_E.absorb_in_ro(cs.namespace(|| "absorb_E"), ro_2)?;
-    let re = ro_2.squeeze(cs.namespace(|| "squeeze_E"), 128)?;
-    let alloc_re = le_bits_to_num(cs.namespace(|| "bits_to_num"), &re)?;
     Ok((alloc_rw, alloc_re))
   }
 }

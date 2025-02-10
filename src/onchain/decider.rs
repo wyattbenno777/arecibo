@@ -20,7 +20,8 @@ use crate::{
 };
 use halo2curves::bn256::{Bn256, Fr};
 use rand::RngCore;
-// use crate::traits::commitment::CommitmentEngineTrait;
+use crate::onchain::eth::ToEth;
+
 /// A type that holds the prover key for [`CompressedSNARK`]
 #[derive(Clone)]
 pub struct ProverKey {
@@ -41,8 +42,8 @@ pub struct VerifierKey {
 pub struct Decider {
   groth16_proof: groth16::Proof<Bn256EngineKZG>,
   rho: Fr,
-  kzg_challenges: Vec<Fr>,
-  kzg_proofs: Vec<KZGProof<Bn256>>,
+  kzg_challenges: (Fr, Fr),
+  kzg_proofs: (KZGProof<Bn256>, KZGProof<Bn256>),
 }
 
 impl Decider {
@@ -61,8 +62,6 @@ impl Decider {
       ROConstants::<Bn256EngineKZG>::default(),
       pp_hash,
       1, // TODO: Parameterize
-      // TODO: Set correct value
-      2, // Nebula's running CommittedInstance contains 2 commitments
       (&*pp.ck_primary, &*pp.ck_cyclefold),
     );
 
@@ -99,10 +98,10 @@ impl Decider {
     let rho = circuit.randomness;
     let kzg_challenges = circuit.kzg_challenges.clone();
 
-    let kzg_proofs = kzg_challenges
-      .iter()
-      .map(|c| KZGCommitmentEngine::prove_with_challenge(&pk.kzg_pk, *c, &circuit.W_i1.W[..]))
-      .collect::<Result<Vec<_>, _>>()?;
+    let kzg_proofs = (
+      KZGCommitmentEngine::prove_with_challenge(&pk.kzg_pk, kzg_challenges.0, &circuit.W_i1.W[..])?,
+      KZGCommitmentEngine::prove_with_challenge(&pk.kzg_pk, kzg_challenges.1, &circuit.W_i1.W[..])?,
+    );
     let groth16_proof = create_random_proof(circuit, &pk.groth16_pk, rng)?;
     Ok(Self {
       groth16_proof,
@@ -146,7 +145,7 @@ impl Decider {
       &z_0[..],
       &z_i[..],
       // &U_final_commitments.inputize_nonnative(),
-      // &self.kzg_challenges[..],
+      &[self.kzg_challenges.0, self.kzg_challenges.1],
       // &self.kzg_proofs.iter().map(|p| p.eval).collect::<Vec<_>>()[..],
       // &proof.cmT.inputize_nonnative(),
     ]
@@ -171,35 +170,35 @@ impl Decider {
   }
 }
 
-// /// Prepares solidity calldata for calling the NovaDecider contract
-// #[allow(clippy::too_many_arguments)]
-// pub fn prepare_calldata(
-//   function_signature_check: [u8; 4],
-//   i: Fr,
-//   z_0: Vec<Fr>,
-//   z_i: Vec<Fr>,
-//   running_instance: &CommittedInstance<G1>,
-//   incoming_instance: &CommittedInstance<G1>,
-//   proof: Proof<G1, KZG<'static, Bn254>, Groth16<Bn254>>,
-// ) -> Result<Vec<u8>, Error> {
-//   Ok(
-//     [
-//       function_signature_check.to_eth(),
-//       i.to_eth(),   // i
-//       z_0.to_eth(), // z_0
-//       z_i.to_eth(), // z_i
-//       running_instance.cmW.to_eth(),
-//       running_instance.cmE.to_eth(),
-//       incoming_instance.cmW.to_eth(),
-//       proof.cmT.to_eth(),                 // cmT
-//       proof.r.to_eth(),                   // r
-//       proof.snark_proof.to_eth(),         // pA, pB, pC
-//       proof.kzg_challenges.to_eth(),      // challenge_W, challenge_E
-//       proof.kzg_proofs[0].eval.to_eth(),  // eval W
-//       proof.kzg_proofs[1].eval.to_eth(),  // eval E
-//       proof.kzg_proofs[0].proof.to_eth(), // W kzg_proof
-//       proof.kzg_proofs[1].proof.to_eth(), // E kzg_proof
-//     ]
-//     .concat(),
-//   )
-// }
+/// Prepares solidity calldata for calling the NovaDecider contract
+#[allow(clippy::too_many_arguments)]
+pub fn prepare_calldata(
+  function_signature_check: [u8; 4],
+  i: Fr,
+  z_0: Vec<Fr>,
+  z_i: Vec<Fr>,
+  running_instance: &RelaxedR1CSInstance<Bn256EngineKZG>,
+  incoming_instance: &R1CSInstance<Bn256EngineKZG>,
+  proof: Decider,
+) -> Result<Vec<u8>, NovaError> {
+  Ok(
+    [
+      function_signature_check.to_eth(),
+      i.to_eth(),   // i
+      z_0.to_eth(), // z_0
+      z_i.to_eth(), // z_i
+      running_instance.cmW.to_eth(),
+      running_instance.cmE.to_eth(),
+      incoming_instance.cmW.to_eth(),
+      proof.cmT.to_eth(),                 // cmT
+      proof.r.to_eth(),                   // r
+      proof.snark_proof.to_eth(),         // pA, pB, pC
+      proof.kzg_challenges.to_eth(),      // challenge_W, challenge_E
+      proof.kzg_proofs[0].eval.to_eth(),  // eval W
+      proof.kzg_proofs[1].eval.to_eth(),  // eval E
+      proof.kzg_proofs[0].proof.to_eth(), // W kzg_proof
+      proof.kzg_proofs[1].proof.to_eth(), // E kzg_proof
+    ]
+    .concat(),
+  )
+}

@@ -188,7 +188,7 @@ where
   pub zi: Vec<E1::Scalar>,
 
   // makes Nova simulataable
-  r_i: E1::Scalar,
+  pub r_i: E1::Scalar,
 }
 
 impl<E1> RecursiveSNARK<E1>
