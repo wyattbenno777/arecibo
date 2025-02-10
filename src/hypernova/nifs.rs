@@ -58,7 +58,9 @@ where
       vec
     };
 
-    // Compute L_j = eq(rx, y) • H_j(y)
+    // Compute L_j's
+    //
+    // where L_j = eq(rx, y) • H_j(y)
     let z1 = [W1.W.as_slice(), [U1.u].as_slice(), U1.X.as_slice()].concat();
     let mut poly_ABC = {
       let (evals_A, evals_B, evals_C) = S.multiply_vec(&z1)?;
@@ -96,7 +98,7 @@ where
       (a * b - c) * eq * gamma_cubed
     };
 
-    // sumcheck
+    // hypernova's sumcheck
     let comb_func =
       |L_abc: E::Scalar,
        L_eq: E::Scalar,
