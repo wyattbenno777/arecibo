@@ -34,7 +34,7 @@ where
     (U1, W1): (&LR1CSInstance<E>, &R1CSWitness<E>),
     (U2, W2): (&R1CSInstance<E>, &R1CSWitness<E>),
   ) -> Result<(Self, (LR1CSInstance<E>, R1CSWitness<E>)), NovaError> {
-    // rho, gamma, beta
+    // squeeze rho, gamma, beta
     let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(*pp_digest);
     absorb_primary_r1cs::<E, Dual<E>>(U2, &mut ro);
@@ -146,6 +146,7 @@ where
     U1: &LR1CSInstance<E>,
     U2: &R1CSInstance<E>,
   ) -> Result<LR1CSInstance<E>, NovaError> {
+    // squeeze rho, gamma, beta
     let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(*pp_digest);
     absorb_primary_r1cs::<E, Dual<E>>(U2, &mut ro);
@@ -161,6 +162,8 @@ where
         .map(|b| scalar_as_base::<Dual<E>>(*b))
         .collect::<Vec<_>>()
     };
+
+    // Verify sumcheck proof
     let claim = U1.vs[0] + gamma * U1.vs[1] + gamma * gamma * U1.vs[2];
     let (new_claim, rx_p) = self
       .sc
@@ -174,6 +177,8 @@ where
       assert_eq!(cl + cr, new_claim);
       return Err(NovaError::InvalidSumcheckProof);
     }
+
+    // Output folded instance.
     let U = U1.fold(U2, rho, &rx_p, &self.sigmas, &self.thetas)?;
     Ok(U)
   }
