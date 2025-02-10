@@ -172,7 +172,7 @@ where
   pub l_u_primary: R1CSInstance<E1>,
 
   // Number of recursive steps proven
-  pub(crate) i: usize,
+  pub i: usize,
 
   // incremental commitment of previous invokation of step circuit
   pub(crate) prev_IC: E1::Scalar,

@@ -2,21 +2,16 @@
 
 use super::{decider_circuit::DeciderCircuit, gadgets::DeciderNovaGadget};
 use crate::{
-  errors::NovaError,
-  frontend::groth16::{
-    self, create_random_proof, generate_random_parameters, verify_proof, Parameters,
-  },
-  nebula::{
+  errors::NovaError, frontend::groth16::{
+    self, create_random_proof, generate_random_parameters, verify_proof, Parameters, Proof as Groth16Proof
+  }, nebula::{
     nifs::NIFS,
     rs::{PublicParams, RecursiveSNARK},
-  },
-  provider::{
+  }, provider::{
     hyperkzg::EvaluationEngine,
     kzg_commitment::{KZGCommitmentEngine, KZGProof, KZGProverKey, KZGVerifierKey},
     Bn256EngineKZG,
-  },
-  traits::{evaluation::EvaluationEngineTrait, Engine, ROConstants},
-  Commitment,
+  }, r1cs::{R1CSInstance, RelaxedR1CSInstance}, traits::{evaluation::EvaluationEngineTrait, Engine, ROConstants}, Commitment
 };
 use halo2curves::bn256::{Bn256, Fr};
 use rand::RngCore;
@@ -40,7 +35,7 @@ pub struct VerifierKey {
 /// A SNARK that proves the knowledge of a valid Nebula proof
 #[derive(Debug)]
 pub struct Decider {
-  groth16_proof: groth16::Proof<Bn256EngineKZG>,
+  groth16_proof: Groth16Proof<Bn256EngineKZG>,
   rho: Fr,
   kzg_challenges: (Fr, Fr),
   kzg_proofs: (KZGProof<Bn256>, KZGProof<Bn256>),
@@ -179,25 +174,26 @@ pub fn prepare_calldata(
   z_i: Vec<Fr>,
   running_instance: &RelaxedR1CSInstance<Bn256EngineKZG>,
   incoming_instance: &R1CSInstance<Bn256EngineKZG>,
-  proof: Decider,
+  proof: &Decider,
 ) -> Result<Vec<u8>, NovaError> {
   Ok(
     [
       function_signature_check.to_eth(),
       i.to_eth(),   // i
-      z_0.to_eth(), // z_0
-      z_i.to_eth(), // z_i
-      running_instance.cmW.to_eth(),
-      running_instance.cmE.to_eth(),
-      incoming_instance.cmW.to_eth(),
-      proof.cmT.to_eth(),                 // cmT
-      proof.r.to_eth(),                   // r
-      proof.snark_proof.to_eth(),         // pA, pB, pC
-      proof.kzg_challenges.to_eth(),      // challenge_W, challenge_E
-      proof.kzg_proofs[0].eval.to_eth(),  // eval W
-      proof.kzg_proofs[1].eval.to_eth(),  // eval E
-      proof.kzg_proofs[0].proof.to_eth(), // W kzg_proof
-      proof.kzg_proofs[1].proof.to_eth(), // E kzg_proof
+      z_0[..].to_eth(), // z_0
+      z_i[..].to_eth(), // z_i
+      running_instance.comm_W.to_eth(),
+      running_instance.comm_E.to_eth(),
+      incoming_instance.comm_W.to_eth(),
+      // proof.cmT.to_eth(),                 // cmT
+      proof.rho.to_eth(),                   // r
+      proof.groth16_proof.to_eth(),         // pA, pB, pC
+      proof.kzg_challenges.0.to_eth(),      // challenge_W, challenge_E
+      proof.kzg_challenges.1.to_eth(),      // challenge_W, challenge_E
+      // proof.kzg_proofs[0].eval.to_eth(),  // eval W
+      // proof.kzg_proofs[1].eval.to_eth(),  // eval E
+      // proof.kzg_proofs[0].proof.to_eth(), // W kzg_proof
+      // proof.kzg_proofs[1].proof.to_eth(), // E kzg_proof
     ]
     .concat(),
   )

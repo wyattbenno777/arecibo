@@ -11,7 +11,7 @@
 use arecibo::{
   frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
   nebula::rs::{PublicParams, RecursiveSNARK, StepCircuit},
-  onchain::decider::Decider,
+  onchain::{decider::{prepare_calldata, Decider}, utils::get_function_selector_for_nova_cyclefold_verifier, verifiers::nova::NovaCycleFoldVerifierKey},
   provider::{Bn256EngineKZG, GrumpkinEngine},
   traits::{snark::RelaxedR1CSSNARKTrait, Engine},
 };
@@ -132,19 +132,20 @@ fn main() {
   }
   assert!(proof.is_ok());
 
+  let proof = proof.unwrap();
+
   let start = Instant::now();
   let res = Decider::verify(
-    &proof.unwrap(),
+    &proof,
      vk, 
      Fr::from(num_steps as u64), 
      z0, 
-     recursive_snark.zi, 
+     recursive_snark.zi.clone(), 
      (recursive_snark.r_U_primary.comm_W, recursive_snark.r_U_primary.comm_E), 
      recursive_snark.l_u_primary.comm_W);
   println!("Decider::verify: {:?}, took {:?}", res.is_ok(), start.elapsed());
 
-  res.unwrap();
-  // let compressed_snark = res.unwrap();
+  let compressed_snark = res.unwrap();
 
   // let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
   // bincode::serialize_into(&mut encoder, &compressed_snark).unwrap();
@@ -171,21 +172,21 @@ fn main() {
   // res.unwrap();
   println!("=========================================================");
 
-  // // Now, let's generate the Solidity code that verifies this Decider final proof
-  // let function_selector = get_function_selector_for_nova_cyclefold_verifier(nova.z_0.len() * 2 + 1);
+  // Now, let's generate the Solidity code that verifies this Decider final proof
+  let function_selector = get_function_selector_for_nova_cyclefold_verifier(recursive_snark.z0.len() * 2 + 1);
 
-  // let calldata: Vec<u8> = prepare_calldata(
-  //   function_selector,
-  //   nova.i,
-  //   nova.z_0,
-  //   nova.z_i,
-  //   &nova.U_i,
-  //   &nova.u_i,
-  //   proof,
-  // )?;
+  let calldata: Vec<u8> = prepare_calldata(
+    function_selector,
+    Fr::from(recursive_snark.i as u64),
+    recursive_snark.z0,
+    recursive_snark.zi,
+    &recursive_snark.r_U_primary,
+    &recursive_snark.l_u_primary,
+    &proof,
+  ).unwrap();
 
-  // // prepare the setup params for the solidity verifier
-  // let nova_cyclefold_vk = NovaCycleFoldVerifierKey::from((decider_vp, f_circuit.state_len()));
+  // prepare the setup params for the solidity verifier
+  // let nova_cyclefold_vk = NovaCycleFoldVerifierKey::from((vk, 1));
 
   // // generate the solidity code
   // let decider_solidity_code = get_decider_template_for_cyclefold_decider(nova_cyclefold_vk);
