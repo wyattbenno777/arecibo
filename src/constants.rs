@@ -9,3 +9,6 @@ pub(crate) const DEFAULT_ABSORBS: usize = 0;
 
 /// Bit size of Nova field element hashes
 pub const NUM_HASH_BITS: usize = 250;
+
+/// Number of Matrices for HyperNova
+pub(crate) const NUM_MATRICES: usize = 3;

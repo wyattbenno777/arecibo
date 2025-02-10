@@ -219,21 +219,15 @@ impl<E: Engine> AllocatedCycleFoldData<E> {
 
 pub mod emulated {
   use crate::frontend::gadgets::Assignment;
-  use crate::frontend::{
-    num::AllocatedNum,
-    ConstraintSystem, SynthesisError, {AllocatedBit, Boolean},
-  };
+  use crate::frontend::{num::AllocatedNum, Boolean, ConstraintSystem, SynthesisError};
 
   use crate::gadgets::conditionally_select;
   use crate::gadgets::emulated::AllocatedEmulPoint;
   use crate::r1cs::RelaxedR1CSInstance;
   use crate::{
     constants::{NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT},
-    gadgets::{
-      alloc_bignat_constant, alloc_zero, conditionally_select_allocated_bit,
-      conditionally_select_bignat, f_to_nat, le_bits_to_num, BigNat,
-    },
-    traits::{commitment::CommitmentTrait, Engine, Group, ROCircuitTrait, ROConstantsCircuit},
+    gadgets::{alloc_zero, le_bits_to_num},
+    traits::{commitment::CommitmentTrait, Engine, ROCircuitTrait, ROConstantsCircuit},
   };
 
   use super::FoldingData;

@@ -4,10 +4,7 @@ use crate::traits::commitment::CommitmentTrait;
 use crate::traits::ROCircuitTrait;
 use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT},
-  cyclefold::gadgets::{
-    emulated::{self, AllocatedEmulRelaxedR1CSInstance},
-    AllocatedCycleFoldInstance,
-  },
+  cyclefold::gadgets::{emulated::AllocatedEmulRelaxedR1CSInstance, AllocatedCycleFoldInstance},
   gadgets::le_bits_to_num,
   nebula::{
     augmented_circuit::AugmentedCircuitParams,

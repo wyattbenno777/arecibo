@@ -1,6 +1,8 @@
 use super::StepCircuit;
 use crate::frontend::gadgets::Assignment;
-use crate::gadgets::{alloc_num_equals, alloc_zero};
+use crate::frontend::Boolean;
+use crate::gadgets::emulated::AllocatedEmulLR1CSInstance;
+use crate::gadgets::{alloc_num_equals, alloc_zero, conditionally_select_vec};
 use crate::{
   frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
   gadgets::alloc_scalar_as_base,
@@ -19,6 +21,7 @@ where
   params: &'a AugmentedCircuitParams,
   ro_consts: ROConstantsCircuit<Dual<E>>,
   inputs: Option<AugmentedCircuitInputs<E>>,
+  num_rounds: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -62,12 +65,14 @@ where
     ro_consts: ROConstantsCircuit<Dual<E>>,
     inputs: Option<AugmentedCircuitInputs<E>>,
     step_circuit: &'a SC,
+    num_rounds: usize,
   ) -> Self {
     Self {
       params,
       ro_consts,
       inputs,
       step_circuit,
+      num_rounds,
     }
   }
   fn alloc_witness<CS: ConstraintSystem<E::Scalar>>(
@@ -108,6 +113,19 @@ where
     Ok((pp_digest, i, z_0, z_i))
   }
 
+  pub fn synthesize_base_case<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+  ) -> Result<AllocatedEmulLR1CSInstance<E>, SynthesisError> {
+    let U_default = AllocatedEmulLR1CSInstance::default(
+      cs.namespace(|| "Allocated U_default"),
+      self.params.limb_width,
+      self.params.n_limbs,
+      self.num_rounds,
+    )?;
+    Ok(U_default)
+  }
+
   pub fn synthesize<CS: ConstraintSystem<E::Scalar>>(
     self,
     cs: &mut CS,
@@ -117,6 +135,36 @@ where
     let (pp_digest, i, z_0, z_i) = self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
     let zero = alloc_zero(cs.namespace(|| "zero"));
     let is_base_case = alloc_num_equals(cs.namespace(|| "is base case"), &i, &zero)?;
-    todo!()
+    let U_default = self.synthesize_base_case(cs.namespace(|| "base case"))?;
+
+    // Compute i + 1
+    let i_new = AllocatedNum::alloc(cs.namespace(|| "i + 1"), || {
+      Ok(*i.get_value().get()? + E::Scalar::ONE)
+    })?;
+    cs.enforce(
+      || "check i + 1",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + i_new.get_variable() - CS::one() - i.get_variable(),
+    );
+
+    // Compute z_{i+1}
+    let z_input = conditionally_select_vec(
+      cs.namespace(|| "select input to F"),
+      &z_0,
+      &z_i,
+      &Boolean::from(is_base_case.clone()),
+    )?;
+
+    // Compute the next output zi+1 ← Fj(zi,ωi).
+    let z_next = self
+      .step_circuit
+      .synthesize(&mut cs.namespace(|| "F"), &z_input)?;
+    if z_next.len() != arity {
+      return Err(SynthesisError::IncompatibleLengthVector(
+        "z_next".to_string(),
+      ));
+    }
+    Ok(z_next)
   }
 }

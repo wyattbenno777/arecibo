@@ -18,7 +18,6 @@ use crate::traits::ROCircuitTrait;
 use crate::traits::ROTrait;
 use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD},
-  cyclefold::gadgets::emulated,
   errors::NovaError,
   nebula::{
     augmented_circuit::AugmentedCircuitParams,
