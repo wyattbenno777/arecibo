@@ -1011,7 +1011,7 @@ impl<E: Engine> AbsorbInROTrait<E> for RelaxedR1CSInstance<E> {
   }
 }
 
-/// A type that holds an R1CS instance
+/// A type that holds a linearized R1CS instance
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct LR1CSInstance<E: Engine> {
