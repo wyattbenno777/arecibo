@@ -8,6 +8,7 @@ use crate::constants::NUM_FE_IN_EMULATED_POINT;
 use crate::cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance;
 use crate::cyclefold::gadgets::AllocatedCycleFoldInstance;
 use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
+use crate::gadgets::emulated::AllocatedEmulPoint;
 use crate::gadgets::scalar_as_base;
 use crate::nebula::layer_2::utils::{absorb_U, absorb_U_bn, Layer2FoldingData};
 use crate::provider::PallasEngine;
@@ -423,8 +424,8 @@ where
       AllocatedNum<E::Scalar>,                                 // pp_digest
       AllocatedEmulRelaxedR1CSInstance<Dual<E>>,               // U1
       AllocatedEmulRelaxedR1CSInstance<Dual<E>>,               // U2
-      emulated::AllocatedEmulPoint<<Dual<E> as Engine>::GE>,   // E_new
-      emulated::AllocatedEmulPoint<<Dual<E> as Engine>::GE>,   // W_new
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,             // E_new
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,             // W_new
       AllocatedRelaxedR1CSInstanceBn<Dual<E>, NIO_CYCLE_FOLD>, // U2_secondary
       NIFSVerifierGadget<E>,                                   // nifs
     ),
@@ -463,7 +464,7 @@ where
       params.limb_width,
       params.n_limbs,
     )?;
-    let E_new = emulated::AllocatedEmulPoint::alloc(
+    let E_new = AllocatedEmulPoint::alloc(
       cs.namespace(|| "E_new"),
       folding_data
         .as_ref()
@@ -472,7 +473,7 @@ where
       params.limb_width,
       params.n_limbs,
     )?;
-    let W_new = emulated::AllocatedEmulPoint::alloc(
+    let W_new = AllocatedEmulPoint::alloc(
       cs.namespace(|| "W_new"),
       folding_data
         .as_ref()

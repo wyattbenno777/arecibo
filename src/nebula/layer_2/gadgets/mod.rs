@@ -1,8 +1,9 @@
 use super::nifs::CycleFoldNIFS;
 use crate::constants::NUM_CHALLENGE_BITS;
-use crate::cyclefold::gadgets::emulated::{self, AllocatedEmulPoint};
+use crate::cyclefold::gadgets::emulated::{self};
 use crate::frontend::num::AllocatedNum;
 use crate::frontend::{ConstraintSystem, SynthesisError};
+use crate::gadgets::emulated::AllocatedEmulPoint;
 use crate::gadgets::{alloc_bignat_constant, le_bits_to_num, BigNat, Num};
 use crate::nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryRelaxedNIFS};
 use crate::traits::commitment::CommitmentTrait;
@@ -127,7 +128,7 @@ pub struct PrimaryNIFSVerifierGadget<E>
 where
   E: CurveCycleEquipped,
 {
-  comm_T: emulated::AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+  comm_T: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
 }
 
 impl<E> PrimaryNIFSVerifierGadget<E>
@@ -143,7 +144,7 @@ where
   where
     CS: ConstraintSystem<E::Scalar>,
   {
-    let comm_T = emulated::AllocatedEmulPoint::alloc(
+    let comm_T = AllocatedEmulPoint::alloc(
       cs.namespace(|| "allocate T"),
       nifs.map(|nifs| nifs.comm_T.to_coordinates()),
       limb_width,

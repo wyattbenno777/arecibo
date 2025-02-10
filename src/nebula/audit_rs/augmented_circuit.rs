@@ -1,5 +1,6 @@
 //! This module defines the Nova augmented circuit used for Cyclefold
 
+use crate::gadgets::emulated::AllocatedEmulPoint;
 use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
   gadgets::{
@@ -120,21 +121,21 @@ where
     arity: usize,
   ) -> Result<
     (
-      AllocatedNum<E1::Scalar>,                               // pp_digest
-      AllocatedNum<E1::Scalar>,                               // i
-      Vec<AllocatedNum<E1::Scalar>>,                          // z0
-      Vec<AllocatedNum<E1::Scalar>>,                          // zi
-      emulated::AllocatedFoldingData<Dual<E1>>,               //data_p
-      AllocatedCycleFoldData<Dual<E1>>,                       // data_c_1
-      AllocatedCycleFoldData<Dual<E1>>,                       // data_c_2
-      emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // E_new
-      emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // W_new
-      AllocatedNum<E1::Scalar>,                               // prev_IC_IS
-      AllocatedNum<E1::Scalar>,                               // prev_IC_FS
-      emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // comm_omega_prev_IS
-      emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // comm_omega_prev_FS
-      AllocatedNum<E1::Scalar>,                               // r_i
-      AllocatedNum<E1::Scalar>,                               // r_i_next
+      AllocatedNum<E1::Scalar>,                     // pp_digest
+      AllocatedNum<E1::Scalar>,                     // i
+      Vec<AllocatedNum<E1::Scalar>>,                // z0
+      Vec<AllocatedNum<E1::Scalar>>,                // zi
+      emulated::AllocatedFoldingData<Dual<E1>>,     //data_p
+      AllocatedCycleFoldData<Dual<E1>>,             // data_c_1
+      AllocatedCycleFoldData<Dual<E1>>,             // data_c_2
+      AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // E_new
+      AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // W_new
+      AllocatedNum<E1::Scalar>,                     // prev_IC_IS
+      AllocatedNum<E1::Scalar>,                     // prev_IC_FS
+      AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // comm_omega_prev_IS
+      AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // comm_omega_prev_FS
+      AllocatedNum<E1::Scalar>,                     // r_i
+      AllocatedNum<E1::Scalar>,                     // r_i_next
     ),
     SynthesisError,
   > {
@@ -193,7 +194,7 @@ where
       self.params.n_limbs,
     )?;
 
-    let E_new = emulated::AllocatedEmulPoint::alloc(
+    let E_new = AllocatedEmulPoint::alloc(
       cs.namespace(|| "E_new"),
       self
         .inputs
@@ -204,7 +205,7 @@ where
       self.params.n_limbs,
     )?;
 
-    let W_new = emulated::AllocatedEmulPoint::alloc(
+    let W_new = AllocatedEmulPoint::alloc(
       cs.namespace(|| "W_new"),
       self
         .inputs
@@ -236,7 +237,7 @@ where
       )
     })?;
 
-    let comm_omega_prev_IS = emulated::AllocatedEmulPoint::alloc(
+    let comm_omega_prev_IS = AllocatedEmulPoint::alloc(
       cs.namespace(|| "comm_omega_prev_IS"),
       self
         .inputs
@@ -246,7 +247,7 @@ where
       self.params.limb_width,
       self.params.n_limbs,
     )?;
-    let comm_omega_prev_FS = emulated::AllocatedEmulPoint::alloc(
+    let comm_omega_prev_FS = AllocatedEmulPoint::alloc(
       cs.namespace(|| "comm_omega_prev_FS"),
       self
         .inputs
@@ -320,8 +321,8 @@ where
     data_p: &emulated::AllocatedFoldingData<Dual<E1>>,
     data_c_1: &AllocatedCycleFoldData<Dual<E1>>,
     data_c_2: &AllocatedCycleFoldData<Dual<E1>>,
-    E_new: emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>,
-    W_new: emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>,
+    E_new: AllocatedEmulPoint<<Dual<E1> as Engine>::GE>,
+    W_new: AllocatedEmulPoint<<Dual<E1> as Engine>::GE>,
     arity: usize,
     prev_IC_IS: &AllocatedNum<E1::Scalar>,
     prev_IC_FS: &AllocatedNum<E1::Scalar>,
