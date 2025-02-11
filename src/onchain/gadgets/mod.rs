@@ -3,11 +3,16 @@
 #![allow(unused_variables)]
 #![allow(unused_mut)]
 
-use crate::{
-  constants::NUM_HASH_BITS, cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance, frontend::{
-    domain::EvaluationDomain, gpu::GpuName, num::AllocatedNum, ConstraintSystem, SynthesisError,
-  }, gadgets::le_bits_to_num, r1cs::RelaxedR1CSInstance, traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, ROCircuitTrait, ROTrait}, Commitment
-};
+use crate::constants::NUM_HASH_BITS;
+use crate::cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance;
+use crate::frontend::domain::EvaluationDomain;
+use crate::frontend::gpu::GpuName;
+use crate::frontend::num::AllocatedNum;
+use crate::frontend::{ConstraintSystem, SynthesisError};
+use crate::gadgets::le_bits_to_num;
+use crate::r1cs::RelaxedR1CSInstance;
+use crate::traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, ROCircuitTrait, ROTrait};
+use crate::Commitment;
 use ec_gpu_gen::threadpool::Worker;
 use ff::PrimeField;
 

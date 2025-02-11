@@ -2,20 +2,27 @@
 
 use super::{decider_circuit::DeciderCircuit, gadgets::DeciderNovaGadget};
 use crate::{
-  errors::NovaError, frontend::groth16::{
-    self, create_random_proof, generate_random_parameters, verify_proof, Parameters, Proof as Groth16Proof
-  }, nebula::{
+  errors::NovaError,
+  frontend::groth16::{
+    self, create_random_proof, generate_random_parameters, verify_proof, Parameters,
+    Proof as Groth16Proof,
+  },
+  nebula::{
     nifs::NIFS,
     rs::{PublicParams, RecursiveSNARK},
-  }, provider::{
+  },
+  onchain::eth::ToEth,
+  provider::{
     hyperkzg::EvaluationEngine,
     kzg_commitment::{KZGCommitmentEngine, KZGProof, KZGProverKey, KZGVerifierKey},
     Bn256EngineKZG,
-  }, r1cs::{R1CSInstance, RelaxedR1CSInstance}, traits::{evaluation::EvaluationEngineTrait, Engine, ROConstants}, Commitment
+  },
+  r1cs::{R1CSInstance, RelaxedR1CSInstance},
+  traits::{evaluation::EvaluationEngineTrait, Engine, ROConstants},
+  Commitment,
 };
 use halo2curves::bn256::{Bn256, Fr};
 use rand::RngCore;
-use crate::onchain::eth::ToEth;
 
 /// A type that holds the prover key for [`Decider`]
 #[derive(Clone)]
@@ -141,13 +148,16 @@ impl Decider {
       &z_i[..],
       // &U_final_commitments.inputize_nonnative(),
       &[self.kzg_challenges.0, self.kzg_challenges.1],
-      // &self.kzg_proofs.iter().map(|p| p.eval).collect::<Vec<_>>()[..],
+      &[self.kzg_proofs.0.eval, self.kzg_proofs.1.eval],
       // &proof.cmT.inputize_nonnative(),
     ]
     .concat();
 
-
-    let snark_v = verify_proof(&prepared_groth16_vk, &self.groth16_proof, &public_inputs[..])?;
+    let snark_v = verify_proof(
+      &prepared_groth16_vk,
+      &self.groth16_proof,
+      &public_inputs[..],
+    )?;
 
     if !snark_v {
       return Err(NovaError::ProofVerifyError);
@@ -186,15 +196,164 @@ pub fn prepare_calldata(
       running_instance.comm_E.to_eth(),
       incoming_instance.comm_W.to_eth(),
       // proof.cmT.to_eth(),                 // cmT
-      proof.rho.to_eth(),                   // r
-      proof.groth16_proof.to_eth(),         // pA, pB, pC
-      proof.kzg_challenges.0.to_eth(),      // challenge_W, challenge_E
-      proof.kzg_challenges.1.to_eth(),      // challenge_W, challenge_E
-      // proof.kzg_proofs[0].eval.to_eth(),  // eval W
-      // proof.kzg_proofs[1].eval.to_eth(),  // eval E
-      // proof.kzg_proofs[0].proof.to_eth(), // W kzg_proof
-      // proof.kzg_proofs[1].proof.to_eth(), // E kzg_proof
+      proof.rho.to_eth(),              // r
+      proof.groth16_proof.to_eth(),    // pA, pB, pC
+      proof.kzg_challenges.0.to_eth(), // challenge_W, challenge_E
+      proof.kzg_challenges.1.to_eth(), // challenge_W, challenge_E
+                                       // proof.kzg_proofs[0].eval.to_eth(),  // eval W
+                                       // proof.kzg_proofs[1].eval.to_eth(),  // eval E
+                                       // proof.kzg_proofs[0].proof.to_eth(), // W kzg_proof
+                                       // proof.kzg_proofs[1].proof.to_eth(), // E kzg_proof
     ]
     .concat(),
   )
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::{
+    constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
+    cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance,
+    frontend::{
+      num::AllocatedNum, r1cs::NovaShape, shape_cs::ShapeCS, Circuit, ConstraintSystem,
+      SynthesisError,
+    },
+    onchain::gadgets::KZGChallengesGadget,
+    provider::Bn256EngineKZG,
+    traits::{snark::RelaxedR1CSSNARKTrait, Dual, Engine, ROConstantsCircuit},
+  };
+  use ff::Field;
+  use halo2curves::bn256::{Bn256, Fr};
+
+  use crate::traits::ROTrait;
+  use crate::traits::ROCircuitTrait;
+  use rand::thread_rng;
+
+  type E1 = Bn256EngineKZG;
+  type EE1 = crate::provider::hyperkzg::EvaluationEngine<Bn256, E1>;
+  type S1 = crate::spartan::snark::RelaxedR1CSSNARK<E1, EE1>; // non-preprocessing SNARK
+
+  /// Test circuit to be folded
+  #[derive(Clone, Debug)]
+  pub struct TestChallengeCircuit {
+    pub relaxed_instance: RelaxedR1CSInstance<Bn256EngineKZG>,
+    pub challenge_w: Fr,
+    pub challenge_e: Fr,
+  }
+
+  impl TestChallengeCircuit {
+    fn new(
+      relaxed_instance: RelaxedR1CSInstance<Bn256EngineKZG>,
+      challenge_w: Fr,
+      challenge_e: Fr,
+    ) -> Self {
+      Self {
+        relaxed_instance,
+        challenge_w,
+        challenge_e,
+      }
+    }
+
+    fn default() -> Self {
+      Self {
+        relaxed_instance: RelaxedR1CSInstance {
+          comm_W: Commitment::<Bn256EngineKZG>::default(),
+          comm_E: Commitment::<Bn256EngineKZG>::default(),
+          X: vec![Fr::from(0); 2],
+          u: Fr::from(0),
+        },
+        challenge_w: Fr::random(&mut thread_rng()),
+        challenge_e: Fr::random(&mut thread_rng()),
+      }
+    }
+  }
+  impl Circuit<halo2curves::bn256::Fr> for TestChallengeCircuit {
+    fn synthesize<CS: ConstraintSystem<halo2curves::bn256::Fr>>(
+      self,
+      cs: &mut CS,
+    ) -> Result<(), SynthesisError> {
+      let kzg_alloc_rw = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges"), || {
+        Ok(self.challenge_w)
+      })?;
+      kzg_alloc_rw.inputize(cs.namespace(|| "kzg challenge W"))?;
+
+      let kzg_alloc_re = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges"), || {
+        Ok(self.challenge_e)
+      })?;
+      kzg_alloc_re.inputize(cs.namespace(|| "kzg challenge E"))?;
+
+      let mut ro_1 = <Dual<Bn256EngineKZG> as Engine>::ROCircuit::new(
+        ROConstantsCircuit::<Dual<Bn256EngineKZG>>::default(),
+        9,
+      );
+      let mut ro_2 = <Dual<Bn256EngineKZG> as Engine>::ROCircuit::new(
+        ROConstantsCircuit::<Dual<Bn256EngineKZG>>::default(),
+        9,
+      );
+
+      let alloc_relaxed_instance: AllocatedEmulRelaxedR1CSInstance<Dual<Bn256EngineKZG>> =
+        AllocatedEmulRelaxedR1CSInstance::alloc(
+          cs.namespace(|| "relaxed instance"),
+          Some(&self.relaxed_instance),
+          BN_LIMB_WIDTH,
+          BN_N_LIMBS,
+        )?;
+
+      let (alloc_rw, alloc_re) = KZGChallengesGadget::get_challenges_gadget::<CS, _, Bn256EngineKZG>(
+        cs,
+        &mut ro_1,
+        &mut ro_2,
+        alloc_relaxed_instance,
+      )?;
+
+      cs.enforce(
+        || "cW ≡ H(W.{x, y})",
+        |lc| lc,
+        |lc| lc,
+        |lc| lc + kzg_alloc_rw.get_variable() - alloc_rw.get_variable(),
+      );
+
+      cs.enforce(
+        || "cE ≡ H(E.{x, y})",
+        |lc| lc,
+        |lc| lc,
+        |lc| lc + kzg_alloc_re.get_variable() - alloc_re.get_variable(),
+      );
+      Ok(())
+    }
+  }
+
+  #[test]
+  fn test_challenges() -> Result<(), SynthesisError> {
+    let circuit = TestChallengeCircuit::default();
+    let mut shape_cs = ShapeCS::new();
+    let _ = circuit.synthesize(&mut shape_cs);
+    let (r1cs_shape, ck) = shape_cs.r1cs_shape(&*S1::ck_floor());
+    println!("r1cs_shape.num_io: {}", r1cs_shape.num_io);
+    let relaxed_instance = RelaxedR1CSInstance::default(&ck, &r1cs_shape);
+
+    let ro_consts = ROConstants::<Bn256EngineKZG>::default(); 
+    let mut ro_1 = <Bn256EngineKZG as Engine>::RO::new(ro_consts.clone(), 3);
+    let mut ro_2 = <Bn256EngineKZG as Engine>::RO::new(ro_consts.clone(), 3);
+    // Call the native function
+    let (rw_native, re_native) =
+      KZGChallengesGadget::get_challenges_native(&mut ro_1, &mut ro_2, relaxed_instance.clone());
+
+    let circuit = TestChallengeCircuit::new(relaxed_instance.clone(), rw_native, re_native);
+    let mut rng = thread_rng();
+    let params = generate_random_parameters::<Bn256EngineKZG, _, _>(circuit.clone(), &mut rng)?;
+    let groth16_proof = create_random_proof(circuit, &params, &mut rng)?;
+    let prepared_groth16_vk = groth16::prepare_verifying_key(&params.vk);
+    let verified = verify_proof(
+      &prepared_groth16_vk,
+      &groth16_proof,
+      &[rw_native, re_native],
+    )?;
+    println!("verified: {}", verified);
+    if !verified {
+      return Err(SynthesisError::MalformedProofs("".to_string()));
+    }
+    Ok(())
+  }
 }
