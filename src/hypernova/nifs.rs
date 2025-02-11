@@ -44,7 +44,7 @@ where
     let gamma = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
     let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(gamma);
-    let s = S.num_vars.log_2() + 1;
+    let s = S.num_cons.next_power_of_two().log_2();
     let beta = {
       ro.squeeze_vec(NUM_CHALLENGE_BITS, s)
         .iter()
@@ -58,7 +58,7 @@ where
 
     // Helper function for resizing polynomials
     let pad_poly = |mut vec: Vec<E::Scalar>| {
-      vec.resize(S.num_vars * 2, E::Scalar::ZERO);
+      vec.resize(S.num_cons.next_power_of_two(), E::Scalar::ZERO);
       vec
     };
 
@@ -222,13 +222,13 @@ mod tests {
     // First create the shape
     let mut cs: TestShapeCS<E> = TestShapeCS::new();
     let _ = synthesize_tiny_r1cs_bellpepper(&mut cs, None);
-    let (shape, ck) = cs.padded_r1cs_shape(&*default_ck_hint());
+    let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
     let ro_consts = ROConstants::<Dual<E>>::default();
 
     // Now get the instance and assignment for one instance
     let mut cs = SatisfyingAssignment::<E>::new();
     let _ = synthesize_tiny_r1cs_bellpepper(&mut cs, Some(E::Scalar::from(5)));
-    let (U1, W1) = cs.padded_r1cs_instance_and_witness(&shape, &ck).unwrap();
+    let (U1, W1) = cs.r1cs_instance_and_witness(&shape, &ck).unwrap();
 
     // Make sure that the first instance is satisfiable
     shape.is_sat(&ck, &U1, &W1).unwrap();
@@ -236,7 +236,7 @@ mod tests {
     // Now get the instance and assignment for second instance
     let mut cs = SatisfyingAssignment::<E>::new();
     let _ = synthesize_tiny_r1cs_bellpepper(&mut cs, Some(E::Scalar::from(135)));
-    let (U2, W2) = cs.padded_r1cs_instance_and_witness(&shape, &ck).unwrap();
+    let (U2, W2) = cs.r1cs_instance_and_witness(&shape, &ck).unwrap();
 
     // Make sure that the second instance is satisfiable
     shape.is_sat(&ck, &U2, &W2).unwrap();
@@ -244,7 +244,7 @@ mod tests {
     // Now get the instance and assignment for second instance
     let mut cs = SatisfyingAssignment::<E>::new();
     let _ = synthesize_tiny_r1cs_bellpepper(&mut cs, Some(E::Scalar::from(100)));
-    let (U3, W3) = cs.padded_r1cs_instance_and_witness(&shape, &ck).unwrap();
+    let (U3, W3) = cs.r1cs_instance_and_witness(&shape, &ck).unwrap();
 
     // Make sure that the second instance is satisfiable
     shape.is_sat(&ck, &U3, &W3).unwrap();
@@ -252,7 +252,7 @@ mod tests {
     // Now get the instance and assignment for second instance
     let mut cs = SatisfyingAssignment::<E>::new();
     let _ = synthesize_tiny_r1cs_bellpepper(&mut cs, Some(E::Scalar::from(100)));
-    let (U4, W4) = cs.padded_r1cs_instance_and_witness(&shape, &ck).unwrap();
+    let (U4, W4) = cs.r1cs_instance_and_witness(&shape, &ck).unwrap();
 
     // Make sure that the second instance is satisfiable
     shape.is_sat(&ck, &U4, &W4).unwrap();
@@ -288,7 +288,7 @@ mod tests {
     U4: &R1CSInstance<E>,
     W4: &R1CSWitness<E>,
   ) {
-    let s = S.num_vars.log_2() + 1;
+    let s = S.num_cons.next_power_of_two().log_2();
     // produce a default running instance
     let mut r_W = R1CSWitness::default(S);
     let mut r_U = LR1CSInstance::default(S);
