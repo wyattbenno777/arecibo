@@ -5,11 +5,12 @@
 
 use crate::constants::NUM_HASH_BITS;
 use crate::cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance;
+use crate::cyclefold::util::absorb_primary_commitment;
 use crate::frontend::domain::EvaluationDomain;
 use crate::frontend::gpu::GpuName;
 use crate::frontend::num::AllocatedNum;
 use crate::frontend::{ConstraintSystem, SynthesisError};
-use crate::gadgets::le_bits_to_num;
+use crate::gadgets::{le_bits_to_num, scalar_as_base};
 use crate::r1cs::RelaxedR1CSInstance;
 use crate::traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait, ROConstants, ROConstantsCircuit, ROTrait};
 use crate::Commitment;
@@ -24,14 +25,15 @@ impl KZGChallengesGadget {
   pub fn get_challenges_native<E: CurveCycleEquipped>(
     U_i: RelaxedR1CSInstance<E>,
   ) -> (E::Scalar, E::Scalar) {
-    let ro_consts = ROConstants::<E>::default(); 
-    let mut ro: <E as Engine>::RO = <E as Engine>::RO::new(ro_consts.clone(), 3);
-    U_i.comm_W.absorb_in_ro(&mut ro);
+    let ro_consts = ROConstants::<Dual<E>>::default(); 
+    let mut ro: <Dual<E> as Engine>::RO = <Dual<E> as Engine>::RO::new(ro_consts.clone(), 9);
+    absorb_primary_commitment::<E, Dual<E>>(&U_i.comm_W, &mut ro);
     let rw = ro.squeeze(NUM_HASH_BITS); 
-    let mut ro: <E as Engine>::RO = <E as Engine>::RO::new(ro_consts.clone(), 3);
-    U_i.comm_E.absorb_in_ro(&mut ro);
+    let mut ro: <Dual<E> as Engine>::RO = <Dual<E> as Engine>::RO::new(ro_consts.clone(), 9);
+    absorb_primary_commitment::<E, Dual<E>>(&U_i.comm_E, &mut ro);
     let re = ro.squeeze(NUM_HASH_BITS);
-
+    let rw = scalar_as_base::<Dual<E>>(rw);
+    let re = scalar_as_base::<Dual<E>>(re);
     (rw, re)
   }
 

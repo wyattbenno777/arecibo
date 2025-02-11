@@ -321,7 +321,6 @@ mod tests {
     println!("r1cs_shape.num_io: {}", r1cs_shape.num_io);
     let relaxed_instance = RelaxedR1CSInstance::default(&ck, &r1cs_shape);
 
-    let ro_consts = ROConstants::<Bn256EngineKZG>::default(); 
     // Call the native function
     let (rw_native, re_native) =
       KZGChallengesGadget::get_challenges_native(relaxed_instance.clone());
