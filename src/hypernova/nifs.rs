@@ -179,14 +179,15 @@ where
 
     // Verify sumcheck proof
     let claim = U1.vs[0] + gamma * U1.vs[1] + gamma * gamma * U1.vs[2];
-    let (new_claim, rx_p) = self.sc.verify(claim, num_rounds, 3, ro, ro_consts)?;
+    let (sub_claim, rx_p) = self.sc.verify(claim, num_rounds, 3, ro, ro_consts)?;
+
+    // sub_claim = (σ_0 + γ•σ_1 + γ^2•σ_2) * eq(rx, rx_p) + (θ_0•θ_1 - θ_2) * eq(β, rx_p)
     let e1 = EqPolynomial::new(U1.rx.to_vec()).evaluate(&rx_p);
     let cl = (self.sigmas[0] + gamma * self.sigmas[1] + gamma * gamma * self.sigmas[2]) * e1;
     let e2 = EqPolynomial::new(beta).evaluate(&rx_p);
     let gamma_cubed = gamma * gamma * gamma;
     let cr = (self.thetas[0] * self.thetas[1] - self.thetas[2]) * e2 * gamma_cubed;
-    if cl + cr != new_claim {
-      assert_eq!(cl + cr, new_claim);
+    if cl + cr != sub_claim {
       return Err(NovaError::InvalidSumcheckProof);
     }
 

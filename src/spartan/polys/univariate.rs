@@ -167,7 +167,13 @@ impl<Scalar: PrimeField> UniPoly<Scalar> {
   }
 
   pub fn evaluate(&self, r: &Scalar) -> Scalar {
-    self.coeffs.iter().rlc(r)
+    let mut eval = self.coeffs[0];
+    let mut power = *r;
+    for coeff in self.coeffs.iter().skip(1) {
+      eval += power * coeff;
+      power *= r;
+    }
+    eval
   }
 
   pub fn compress(&self) -> CompressedUniPoly<Scalar> {

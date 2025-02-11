@@ -1,3 +1,4 @@
+use super::alloc_zero;
 use super::emulated::AllocatedEmulPoint;
 use crate::constants::NUM_CHALLENGE_BITS;
 use crate::gadgets::le_bits_to_num;
@@ -90,19 +91,68 @@ where
     for b in beta.iter() {
       ro.absorb(b);
     }
+
+    // Verify sumcheck proof
+    // /////////////////////
+    //
     // claim <- U.vs[0] + gamma * U.vs[1] + gamma^2 * U.vs[2]
-    let claim = self.compute_claim(
+    let claim = Self::claim(
       cs.namespace(|| "claim"),
       &gamma,
       &U.vs[0],
       &U.vs[1],
       &U.vs[2],
     )?;
+    // ///////////////
+    // verify sumcheck
+    let (sub_claim, rx_p) = self.sc.verify(
+      cs.namespace(|| "verify sumcheck"),
+      ro_consts,
+      ro,
+      &claim,
+      num_rounds,
+    )?;
     todo!()
   }
 
-  fn compute_claim<CS>(
+  fn claim<CS>(
+    mut cs: CS,
+    gamma: &AllocatedNum<E::Scalar>,
+    v0: &AllocatedNum<E::Scalar>,
+    v1: &AllocatedNum<E::Scalar>,
+    v2: &AllocatedNum<E::Scalar>,
+  ) -> Result<AllocatedNum<E::Scalar>, SynthesisError>
+  where
+    CS: ConstraintSystem<E::Scalar>,
+  {
+    Self::random_linear_combination(
+      cs.namespace(|| "random linear combination"),
+      gamma,
+      v0,
+      v1,
+      v2,
+    )
+  }
+
+  fn cl<CS>(
     &self,
+    mut cs: CS,
+    gamma: &AllocatedNum<E::Scalar>,
+  ) -> Result<AllocatedNum<E::Scalar>, SynthesisError>
+  where
+    CS: ConstraintSystem<E::Scalar>,
+  {
+    let sigma_term = Self::random_linear_combination(
+      cs.namespace(|| "sigma_term"),
+      gamma,
+      &self.sigmas[0],
+      &self.sigmas[1],
+      &self.sigmas[2],
+    )?;
+    todo!()
+  }
+
+  fn random_linear_combination<CS>(
     mut cs: CS,
     gamma: &AllocatedNum<E::Scalar>,
     v0: &AllocatedNum<E::Scalar>,
@@ -121,7 +171,7 @@ where
 
     // claim = v[0] + v[1] * gamma + v[2] * gamma^2
     //       = term_0 + term_1 + term_2
-    v0.add(cs.namespace(|| "claim"), &term_1)?
+    v0.add(cs.namespace(|| "term 1 + term 2"), &term_1)?
       .add(cs.namespace(|| "claim"), &term_2)
   }
 }
@@ -156,6 +206,42 @@ where
         .try_collect()?,
     })
   }
+
+  fn verify<CS>(
+    &self,
+    mut cs: CS,
+    ro_consts: &ROConstantsCircuit<Dual<E>>,
+    ro: <Dual<E> as Engine>::ROCircuit,
+    claim: &AllocatedNum<E::Scalar>,
+    num_rounds: usize,
+  ) -> Result<(AllocatedNum<E::Scalar>, Vec<AllocatedNum<E::Scalar>>), SynthesisError>
+  where
+    CS: ConstraintSystem<E::Scalar>,
+  {
+    let mut e = claim.clone();
+    let mut ro = ro;
+    let mut rx = Vec::with_capacity(num_rounds);
+    for i in 0..num_rounds {
+      let poly = &self.polys[i];
+      let s0 = poly.eval_at_zero();
+      let s1 = poly.eval_at_one(cs.namespace(|| "eval at one"))?;
+      let s0_s1 = s0.add(cs.namespace(|| "s0 + s1"), &s1)?;
+      enforce_equal(
+        &mut cs,
+        || format!("poly(0) + poly(1) == e {i}"),
+        &s0_s1,
+        &e,
+      );
+      poly.absorb_in_ro(&mut ro)?;
+      let r_i_bits = ro.squeeze(cs.namespace(|| format!("r_bits_{i}")), NUM_CHALLENGE_BITS)?;
+      let r_i = le_bits_to_num(cs.namespace(|| format!("r_{i}")), &r_i_bits)?;
+      ro = <Dual<E> as Engine>::ROCircuit::new(ro_consts.clone(), DEFAULT_ABSORBS);
+      ro.absorb(&r_i);
+      e = poly.eval(cs.namespace(|| format!("eval_{i}")), &r_i)?;
+      rx.push(r_i);
+    }
+    Ok((e, rx))
+  }
 }
 
 pub struct AllocatedUniPoly<F>
@@ -180,6 +266,42 @@ where
         NUM_UNIVARIATE_COEFFS,
       )?,
     })
+  }
+
+  pub fn eval_at_zero(&self) -> AllocatedNum<F> {
+    self.coeffs[0].clone()
+  }
+
+  pub fn eval_at_one<CS>(&self, mut cs: CS) -> Result<AllocatedNum<F>, SynthesisError>
+  where
+    CS: ConstraintSystem<F>,
+  {
+    let mut eval = alloc_zero(cs.namespace(|| "eval at one"));
+    for i in 0..NUM_UNIVARIATE_COEFFS {
+      eval = eval.add(cs.namespace(|| "add_{i}"), &self.coeffs[i])?
+    }
+    Ok(eval)
+  }
+
+  pub fn eval<CS>(&self, mut cs: CS, r: &AllocatedNum<F>) -> Result<AllocatedNum<F>, SynthesisError>
+  where
+    CS: ConstraintSystem<F>,
+  {
+    let mut eval = self.coeffs[0].clone();
+    let mut r_i = r.clone();
+    for i in 1..NUM_UNIVARIATE_COEFFS {
+      let term = self.coeffs[i].mul(cs.namespace(|| format!("r_{i} * coeff_{i}")), &r_i)?;
+      eval = eval.add(cs.namespace(|| format!("add_{i}")), &term)?;
+      r_i = r_i.square(cs.namespace(|| format!("r_{i}^2")))?;
+    }
+    Ok(eval)
+  }
+
+  pub fn absorb_in_ro(&self, ro: &mut impl ROCircuitTrait<F>) -> Result<(), SynthesisError> {
+    for i in 0..NUM_UNIVARIATE_COEFFS {
+      ro.absorb(&self.coeffs[i]);
+    }
+    Ok(())
   }
 }
 
@@ -347,4 +469,68 @@ where
     |lc| lc + i_new.get_variable() - CS::one() - i.get_variable(),
   );
   Ok(i_new)
+}
+
+/// Adds a constraint to CS, enforcing an equality relationship between the allocated numbers a and b.
+///
+/// a == b
+pub fn enforce_equal<F: PrimeField, A, AR, CS: ConstraintSystem<F>>(
+  cs: &mut CS,
+  annotation: A,
+  a: &AllocatedNum<F>,
+  b: &AllocatedNum<F>,
+) where
+  A: FnOnce() -> AR,
+  AR: Into<String>,
+{
+  // debug_assert_eq!(a.get_value(), b.get_value());
+  // a * 1 = b
+  cs.enforce(
+    annotation,
+    |lc| lc + a.get_variable(),
+    |lc| lc + CS::one(),
+    |lc| lc + b.get_variable(),
+  );
+}
+
+/// Adds a constraint to CS, enforcing a difference relationship between the allocated numbers a, b, and difference.
+///
+/// a - b = difference
+pub(crate) fn enforce_difference<F: PrimeField, A, AR, CS: ConstraintSystem<F>>(
+  cs: &mut CS,
+  annotation: A,
+  a: &AllocatedNum<F>,
+  b: &AllocatedNum<F>,
+  difference: &AllocatedNum<F>,
+) where
+  A: FnOnce() -> AR,
+  AR: Into<String>,
+{
+  //    difference = a-b
+  // => difference + b = a
+  // => (difference + b) * 1 = a
+  cs.enforce(
+    annotation,
+    |lc| lc + difference.get_variable() + b.get_variable(),
+    |lc| lc + CS::one(),
+    |lc| lc + a.get_variable(),
+  );
+}
+
+/// Compute difference and enforce it.
+pub(crate) fn sub<F: PrimeField, CS: ConstraintSystem<F>>(
+  mut cs: CS,
+  a: &AllocatedNum<F>,
+  b: &AllocatedNum<F>,
+) -> Result<AllocatedNum<F>, SynthesisError> {
+  let res = AllocatedNum::alloc(cs.namespace(|| "sub_num"), || {
+    let mut tmp = a.get_value().ok_or(SynthesisError::AssignmentMissing)?;
+    tmp.sub_assign(&b.get_value().ok_or(SynthesisError::AssignmentMissing)?);
+
+    Ok(tmp)
+  })?;
+
+  // a - b = res
+  enforce_difference(&mut cs, || "subtraction constraint", a, b, &res);
+  Ok(res)
 }
