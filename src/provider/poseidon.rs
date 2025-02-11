@@ -13,6 +13,7 @@ use crate::{
 use core::marker::PhantomData;
 use ff::{PrimeField, PrimeFieldBits};
 use generic_array::typenum::U24;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 /// All Poseidon Constants that are used in Nova
@@ -136,7 +137,6 @@ pub struct PoseidonROCircuit<Scalar: PrimeField> {
   // Internal state
   state: Vec<AllocatedNum<Scalar>>,
   constants: PoseidonConstantsCircuit<Scalar>,
-  num_absorbs: usize,
   squeezed: bool,
 }
 
@@ -149,11 +149,10 @@ where
   type Constants = PoseidonConstantsCircuit<Scalar>;
 
   /// Initialize the internal state and set the poseidon constants
-  fn new(constants: PoseidonConstantsCircuit<Scalar>, num_absorbs: usize) -> Self {
+  fn new(constants: PoseidonConstantsCircuit<Scalar>, _num_absorbs: usize) -> Self {
     Self {
       state: Vec::new(),
       constants,
-      num_absorbs,
       squeezed: false,
     }
   }
@@ -174,7 +173,7 @@ where
     assert!(!self.squeezed, "Cannot squeeze again after squeezing");
     self.squeezed = true;
     let parameter = IOPattern(vec![
-      SpongeOp::Absorb(self.num_absorbs as u32),
+      SpongeOp::Absorb(self.state.len() as u32),
       SpongeOp::Squeeze(1u32),
     ]);
     let mut ns = cs.namespace(|| "ns");
@@ -182,12 +181,11 @@ where
     let hash = {
       let mut sponge = SpongeCircuit::new_with_constants(&self.constants.0, Simplex);
       let acc = &mut ns;
-      assert_eq!(self.num_absorbs, self.state.len());
 
       sponge.start(parameter, None, acc);
       SpongeAPI::absorb(
         &mut sponge,
-        self.num_absorbs as u32,
+        self.state.len() as u32,
         &(0..self.state.len())
           .map(|i| Elt::Allocated(self.state[i].clone()))
           .collect::<Vec<Elt<Scalar>>>(),
@@ -213,6 +211,58 @@ where
         .collect::<Vec<AllocatedBit>>()[..num_bits]
         .into(),
     )
+  }
+
+  /// Compute a challenge by hashing the current state
+  fn squeeze_vec<CS: ConstraintSystem<Scalar>>(
+    &mut self,
+    mut cs: CS,
+    num_bits: usize,
+    len: usize,
+  ) -> Result<Vec<Vec<AllocatedBit>>, SynthesisError> {
+    // check if we have squeezed already
+    assert!(!self.squeezed, "Cannot squeeze again after squeezing");
+    self.squeezed = true;
+    let parameter = IOPattern(vec![
+      SpongeOp::Absorb(self.state.len() as u32),
+      SpongeOp::Squeeze(1u32),
+    ]);
+    let mut ns = cs.namespace(|| "ns");
+
+    let hash = {
+      let mut sponge = SpongeCircuit::new_with_constants(&self.constants.0, Simplex);
+      let acc = &mut ns;
+
+      sponge.start(parameter, None, acc);
+      SpongeAPI::absorb(
+        &mut sponge,
+        self.state.len() as u32,
+        &(0..self.state.len())
+          .map(|i| Elt::Allocated(self.state[i].clone()))
+          .collect::<Vec<Elt<Scalar>>>(),
+        acc,
+      );
+
+      let output = SpongeAPI::squeeze(&mut sponge, len as u32, acc);
+      sponge.finish(acc).unwrap();
+      output
+    };
+    (0..len)
+      .map(|i| {
+        let hash = Elt::ensure_allocated(&hash[i], &mut ns.namespace(|| "ensure allocated"), true)?;
+        Ok(
+          hash
+            .to_bits_le_strict(ns.namespace(|| "poseidon hash to boolean"))?
+            .iter()
+            .map(|boolean| match boolean {
+              Boolean::Is(ref x) => x.clone(),
+              _ => panic!("Wrong type of input. We should have never reached there"),
+            })
+            .collect::<Vec<AllocatedBit>>()[..num_bits]
+            .into(),
+        )
+      })
+      .try_collect()
   }
 }
 
