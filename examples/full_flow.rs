@@ -11,7 +11,7 @@
 use arecibo::{
   frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
   nebula::rs::{PublicParams, RecursiveSNARK, StepCircuit},
-  onchain::{decider::{prepare_calldata, Decider}, utils::get_function_selector_for_nova_cyclefold_verifier, verifiers::nova::NovaCycleFoldVerifierKey},
+  onchain::{decider::{prepare_calldata, Decider}, utils::get_function_selector_for_nova_cyclefold_verifier, verifiers::nebula::NovaCycleFoldVerifierKey},
   provider::{Bn256EngineKZG, GrumpkinEngine},
   traits::{snark::RelaxedR1CSSNARKTrait, Engine},
 };
@@ -186,7 +186,7 @@ fn main() {
   ).unwrap();
 
   // prepare the setup params for the solidity verifier
-  // let nova_cyclefold_vk = NovaCycleFoldVerifierKey::from((vk, 1));
+  let nova_cyclefold_vk = NovaCycleFoldVerifierKey::from(vk);
 
   // // generate the solidity code
   // let decider_solidity_code = get_decider_template_for_cyclefold_decider(nova_cyclefold_vk);

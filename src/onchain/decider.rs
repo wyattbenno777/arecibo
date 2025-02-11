@@ -17,22 +17,22 @@ use halo2curves::bn256::{Bn256, Fr};
 use rand::RngCore;
 use crate::onchain::eth::ToEth;
 
-/// A type that holds the prover key for [`CompressedSNARK`]
+/// A type that holds the prover key for [`Decider`]
 #[derive(Clone)]
-pub struct ProverKey {
-  groth16_pk: Parameters<Bn256EngineKZG>,
-  kzg_pk: KZGProverKey<Bn256>,
+pub struct DeciderProverKey {
+  pub groth16_pk: Parameters<Bn256EngineKZG>,
+  pub kzg_pk: KZGProverKey<Bn256>,
 }
 
-/// A type that holds the prover key for [`CompressedSNARK`]
+/// A type that holds the verifier key for [`Decider`]
 #[derive(Debug, Clone)]
-pub struct VerifierKey {
-  groth16_vk: groth16::VerifyingKey<Bn256EngineKZG>,
-  pp_hash: <Bn256EngineKZG as Engine>::Scalar,
-  kzg_vk: KZGVerifierKey<Bn256>,
+pub struct DeciderVerifierKey {
+  pub groth16_vk: groth16::VerifyingKey<Bn256EngineKZG>,
+  pub pp_hash: <Bn256EngineKZG as Engine>::Scalar,
+  pub kzg_vk: KZGVerifierKey<Bn256>,
 }
 
-/// A SNARK that proves the knowledge of a valid Nebula proof
+/// A SNARK that proves the knowledge of a valid  proof
 #[derive(Debug)]
 pub struct Decider {
   groth16_proof: Groth16Proof<Bn256EngineKZG>,
@@ -46,7 +46,7 @@ impl Decider {
   pub fn setup<R>(
     pp: &PublicParams<Bn256EngineKZG>,
     rng: &mut R,
-  ) -> Result<(ProverKey, VerifierKey), NovaError>
+  ) -> Result<(DeciderProverKey, DeciderVerifierKey), NovaError>
   where
     R: RngCore,
   {
@@ -65,11 +65,11 @@ impl Decider {
     // get the Groth16 specific setup for the circuit
     let params = generate_random_parameters::<Bn256EngineKZG, _, _>(circuit, rng).unwrap();
 
-    let pk = ProverKey {
+    let pk = DeciderProverKey {
       groth16_pk: params.clone(),
       kzg_pk,
     };
-    let vk = VerifierKey {
+    let vk = DeciderVerifierKey {
       groth16_vk: params.vk,
       pp_hash,
       kzg_vk,
@@ -81,7 +81,7 @@ impl Decider {
   /// Create a new [`CompressedSNARK`]
   pub fn prove<R>(
     pp: &PublicParams<Bn256EngineKZG>,
-    pk: &ProverKey,
+    pk: &DeciderProverKey,
     rs: &RecursiveSNARK<Bn256EngineKZG>,
     rng: &mut R,
   ) -> Result<Self, NovaError>
@@ -109,7 +109,7 @@ impl Decider {
   /// Verify the correctness of the [`CompressedSNARK`]
   pub fn verify(
     &self,
-    vk: VerifierKey,
+    vk: DeciderVerifierKey,
     i: Fr,
     z_0: Vec<Fr>,
     z_i: Vec<Fr>,
@@ -117,7 +117,7 @@ impl Decider {
     u_commitments: Commitment<Bn256EngineKZG>,
     // nifs_proof: NIFS<Bn256EngineKZG>,
   ) -> Result<(), NovaError> {
-    let VerifierKey {
+    let DeciderVerifierKey {
       groth16_vk,
       pp_hash,
       kzg_vk,

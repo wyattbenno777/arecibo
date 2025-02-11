@@ -1,13 +1,15 @@
 //! Nova verifier
 use askama::Template;
 use crate::frontend::num::AllocatedNum;
+use crate::onchain::decider::DeciderVerifierKey;
+use crate::provider::kzg_commitment::KZGVerifierKey;
+use crate::provider::Bn256EngineKZG;
 
-use super::groth16;
-use super::groth16::Groth16Verifier;
-use super::kzg;
-use super::kzg::KZG10Verifier;
+use crate::frontend::groth16;
+use super::groth16::{SolidityGroth16Verifier, SolidityGroth16VerifierKey};
+use super::kzg::{SolidityKZGVerifier, SolidityKZGVerifierKey};
 use crate::onchain::utils::HeaderInclusion;
-use crate::onchain::verifiers::{Groth16VerifierKey, KZG10VerifierKey, ProtocolVerifierKey, PRAGMA_GROTH16_VERIFIER};
+use crate::onchain::verifiers::{ProtocolVerifierKey, PRAGMA_GROTH16_VERIFIER};
 use serde::{Deserialize, Serialize};
 use halo2curves::bn256::{Bn256, Fr, Fq, G1Affine};
 use ff::PrimeField;
@@ -17,8 +19,8 @@ use crate::gadgets::BigNat;
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct NovaCycleFoldVerifierKey {
     pp_hash: DisplayFr,
-    g16_vk: Groth16VerifierKey,
-    kzg_vk: KZG10VerifierKey,
+    g16_vk: SolidityGroth16VerifierKey,
+    kzg_vk: SolidityKZGVerifierKey,
     z_len: usize,
 }
 
@@ -37,8 +39,8 @@ impl std::fmt::Display for DisplayFr {
 #[template(path = "nova_cyclefold_decider.askama.sol", ext = "sol")]
 pub struct NovaCycleFoldDecider {
     pp_hash: DisplayFr,
-    groth16_verifier: Groth16Verifier,
-    kzg10_verifier: KZG10Verifier,
+    groth16_verifier: SolidityGroth16Verifier,
+    kzg10_verifier: SolidityKZGVerifier,
     // z_len denotes the FCircuit state (z_i) length
     z_len: usize,
     public_inputs_len: usize,
@@ -59,13 +61,14 @@ pub fn get_decider_template_for_cyclefold_decider(
 
 impl From<NovaCycleFoldVerifierKey> for NovaCycleFoldDecider {
     fn from(value: NovaCycleFoldVerifierKey) -> Self {
-        let groth16_verifier = Groth16Verifier::from(value.g16_vk);
-        let public_inputs_len = groth16_verifier.gamma_abc_len;
+        let solidity_groth16_verifier_key = SolidityGroth16VerifierKey::from(value.g16_vk);
+        let solidity_kzg_verifier_key = SolidityKZGVerifierKey::from(value.kzg_vk);
+        let public_inputs_len = solidity_groth16_verifier_key.vk.ic.len();
         let bits_per_limb = NonNativeUintVar::<Fq>::bits_per_limb();
         Self {
             pp_hash: value.pp_hash,
-            groth16_verifier,
-            kzg10_verifier: KZG10Verifier::from(value.kzg_vk),
+            groth16_verifier: SolidityGroth16Verifier::from(solidity_groth16_verifier_key),
+            kzg10_verifier: SolidityKZGVerifier::from(solidity_kzg_verifier_key),
             z_len: value.z_len,
             public_inputs_len,
             num_limbs: (250_f32 / (bits_per_limb as f32)).ceil() as usize,
@@ -139,8 +142,8 @@ impl ProtocolVerifierKey for NovaCycleFoldVerifierKey {
     }
 }
 
-impl From<(Fr, Groth16VerifierKey, KZG10VerifierKey, usize)> for NovaCycleFoldVerifierKey {
-    fn from(value: (Fr, Groth16VerifierKey, KZG10VerifierKey, usize)) -> Self {
+impl From<(Fr, SolidityGroth16VerifierKey, SolidityKZGVerifierKey, usize)> for NovaCycleFoldVerifierKey {
+    fn from(value: (Fr, SolidityGroth16VerifierKey, SolidityKZGVerifierKey, usize)) -> Self {
         Self {
             pp_hash: DisplayFr(value.0),
             g16_vk: value.1,
@@ -150,19 +153,32 @@ impl From<(Fr, Groth16VerifierKey, KZG10VerifierKey, usize)> for NovaCycleFoldVe
     }
 }
 
+impl From<DeciderVerifierKey> for NovaCycleFoldVerifierKey {
+    fn from(value: DeciderVerifierKey) -> Self {
+        let g16_vk = SolidityGroth16VerifierKey::from(value.groth16_vk);
+        let kzg_vk = SolidityKZGVerifierKey::from((value.kzg_vk, Vec::new()));
+        Self {
+            pp_hash: DisplayFr(value.pp_hash),
+            g16_vk,
+            kzg_vk,
+            z_len: 1,
+        }
+    }
+}
+
 impl NovaCycleFoldVerifierKey {
     /// Create a new NovaCycleFoldVerifierKey
     pub fn new(
         pp_hash: Fr,
-        vkey_g16: groth16::VerifyingKey,
-        vkey_kzg: kzg::VerifierKey<Bn256>,
+        g16_vk: groth16::VerifyingKey<Bn256EngineKZG>,
+        vkey_kzg: KZGVerifierKey<Bn256>,
         crs_points: Vec<G1Affine>,
         z_len: usize,
     ) -> Self {
         Self {
             pp_hash: DisplayFr(pp_hash),
-            g16_vk: Groth16VerifierKey::from(vkey_g16),
-            kzg_vk: KZG10VerifierKey::from((vkey_kzg, crs_points)),
+            g16_vk: SolidityGroth16VerifierKey::from(g16_vk),
+            kzg_vk: SolidityKZGVerifierKey::from((vkey_kzg, crs_points)),
             z_len,
         }
     }

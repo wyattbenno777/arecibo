@@ -1,9 +1,9 @@
 //! Encoding utilities for onchain verification
 use halo2curves::bn256::{Fq, G1Affine, G2Affine};
 use std::fmt::{self, Display};
-
+use serde::{Deserialize, Serialize};
 /// Fq wrapper
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct FqWrapper(pub Fq);
 
 impl Display for FqWrapper {
@@ -13,7 +13,7 @@ impl Display for FqWrapper {
 }
 
 /// G1 representation
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct G1Repr(pub [FqWrapper; 2]);
 
 impl Display for G1Repr {
@@ -28,7 +28,7 @@ pub fn g1_to_fq_repr(g1: G1Affine) -> G1Repr {
 }
 
 /// G2 representation
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct G2Repr(pub [[FqWrapper; 2]; 2]);
 
 impl Display for G2Repr {

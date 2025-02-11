@@ -4,13 +4,14 @@ use pairing::{Engine, MultiMillerLoop};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 #[cfg(not(target_arch = "wasm32"))]
 use memmap2::Mmap;
+use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 #[cfg(not(target_arch = "wasm32"))]
 use std::mem;
 
 use super::multiscalar;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerifyingKey<E: Engine + MultiMillerLoop> {
     // alpha in g1 for verifying and for creating A/C elements of
     // proof. Never the point at infinity.

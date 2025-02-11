@@ -13,10 +13,7 @@ pub const MIT_SDPX_IDENTIFIER: &str = "// SPDX-License-Identifier: MIT";
 
 pub mod groth16;
 pub mod kzg;
-pub mod nova;
-
-pub use groth16::Groth16VerifierKey;
-pub use kzg::KZG10VerifierKey;
+pub mod nebula;
 
 use serde::{Serialize, de::DeserializeOwned};
 use std::io::{Write, Read};
