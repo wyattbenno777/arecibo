@@ -90,7 +90,7 @@ where
     for b in beta.iter() {
       ro.absorb(b);
     }
-
+    // claim <- U.vs[0] + gamma * U.vs[1] + gamma^2 * U.vs[2]
     let claim = self.compute_claim(
       cs.namespace(|| "claim"),
       &gamma,
