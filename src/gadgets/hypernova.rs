@@ -4,7 +4,7 @@ use crate::{
   frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
   hypernova::{nifs::NIFS, ro_sumcheck::ROSumcheckProof},
   map_field,
-  r1cs::LR1CSInstance,
+  r1cs::{LR1CSInstance, R1CSInstance},
   spartan::polys::univariate::UniPoly,
   traits::{commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
   Commitment,
@@ -13,16 +13,16 @@ use ff::{Field, PrimeField};
 use itertools::Itertools;
 use std::marker::PhantomData;
 
-pub struct NIFSGadget<E>
+pub struct AllocatedNIFS<E>
 where
   E: CurveCycleEquipped,
 {
-  sc: SumcheckProofGadget<E>,
+  sc: AllocatedSumcheckProof<E>,
   sigmas: Vec<AllocatedNum<E::Scalar>>,
   thetas: Vec<AllocatedNum<E::Scalar>>,
 }
 
-impl<E> NIFSGadget<E>
+impl<E> AllocatedNIFS<E>
 where
   E: CurveCycleEquipped,
 {
@@ -34,9 +34,9 @@ where
   where
     CS: ConstraintSystem<E::Scalar>,
   {
-    let sc = SumcheckProofGadget::alloc(
+    let sc = AllocatedSumcheckProof::alloc(
       cs.namespace(|| "sumcheck proof"),
-      inst.map(|inst| &inst.sc),
+      map_field!(inst, sc),
       num_rounds,
     )?;
     let sigmas = alloc_sized_vec(
@@ -57,10 +57,10 @@ where
     mut cs: CS,
     pp_digest: &AllocatedNum<E::Scalar>,
     ro_consts: &ROConstantsCircuit<Dual<E>>,
-    U: &LR1CSInstanceGadget<E>,
-    u: &R1CSInstanceGadget<E>,
+    U: &AllocatedLR1CSInstance<E>,
+    u: &AllocatedR1CSInstance<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-  ) -> Result<LR1CSInstanceGadget<E>, SynthesisError>
+  ) -> Result<AllocatedLR1CSInstance<E>, SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
   {
@@ -69,14 +69,14 @@ where
   }
 }
 
-pub struct SumcheckProofGadget<E>
+pub struct AllocatedSumcheckProof<E>
 where
   E: CurveCycleEquipped,
 {
-  polys: Vec<UniPolyGadget<E::Scalar>>,
+  polys: Vec<AllocatedUniPoly<E::Scalar>>,
 }
 
-impl<E> SumcheckProofGadget<E>
+impl<E> AllocatedSumcheckProof<E>
 where
   E: CurveCycleEquipped,
 {
@@ -91,7 +91,7 @@ where
     Ok(Self {
       polys: (0..num_rounds)
         .map(|i| {
-          UniPolyGadget::alloc(
+          AllocatedUniPoly::alloc(
             cs.namespace(|| format!("poly_{i}")),
             inst.map(|inst| &inst.polys[i]),
           )
@@ -101,14 +101,14 @@ where
   }
 }
 
-pub struct UniPolyGadget<F>
+pub struct AllocatedUniPoly<F>
 where
   F: PrimeField,
 {
   coeffs: Vec<AllocatedNum<F>>,
 }
 
-impl<F> UniPolyGadget<F>
+impl<F> AllocatedUniPoly<F>
 where
   F: PrimeField,
 {
@@ -126,7 +126,7 @@ where
   }
 }
 
-pub struct LR1CSInstanceGadget<E>
+pub struct AllocatedLR1CSInstance<E>
 where
   E: CurveCycleEquipped,
 {
@@ -138,7 +138,7 @@ where
   pub vs: Vec<AllocatedNum<E::Scalar>>,
 }
 
-impl<E> LR1CSInstanceGadget<E>
+impl<E> AllocatedLR1CSInstance<E>
 where
   E: CurveCycleEquipped,
 {
@@ -173,7 +173,7 @@ where
   }
 }
 
-pub struct R1CSInstanceGadget<E>
+pub struct AllocatedR1CSInstance<E>
 where
   E: CurveCycleEquipped,
 {
@@ -182,13 +182,13 @@ where
   pub x1: AllocatedNum<E::Scalar>,
 }
 
-impl<E> R1CSInstanceGadget<E>
+impl<E> AllocatedR1CSInstance<E>
 where
   E: CurveCycleEquipped,
 {
   pub fn alloc<CS>(
     mut cs: CS,
-    inst: Option<&LR1CSInstance<E>>,
+    inst: Option<&R1CSInstance<E>>,
     limb_width: usize,
     n_limbs: usize,
   ) -> Result<Self, SynthesisError>

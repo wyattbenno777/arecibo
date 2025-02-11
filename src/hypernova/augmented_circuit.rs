@@ -1,5 +1,6 @@
 use super::{nifs::NIFS, StepCircuit};
 use crate::{
+  and_then_field,
   frontend::{
     gadgets::Assignment, num::AllocatedNum, shape_cs::ShapeCS, Boolean, ConstraintSystem,
     SynthesisError,
@@ -7,11 +8,12 @@ use crate::{
   gadgets::{
     alloc_num_equals, alloc_scalar_as_base, alloc_zero, conditionally_select_vec,
     emulated::{AllocatedEmulLR1CSInstance, AllocatedEmulPoint},
-    hypernova::{alloc_sized_vec, LR1CSInstanceGadget, NIFSGadget, R1CSInstanceGadget},
+    hypernova::{alloc_sized_vec, AllocatedLR1CSInstance, AllocatedNIFS, AllocatedR1CSInstance},
   },
+  map_field,
   r1cs::{LR1CSInstance, R1CSInstance},
   spartan::math::Math,
-  traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
+  traits::{commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
   AugmentedCircuitParams, Commitment,
 };
 use ff::Field;
@@ -38,8 +40,8 @@ where
 {
   pp_digest: E::Base,
   i: E::Scalar,
-  z0: Vec<E::Scalar>,
-  zi: Option<Vec<E::Scalar>>,
+  z_0: Vec<E::Scalar>,
+  z_i: Option<Vec<E::Scalar>>,
   nifs: Option<NIFS<E>>,
   U: Option<LR1CSInstance<E>>,
   u: Option<R1CSInstance<E>>,
@@ -53,8 +55,8 @@ where
   pub fn new(
     pp_digest: E::Base,
     i: E::Scalar,
-    z0: Vec<E::Scalar>,
-    zi: Option<Vec<E::Scalar>>,
+    z_0: Vec<E::Scalar>,
+    z_i: Option<Vec<E::Scalar>>,
     nifs: Option<NIFS<E>>,
     U: Option<LR1CSInstance<E>>,
     u: Option<R1CSInstance<E>>,
@@ -63,8 +65,8 @@ where
     Self {
       pp_digest,
       i,
-      z0,
-      zi,
+      z_0,
+      z_i,
       nifs,
       U,
       u,
@@ -84,7 +86,8 @@ where
   ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
     // Allocate the witness
     let arity = self.step_circuit.arity();
-    let (pp_digest, i, z_0, z_i) = self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
+    let (pp_digest, i, z_0, z_i, nifs, U, u, W_new) =
+      self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
 
     // Base case: i = 0
     //
@@ -92,6 +95,19 @@ where
     let zero = alloc_zero(cs.namespace(|| "zero"));
     let is_base_case = alloc_num_equals(cs.namespace(|| "is base case"), &i, &zero)?;
     let U_default = self.synthesize_base_case(cs.namespace(|| "base case"))?;
+
+    // Non-base case: i > 0
+    //
+    // U <- NIFS.V
+    let U = self.synthesize_non_base_case(
+      cs.namespace(|| "non base case"),
+      &pp_digest,
+      &self.ro_consts,
+      &nifs,
+      &U,
+      &u,
+      W_new,
+    )?;
 
     // Compute i + 1
     let i_new = AllocatedNum::alloc(cs.namespace(|| "i + 1"), || {
@@ -129,13 +145,12 @@ where
     mut cs: CS,
     pp_digest: &AllocatedNum<E::Scalar>,
     ro_consts: &ROConstantsCircuit<Dual<E>>,
-    nifs: &NIFSGadget<E>,
-    U: &LR1CSInstanceGadget<E>,
-    u: &R1CSInstanceGadget<E>,
+    nifs: &AllocatedNIFS<E>,
+    U: &AllocatedLR1CSInstance<E>,
+    u: &AllocatedR1CSInstance<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-  ) -> Result<(), SynthesisError> {
-    nifs.verify(cs.namespace(|| "NIFS.V"), pp_digest, ro_consts, U, u, W_new)?;
-    Ok(())
+  ) -> Result<AllocatedLR1CSInstance<E>, SynthesisError> {
+    nifs.verify(cs.namespace(|| "NIFS.V"), pp_digest, ro_consts, U, u, W_new)
   }
 
   fn alloc_witness<CS: ConstraintSystem<E::Scalar>>(
@@ -144,31 +159,60 @@ where
     arity: usize,
   ) -> Result<
     (
-      AllocatedNum<E::Scalar>,      // pp_digest
-      AllocatedNum<E::Scalar>,      // i
-      Vec<AllocatedNum<E::Scalar>>, // z0
-      Vec<AllocatedNum<E::Scalar>>, // zi
+      AllocatedNum<E::Scalar>,                     // pp_digest
+      AllocatedNum<E::Scalar>,                     // i
+      Vec<AllocatedNum<E::Scalar>>,                // z0
+      Vec<AllocatedNum<E::Scalar>>,                // zi
+      AllocatedNIFS<E>,                            // nifs
+      AllocatedLR1CSInstance<E>,                   // U
+      AllocatedR1CSInstance<E>,                    // u
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>, // W_new
     ),
     SynthesisError,
   > {
     let pp_digest = alloc_scalar_as_base::<Dual<E>, _>(
       cs.namespace(|| "params"),
-      self.inputs.as_ref().map(|inputs| inputs.pp_digest),
+      map_field!(self.inputs, ref, pp_digest).copied(),
     )?;
     let i = AllocatedNum::alloc(cs.namespace(|| "i"), || Ok(self.inputs.get()?.i))?;
     let z_0 = alloc_sized_vec(
       cs.namespace(|| "z_0"),
-      self.inputs.as_ref().map(|inputs| inputs.z0.as_ref()),
+      map_field!(self.inputs, ref, z_0),
       arity,
     )?;
 
     // Allocate zi. If inputs.zi is not provided (base case) allocate default value 0
     let z_i = alloc_sized_vec(
       cs.namespace(|| "z_i"),
-      self.inputs.as_ref().and_then(|inputs| inputs.zi.as_ref()),
+      and_then_field!(self.inputs, z_i),
       arity,
     )?;
-    Ok((pp_digest, i, z_0, z_i))
+
+    let nifs = AllocatedNIFS::alloc(
+      cs.namespace(|| "nifs"),
+      and_then_field!(self.inputs, nifs),
+      self.num_rounds,
+    )?;
+    let U = AllocatedLR1CSInstance::alloc(
+      cs.namespace(|| "allocate U"),
+      and_then_field!(self.inputs, U),
+      self.params.limb_width,
+      self.params.n_limbs,
+      self.num_rounds,
+    )?;
+    let u = AllocatedR1CSInstance::alloc(
+      cs.namespace(|| "allocate u"),
+      and_then_field!(self.inputs, u),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    let W_new = AllocatedEmulPoint::alloc(
+      cs.namespace(|| "allocate W_new"),
+      and_then_field!(self.inputs, W_new).map(|W_new| W_new.to_coordinates()),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    Ok((pp_digest, i, z_0, z_i, nifs, U, u, W_new))
   }
 
   pub fn synthesize_base_case<CS: ConstraintSystem<E::Scalar>>(

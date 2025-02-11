@@ -449,7 +449,23 @@ pub fn conditionally_select_vec<F: PrimeField, CS: ConstraintSystem<F>>(
 /// Helper util to map Option<&T> to Option<&U>
 #[macro_export]
 macro_rules! map_field {
+  // This arm is used when you already have an Option<&T>
+  // Usage: opt_field!(opt_instance, field_name)
   ($inst:expr, $field:ident) => {
     $inst.map(|i| &i.$field)
+  };
+  // This arm is used when you have an Option<T> (not already a reference)
+  // and you want to call as_ref() first.
+  // Usage: opt_field!(opt_instance, ref, field_name)
+  ($opt:expr, ref, $field:ident) => {
+    $opt.as_ref().map(|inst| &inst.$field)
+  };
+}
+
+/// Helper util to and_then Option<&T> to Option<&U>
+#[macro_export]
+macro_rules! and_then_field {
+  ($inst:expr, $field:ident) => {
+    $inst.as_ref().and_then(|i| i.$field.as_ref())
   };
 }
