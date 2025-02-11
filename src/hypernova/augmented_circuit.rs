@@ -8,7 +8,9 @@ use crate::{
   gadgets::{
     alloc_num_equals, alloc_scalar_as_base, alloc_zero, conditionally_select_vec,
     emulated::{AllocatedEmulLR1CSInstance, AllocatedEmulPoint},
-    hypernova::{alloc_sized_vec, AllocatedLR1CSInstance, AllocatedNIFS, AllocatedR1CSInstance},
+    hypernova::{
+      alloc_sized_vec, increment, AllocatedLR1CSInstance, AllocatedNIFS, AllocatedR1CSInstance,
+    },
   },
   map_field,
   r1cs::{LR1CSInstance, R1CSInstance},
@@ -90,15 +92,19 @@ where
       self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
 
     // Base case: i = 0
+    // ////////////////
     //
-    // Get the default running instance.
+    // 1. Check if this is the base
     let zero = alloc_zero(cs.namespace(|| "zero"));
     let is_base_case = alloc_num_equals(cs.namespace(|| "is base case"), &i, &zero)?;
+    // ////////////////////////////////////
+    // 2. Get the default running instance.
     let U_default = self.synthesize_base_case(cs.namespace(|| "base case"))?;
 
     // Non-base case: i > 0
+    // ////////////////////
     //
-    // U <- NIFS.V
+    // 1. U <- NIFS.V
     let U = self.synthesize_non_base_case(
       cs.namespace(|| "non base case"),
       &pp_digest,
@@ -110,15 +116,7 @@ where
     )?;
 
     // Compute i + 1
-    let i_new = AllocatedNum::alloc(cs.namespace(|| "i + 1"), || {
-      Ok(*i.get_value().get()? + E::Scalar::ONE)
-    })?;
-    cs.enforce(
-      || "check i + 1",
-      |lc| lc,
-      |lc| lc,
-      |lc| lc + i_new.get_variable() - CS::one() - i.get_variable(),
-    );
+    let i_new = increment(cs.namespace(|| "i++"), &i)?;
 
     // Compute z_{i+1}
     let z_input = conditionally_select_vec(
@@ -128,10 +126,12 @@ where
       &Boolean::from(is_base_case.clone()),
     )?;
 
-    // Synthesize the step circuit and compute the next output zi+1 ← Fj(zi,ωi).
+    // Synthesize the step circuit (F) and compute the next output zi+1 ← F(zi,ωi).
     let z_next = self
       .step_circuit
       .synthesize(&mut cs.namespace(|| "F"), &z_input)?;
+
+    // Check step_circuit_i (F_i) conforms to structure F
     if z_next.len() != arity {
       return Err(SynthesisError::IncompatibleLengthVector(
         "z_next".to_string(),
@@ -150,7 +150,15 @@ where
     u: &AllocatedR1CSInstance<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
   ) -> Result<AllocatedLR1CSInstance<E>, SynthesisError> {
-    nifs.verify(cs.namespace(|| "NIFS.V"), pp_digest, ro_consts, U, u, W_new)
+    nifs.verify(
+      cs.namespace(|| "NIFS.V"),
+      pp_digest,
+      ro_consts,
+      U,
+      u,
+      W_new,
+      self.num_rounds,
+    )
   }
 
   fn alloc_witness<CS: ConstraintSystem<E::Scalar>>(
@@ -170,6 +178,7 @@ where
     ),
     SynthesisError,
   > {
+    // Allocate primitives: pp_digest, i, z_0
     let pp_digest = alloc_scalar_as_base::<Dual<E>, _>(
       cs.namespace(|| "params"),
       map_field!(self.inputs, ref, pp_digest).copied(),
@@ -188,6 +197,7 @@ where
       arity,
     )?;
 
+    // Allocate primary folding data
     let nifs = AllocatedNIFS::alloc(
       cs.namespace(|| "nifs"),
       and_then_field!(self.inputs, nifs),

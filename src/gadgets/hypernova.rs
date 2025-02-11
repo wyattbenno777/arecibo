@@ -1,7 +1,10 @@
 use super::emulated::AllocatedEmulPoint;
+use crate::constants::NUM_CHALLENGE_BITS;
+use crate::gadgets::le_bits_to_num;
+use crate::traits::ROCircuitTrait;
 use crate::{
-  constants::{NUM_MATRICES, NUM_UNIVARIATE_COEFFS},
-  frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
+  constants::{DEFAULT_ABSORBS, NUM_MATRICES, NUM_UNIVARIATE_COEFFS},
+  frontend::{gadgets::Assignment, num::AllocatedNum, ConstraintSystem, SynthesisError},
   hypernova::{nifs::NIFS, ro_sumcheck::ROSumcheckProof},
   map_field,
   r1cs::{LR1CSInstance, R1CSInstance},
@@ -60,12 +63,66 @@ where
     U: &AllocatedLR1CSInstance<E>,
     u: &AllocatedR1CSInstance<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    num_rounds: usize,
   ) -> Result<AllocatedLR1CSInstance<E>, SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
   {
-    // Verify the NIFS
+    // squeeze rho, gamma, beta
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(ro_consts.clone(), DEFAULT_ABSORBS);
+    ro.absorb(pp_digest);
+    u.absorb_in_ro(cs.namespace(|| "absorb u"), &mut ro)?;
+    let rho_bits = ro.squeeze(cs.namespace(|| "rho bits"), NUM_CHALLENGE_BITS)?;
+    let rho = le_bits_to_num(cs.namespace(|| "rho"), &rho_bits)?;
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(ro_consts.clone(), DEFAULT_ABSORBS);
+    ro.absorb(&rho);
+    let gamma_bits = ro.squeeze(cs.namespace(|| "gamma bits"), NUM_CHALLENGE_BITS)?;
+    let gamma = le_bits_to_num(cs.namespace(|| "gamma"), &gamma_bits)?;
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(ro_consts.clone(), DEFAULT_ABSORBS);
+    ro.absorb(&gamma);
+    let beta: Vec<AllocatedNum<E::Scalar>> = ro
+      .squeeze_vec(cs.namespace(|| "beta"), NUM_CHALLENGE_BITS, num_rounds)?
+      .into_iter()
+      .enumerate()
+      .map(|(i, bits)| le_bits_to_num(cs.namespace(|| format!("beta[{}]", i)), &bits))
+      .try_collect()?;
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(ro_consts.clone(), DEFAULT_ABSORBS);
+    for b in beta.iter() {
+      ro.absorb(b);
+    }
+
+    let claim = self.compute_claim(
+      cs.namespace(|| "claim"),
+      &gamma,
+      &U.vs[0],
+      &U.vs[1],
+      &U.vs[2],
+    )?;
     todo!()
+  }
+
+  fn compute_claim<CS>(
+    &self,
+    mut cs: CS,
+    gamma: &AllocatedNum<E::Scalar>,
+    v0: &AllocatedNum<E::Scalar>,
+    v1: &AllocatedNum<E::Scalar>,
+    v2: &AllocatedNum<E::Scalar>,
+  ) -> Result<AllocatedNum<E::Scalar>, SynthesisError>
+  where
+    CS: ConstraintSystem<E::Scalar>,
+  {
+    // v[2] * gamma^2
+    let gamma_squared = gamma.square(cs.namespace(|| "gamma * gamma"))?;
+    let term_2 = v2.mul(cs.namespace(|| "v2 * gamma^2"), &gamma_squared)?;
+
+    // v[1] * gamma
+    let term_1 = v1.mul(cs.namespace(|| "v1 * gamma"), gamma)?;
+
+    // claim = v[0] + v[1] * gamma + v[2] * gamma^2
+    //       = term_0 + term_1 + term_2
+    v0.add(cs.namespace(|| "claim"), &term_1)?
+      .add(cs.namespace(|| "claim"), &term_2)
   }
 }
 
@@ -204,6 +261,22 @@ where
     )?;
     Ok(Self { comm_W, x0, x1 })
   }
+
+  pub fn absorb_in_ro<CS>(
+    &self,
+    mut cs: CS,
+    ro: &mut impl ROCircuitTrait<E::Scalar>,
+  ) -> Result<(), SynthesisError>
+  where
+    CS: ConstraintSystem<E::Scalar>,
+  {
+    self
+      .comm_W
+      .absorb_in_ro(cs.namespace(|| "absorb u_W"), ro)?;
+    ro.absorb(&self.x0);
+    ro.absorb(&self.x1);
+    Ok(())
+  }
 }
 
 pub fn alloc_sized_vec<CS, F>(
@@ -257,4 +330,21 @@ where
   AllocatedNum::alloc(cs.namespace(|| "scalar"), || {
     s.map_or(Ok(F::ZERO), |s| Ok(s))
   })
+}
+
+pub fn increment<CS, F>(mut cs: CS, i: &AllocatedNum<F>) -> Result<AllocatedNum<F>, SynthesisError>
+where
+  CS: ConstraintSystem<F>,
+  F: PrimeField,
+{
+  let i_new = AllocatedNum::alloc(cs.namespace(|| "i + 1"), || {
+    Ok(*i.get_value().get()? + F::ONE)
+  })?;
+  cs.enforce(
+    || "check i + 1",
+    |lc| lc,
+    |lc| lc,
+    |lc| lc + i_new.get_variable() - CS::one() - i.get_variable(),
+  );
+  Ok(i_new)
 }
