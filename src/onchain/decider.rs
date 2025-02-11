@@ -170,8 +170,8 @@ impl Decider {
 pub fn prepare_calldata(
   function_signature_check: [u8; 4],
   i: Fr,
-  z_0: Vec<Fr>,
-  z_i: Vec<Fr>,
+  z_0: &Vec<Fr>,
+  z_i: &Vec<Fr>,
   running_instance: &RelaxedR1CSInstance<Bn256EngineKZG>,
   incoming_instance: &R1CSInstance<Bn256EngineKZG>,
   proof: &Decider,
@@ -180,8 +180,8 @@ pub fn prepare_calldata(
     [
       function_signature_check.to_eth(),
       i.to_eth(),   // i
-      z_0[..].to_eth(), // z_0
-      z_i[..].to_eth(), // z_i
+      z_0.to_eth(), // z_0
+      z_i.to_eth(), // z_i
       running_instance.comm_W.to_eth(),
       running_instance.comm_E.to_eth(),
       incoming_instance.comm_W.to_eth(),

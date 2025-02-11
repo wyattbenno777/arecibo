@@ -11,7 +11,7 @@
 use arecibo::{
   frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
   nebula::rs::{PublicParams, RecursiveSNARK, StepCircuit},
-  onchain::{decider::{prepare_calldata, Decider}, utils::get_function_selector_for_nova_cyclefold_verifier, verifiers::nebula::NovaCycleFoldVerifierKey},
+  onchain::{decider::{prepare_calldata, Decider}, eth::evm::{compile_solidity, Evm}, utils::{get_formatted_calldata, get_function_selector_for_nova_cyclefold_verifier}, verifiers::{groth16::SolidityGroth16VerifierKey, kzg::SolidityKZGVerifierKey, nebula::{get_decider_template_for_cyclefold_decider, NovaCycleFoldVerifierKey}}},
   provider::{Bn256EngineKZG, GrumpkinEngine},
   traits::{snark::RelaxedR1CSSNARKTrait, Engine},
 };
@@ -118,10 +118,10 @@ fn main() {
   let mut rng = thread_rng();
   let start = Instant::now();
   
-  let (pk, vk) = Decider::setup(&rs_pp, &mut rng).unwrap();
+  let (decider_pk, decider_vk) = Decider::setup(&rs_pp, &mut rng).unwrap();
   println!("Decider::setup: took {:?}", start.elapsed());
   let start = Instant::now();
-  let proof = Decider::prove(&rs_pp, &pk, &recursive_snark, &mut rng);
+  let proof = Decider::prove(&rs_pp, &decider_pk, &recursive_snark, &mut rng);
   match &proof {
     Ok(_) => println!("CompressedSNARK::prove: Ok, took {:?}", start.elapsed()),
     Err(e) => println!(
@@ -137,7 +137,7 @@ fn main() {
   let start = Instant::now();
   let res = Decider::verify(
     &proof,
-     vk, 
+     decider_vk.clone(), 
      Fr::from(num_steps as u64), 
      z0, 
      recursive_snark.zi.clone(), 
@@ -178,34 +178,41 @@ fn main() {
   let calldata: Vec<u8> = prepare_calldata(
     function_selector,
     Fr::from(recursive_snark.i as u64),
-    recursive_snark.z0,
-    recursive_snark.zi,
+    &recursive_snark.z0,
+    &recursive_snark.zi,
     &recursive_snark.r_U_primary,
     &recursive_snark.l_u_primary,
     &proof,
   ).unwrap();
 
   // prepare the setup params for the solidity verifier
-  let nova_cyclefold_vk = NovaCycleFoldVerifierKey::from(vk);
+  let nova_cyclefold_vk = NovaCycleFoldVerifierKey::from(
+    (
+      decider_vk.pp_hash,
+      SolidityGroth16VerifierKey::from(decider_vk.groth16_vk),
+      SolidityKZGVerifierKey::from((decider_vk.kzg_vk, Vec::new())),
+      recursive_snark.z0.len(),
+    )
+  );
 
-  // // generate the solidity code
-  // let decider_solidity_code = get_decider_template_for_cyclefold_decider(nova_cyclefold_vk);
+  // generate the solidity code
+  let decider_solidity_code = get_decider_template_for_cyclefold_decider(nova_cyclefold_vk);
 
-  // // verify the proof against the solidity code in the EVM
-  // let nova_cyclefold_verifier_bytecode = compile_solidity(&decider_solidity_code, "NovaDecider");
-  // let mut evm = Evm::default();
-  // let verifier_address = evm.create(nova_cyclefold_verifier_bytecode);
-  // let (_, output) = evm.call(verifier_address, calldata.clone());
-  // assert_eq!(*output.last().unwrap(), 1);
+  // verify the proof against the solidity code in the EVM
+  let nova_cyclefold_verifier_bytecode = compile_solidity(&decider_solidity_code, "NovaDecider");
+  let mut evm = Evm::default();
+  let verifier_address = evm.create(nova_cyclefold_verifier_bytecode);
+  let (_, output) = evm.call(verifier_address, calldata.clone());
+  assert_eq!(*output.last().unwrap(), 1);
 
-  // // save smart contract and the calldata
-  // println!("storing nova-verifier.sol and the calldata into files");
-  // use std::fs;
-  // fs::write(
-  //   "./examples/nova-verifier.sol",
-  //   decider_solidity_code.clone(),
-  // )?;
-  // fs::write("./examples/solidity-calldata.calldata", calldata.clone())?;
-  // let s = solidity_verifiers::utils::get_formatted_calldata(calldata.clone());
-  // fs::write("./examples/solidity-calldata.inputs", s.join(",\n")).expect("");
+  // save smart contract and the calldata
+  println!("storing nova-verifier.sol and the calldata into files");
+  use std::fs;
+  fs::write(
+    "./examples/nova-verifier.sol",
+    decider_solidity_code.clone(),
+  ).expect("Unable to write to file");
+  fs::write("./examples/solidity-calldata.calldata", calldata.clone()).expect("");
+  let s = get_formatted_calldata(calldata.clone());
+  fs::write("./examples/solidity-calldata.inputs", s.join(",\n")).expect("");
 }
