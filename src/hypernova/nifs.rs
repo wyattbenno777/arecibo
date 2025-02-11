@@ -14,7 +14,10 @@ use crate::{
   traits::{CurveCycleEquipped, Dual, Engine, ROConstants},
 };
 use ff::Field;
+use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 /// A SNARK that holds the proof of a step of an incremental computation
 pub struct NIFS<E: CurveCycleEquipped> {
   pub(crate) sc: SumcheckProof<E>,

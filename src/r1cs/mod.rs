@@ -1035,7 +1035,7 @@ where
       comm_W,
       u: E::Scalar::ZERO,
       X: vec![E::Scalar::ZERO; S.num_io],
-      rx: vec![E::Scalar::ZERO; S.num_cons.log_2() + 1],
+      rx: vec![E::Scalar::ZERO; S.num_cons.next_power_of_two().log_2()],
       vs: vec![E::Scalar::ZERO; 3],
     }
   }

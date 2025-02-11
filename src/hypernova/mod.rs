@@ -15,7 +15,7 @@ pub trait StepCircuit<F: PrimeField> {
   /// Synthesize the circuit
   fn synthesize<CS>(
     &self,
-    cs: CS,
+    cs: &mut CS,
     z: &[AllocatedNum<F>],
   ) -> Result<Vec<AllocatedNum<F>>, SynthesisError>
   where

@@ -16,3 +16,4 @@ pub(crate) use utils::{
 };
 
 pub(crate) mod emulated;
+pub(crate) mod hypernova;

@@ -10,5 +10,15 @@ pub(crate) const DEFAULT_ABSORBS: usize = 0;
 /// Bit size of Nova field element hashes
 pub const NUM_HASH_BITS: usize = 250;
 
+/*
+ * *** HyperNova constants ***
+*/
+
 /// Number of Matrices for HyperNova
 pub(crate) const NUM_MATRICES: usize = 3;
+/// Number of base constraints for augmented circuit
+pub(crate) const BASE_CONSTRAINTS: usize = 17;
+/// Maximum number of constraints per step circuit input
+pub(crate) const MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT: usize = 487;
+/// Maximum number of constraints per sumcheck round
+pub(crate) const MAX_CONSTRAINTS_PER_SUMCHECK_ROUND: usize = 1481;
