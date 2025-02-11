@@ -445,3 +445,11 @@ pub fn conditionally_select_vec<F: PrimeField, CS: ConstraintSystem<F>>(
     })
     .collect::<Result<Vec<AllocatedNum<F>>, SynthesisError>>()
 }
+
+/// Helper util to map Option<&T> to Option<&U>
+#[macro_export]
+macro_rules! map_field {
+  ($inst:expr, $field:ident) => {
+    $inst.map(|i| &i.$field)
+  };
+}

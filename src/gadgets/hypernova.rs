@@ -1,8 +1,11 @@
 use super::emulated::AllocatedEmulPoint;
 use crate::{
-  constants::NUM_MATRICES,
+  constants::{NUM_MATRICES, NUM_UNIVARIATE_COEFFS},
   frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
+  hypernova::{nifs::NIFS, ro_sumcheck::ROSumcheckProof},
+  map_field,
   r1cs::LR1CSInstance,
+  spartan::polys::univariate::UniPoly,
   traits::{commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
   Commitment,
 };
@@ -14,20 +17,39 @@ pub struct NIFSGadget<E>
 where
   E: CurveCycleEquipped,
 {
-  _engine: PhantomData<E>,
+  sc: SumcheckProofGadget<E>,
+  sigmas: Vec<AllocatedNum<E::Scalar>>,
+  thetas: Vec<AllocatedNum<E::Scalar>>,
 }
 
 impl<E> NIFSGadget<E>
 where
   E: CurveCycleEquipped,
 {
-  pub fn alloc<CS>(mut cs: CS) -> Self
+  pub fn alloc<CS>(
+    mut cs: CS,
+    inst: Option<&NIFS<E>>,
+    num_rounds: usize,
+  ) -> Result<Self, SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
   {
-    Self {
-      _engine: PhantomData,
-    }
+    let sc = SumcheckProofGadget::alloc(
+      cs.namespace(|| "sumcheck proof"),
+      inst.map(|inst| &inst.sc),
+      num_rounds,
+    )?;
+    let sigmas = alloc_sized_vec(
+      cs.namespace(|| "sigmas"),
+      map_field!(inst, sigmas),
+      NUM_MATRICES,
+    )?;
+    let thetas = alloc_sized_vec(
+      cs.namespace(|| "thetas"),
+      map_field!(inst, thetas),
+      NUM_MATRICES,
+    )?;
+    Ok(Self { sc, sigmas, thetas })
   }
 
   pub fn verify<CS>(
@@ -51,20 +73,56 @@ pub struct SumcheckProofGadget<E>
 where
   E: CurveCycleEquipped,
 {
-  _engine: PhantomData<E>,
+  polys: Vec<UniPolyGadget<E::Scalar>>,
 }
 
 impl<E> SumcheckProofGadget<E>
 where
   E: CurveCycleEquipped,
 {
-  pub fn alloc<CS>(mut cs: CS) -> Self
+  pub fn alloc<CS>(
+    mut cs: CS,
+    inst: Option<&ROSumcheckProof<E>>,
+    num_rounds: usize,
+  ) -> Result<Self, SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
   {
-    Self {
-      _engine: PhantomData,
-    }
+    Ok(Self {
+      polys: (0..num_rounds)
+        .map(|i| {
+          UniPolyGadget::alloc(
+            cs.namespace(|| format!("poly_{i}")),
+            inst.map(|inst| &inst.polys[i]),
+          )
+        })
+        .try_collect()?,
+    })
+  }
+}
+
+pub struct UniPolyGadget<F>
+where
+  F: PrimeField,
+{
+  coeffs: Vec<AllocatedNum<F>>,
+}
+
+impl<F> UniPolyGadget<F>
+where
+  F: PrimeField,
+{
+  pub fn alloc<CS>(mut cs: CS, inst: Option<&UniPoly<F>>) -> Result<Self, SynthesisError>
+  where
+    CS: ConstraintSystem<F>,
+  {
+    Ok(Self {
+      coeffs: alloc_sized_vec(
+        cs.namespace(|| "coeffs"),
+        inst.map(|poly| &poly.coeffs),
+        NUM_UNIVARIATE_COEFFS,
+      )?,
+    })
   }
 }
 
@@ -148,7 +206,7 @@ where
   }
 }
 
-fn alloc_sized_vec<CS, F>(
+pub fn alloc_sized_vec<CS, F>(
   mut cs: CS,
   v: Option<&Vec<F>>,
   size: usize,

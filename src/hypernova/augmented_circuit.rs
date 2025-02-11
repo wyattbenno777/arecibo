@@ -7,7 +7,7 @@ use crate::{
   gadgets::{
     alloc_num_equals, alloc_scalar_as_base, alloc_zero, conditionally_select_vec,
     emulated::{AllocatedEmulLR1CSInstance, AllocatedEmulPoint},
-    hypernova::{LR1CSInstanceGadget, NIFSGadget, R1CSInstanceGadget},
+    hypernova::{alloc_sized_vec, LR1CSInstanceGadget, NIFSGadget, R1CSInstanceGadget},
   },
   r1cs::{LR1CSInstance, R1CSInstance},
   spartan::math::Math,
@@ -134,7 +134,7 @@ where
     u: &R1CSInstanceGadget<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
   ) -> Result<(), SynthesisError> {
-    nifs.verify(cs.namespace(|| "NIFS.V"), pp_digest, ro_consts, U, u, W_new);
+    nifs.verify(cs.namespace(|| "NIFS.V"), pp_digest, ro_consts, U, u, W_new)?;
     Ok(())
   }
 
@@ -156,23 +156,18 @@ where
       self.inputs.as_ref().map(|inputs| inputs.pp_digest),
     )?;
     let i = AllocatedNum::alloc(cs.namespace(|| "i"), || Ok(self.inputs.get()?.i))?;
-    let z_0 = (0..arity)
-      .map(|i| {
-        AllocatedNum::alloc(cs.namespace(|| format!("z0_{i}")), || {
-          Ok(self.inputs.get()?.z0[i])
-        })
-      })
-      .collect::<Result<Vec<AllocatedNum<E::Scalar>>, _>>()?;
+    let z_0 = alloc_sized_vec(
+      cs.namespace(|| "z_0"),
+      self.inputs.as_ref().map(|inputs| inputs.z0.as_ref()),
+      arity,
+    )?;
 
     // Allocate zi. If inputs.zi is not provided (base case) allocate default value 0
-    let zero_vec = vec![E::Scalar::ZERO; arity];
-    let z_i = (0..arity)
-      .map(|i| {
-        AllocatedNum::alloc(cs.namespace(|| format!("zi_{i}")), || {
-          Ok(self.inputs.get()?.zi.as_ref().unwrap_or(&zero_vec)[i])
-        })
-      })
-      .collect::<Result<Vec<AllocatedNum<E::Scalar>>, _>>()?;
+    let z_i = alloc_sized_vec(
+      cs.namespace(|| "z_i"),
+      self.inputs.as_ref().and_then(|inputs| inputs.zi.as_ref()),
+      arity,
+    )?;
     Ok((pp_digest, i, z_0, z_i))
   }
 

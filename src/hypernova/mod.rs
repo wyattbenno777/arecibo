@@ -6,7 +6,7 @@ use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 mod augmented_circuit;
 pub mod error;
 pub mod nifs;
-mod poseidon_sumcheck;
+pub mod ro_sumcheck;
 pub mod rs;
 
 /// Step circuit used for Hypernova

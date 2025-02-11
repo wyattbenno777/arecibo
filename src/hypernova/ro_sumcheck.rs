@@ -1,3 +1,5 @@
+//! Implements sumcheck with poseidon RO as the transcript
+
 use crate::{
   constants::{DEFAULT_ABSORBS, NUM_CHALLENGE_BITS},
   errors::NovaError,
@@ -9,14 +11,16 @@ use ff::Field;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+/// Sumcheck proof
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct SumcheckProof<E: Engine> {
-  pub polys: Vec<UniPoly<E::Scalar>>,
+pub struct ROSumcheckProof<E: Engine> {
+  pub(crate) polys: Vec<UniPoly<E::Scalar>>,
 }
 
-impl<E: Engine> SumcheckProof<E> {
-  pub fn verify_poseidon(
+impl<E: Engine> ROSumcheckProof<E> {
+  /// Verify the sumcheck proof
+  pub fn verify(
     &self,
     claim: E::Scalar,
     num_rounds: usize,
@@ -132,7 +136,7 @@ impl<E: Engine> SumcheckProof<E> {
       )
   }
 
-  pub fn prove_cubic_hypernova<F>(
+  pub(crate) fn prove_cubic_hypernova<F>(
     claim: E::Scalar,
     num_rounds: usize,
     poly_A: &mut MultilinearPolynomial<E::Scalar>,

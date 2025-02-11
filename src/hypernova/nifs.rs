@@ -14,13 +14,13 @@ use crate::{
 use ff::Field;
 use serde::{Deserialize, Serialize};
 
-use super::poseidon_sumcheck::SumcheckProof;
+use super::ro_sumcheck::ROSumcheckProof;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
 /// A SNARK that holds the proof of a step of an incremental computation
 pub struct NIFS<E: CurveCycleEquipped> {
-  pub(crate) sc: SumcheckProof<E>,
+  pub(crate) sc: ROSumcheckProof<E>,
   pub(crate) sigmas: Vec<E::Scalar>,
   pub(crate) thetas: Vec<E::Scalar>,
 }
@@ -115,7 +115,7 @@ where
        Q_eq: E::Scalar|
        -> E::Scalar { L_comb_func(L_abc, L_eq) + Q_comb_func(Q_a, Q_b, Q_c, Q_eq) };
     let claim = U1.vs[0] + gamma * U1.vs[1] + gamma * gamma * U1.vs[2];
-    let (sc, rx_p, _) = SumcheckProof::<E>::prove_cubic_hypernova(
+    let (sc, rx_p, _) = ROSumcheckProof::<E>::prove_cubic_hypernova(
       claim,
       s,
       &mut poly_ABC,
@@ -179,9 +179,7 @@ where
 
     // Verify sumcheck proof
     let claim = U1.vs[0] + gamma * U1.vs[1] + gamma * gamma * U1.vs[2];
-    let (new_claim, rx_p) = self
-      .sc
-      .verify_poseidon(claim, num_rounds, 3, ro, ro_consts)?;
+    let (new_claim, rx_p) = self.sc.verify(claim, num_rounds, 3, ro, ro_consts)?;
     let e1 = EqPolynomial::new(U1.rx.to_vec()).evaluate(&rx_p);
     let cl = (self.sigmas[0] + gamma * self.sigmas[1] + gamma * gamma * self.sigmas[2]) * e1;
     let e2 = EqPolynomial::new(beta).evaluate(&rx_p);
