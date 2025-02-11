@@ -1,33 +1,30 @@
-use super::r1cs::AllocatedRelaxedR1CSInstanceBn;
 use super::{
-  le_bits_to_num, CycleFoldNIFSVerifierGadget, CycleFoldRelaxedNIFSVerifierGadget,
-  NIFSVerifierGadget,
+  le_bits_to_num, r1cs::AllocatedRelaxedR1CSInstanceBn, CycleFoldNIFSVerifierGadget,
+  CycleFoldRelaxedNIFSVerifierGadget, NIFSVerifierGadget, PrimaryNIFSVerifierGadget,
+  NUM_CHALLENGE_BITS,
 };
-use super::{PrimaryNIFSVerifierGadget, NUM_CHALLENGE_BITS};
-use crate::constants::NUM_FE_IN_EMULATED_POINT;
-use crate::cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance;
-use crate::cyclefold::gadgets::AllocatedCycleFoldInstance;
-use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
-use crate::gadgets::emulated::AllocatedEmulPoint;
-use crate::gadgets::scalar_as_base;
-use crate::nebula::layer_2::utils::{absorb_U, absorb_U_bn, Layer2FoldingData};
-use crate::provider::PallasEngine;
-use crate::r1cs::RelaxedR1CSWitness;
-use crate::traits::commitment::CommitmentTrait;
-use crate::traits::ROCircuitTrait;
-use crate::traits::ROTrait;
 use crate::{
-  constants::{BN_N_LIMBS, NIO_CYCLE_FOLD},
+  constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT},
+  cyclefold::gadgets::{emulated::AllocatedEmulRelaxedR1CSInstance, AllocatedCycleFoldInstance},
   errors::NovaError,
+  frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
+  gadgets::{emulated::AllocatedEmulPoint, scalar_as_base},
   nebula::{
     augmented_circuit::AugmentedCircuitParams,
-    layer_2::nifs::NIFS,
+    layer_2::{
+      nifs::NIFS,
+      utils::{absorb_U, absorb_U_bn, Layer2FoldingData},
+    },
     rs::{PublicParams, RecursiveSNARK, StepCircuit},
   },
-  r1cs::RelaxedR1CSInstance,
-  traits::{snark::default_ck_hint, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
+  provider::PallasEngine,
+  r1cs::{RelaxedR1CSInstance, RelaxedR1CSWitness},
+  traits::{
+    commitment::CommitmentTrait, snark::default_ck_hint, CurveCycleEquipped, Dual, Engine,
+    ROCircuitTrait, ROConstantsCircuit, ROTrait,
+  },
+  CommitmentKey, R1CSWithArity,
 };
-use crate::{CommitmentKey, R1CSWithArity};
 use ff::Field;
 use std::marker::PhantomData;
 

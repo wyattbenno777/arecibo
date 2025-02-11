@@ -1,13 +1,12 @@
 //! Applies Spartan on top of the Layer 2 proofs.
 
 use super::{AggregationPublicParams, AggregationRecursiveSNARK};
-use crate::nebula::nifs::CycleFoldRelaxedNIFS;
-use crate::traits::commitment::CommitmentEngineTrait;
 use crate::{
   errors::NovaError,
-  nebula::nifs::{PrimaryNIFS, PrimaryRelaxedNIFS},
+  nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryNIFS, PrimaryRelaxedNIFS},
   r1cs::{R1CSInstance, RelaxedR1CSInstance},
   traits::{
+    commitment::CommitmentEngineTrait,
     snark::{BatchedRelaxedR1CSSNARKTrait, RelaxedR1CSSNARKTrait},
     CurveCycleEquipped, Dual, Engine,
   },

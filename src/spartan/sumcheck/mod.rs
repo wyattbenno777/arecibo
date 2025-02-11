@@ -1,7 +1,9 @@
-use crate::errors::NovaError;
-use crate::spartan::polys::{
-  multilinear::MultilinearPolynomial,
-  univariate::{CompressedUniPoly, UniPoly},
+use crate::{
+  errors::NovaError,
+  spartan::polys::{
+    multilinear::MultilinearPolynomial,
+    univariate::{CompressedUniPoly, UniPoly},
+  },
 };
 
 use crate::traits::{Engine, TranscriptEngineTrait};

@@ -2,14 +2,13 @@
 mod sparse;
 pub(crate) mod util;
 
-use crate::spartan::math::Math;
-use crate::spartan::polys::multilinear::MultilinearPolynomial;
 use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
   digest::{DigestComputer, SimpleDigestible},
   errors::NovaError,
   gadgets::{f_to_nat, nat_to_limbs, scalar_as_base},
   hypernova::error::HyperNovaError,
+  spartan::{math::Math, polys::multilinear::MultilinearPolynomial},
   traits::{
     commitment::CommitmentEngineTrait, AbsorbInROTrait, Engine, ROTrait, TranscriptReprTrait,
   },

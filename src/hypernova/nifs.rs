@@ -1,16 +1,15 @@
 //! This module implements the HyperNova folding scheme.
-use crate::constants::NUM_CHALLENGE_BITS;
-use crate::gadgets::scalar_as_base;
-use crate::spartan::math::Math;
-use crate::spartan::polys::eq::EqPolynomial;
-use crate::spartan::polys::multilinear::MultilinearPolynomial;
-use crate::traits::ROTrait;
-use crate::NovaError;
 use crate::{
-  constants::DEFAULT_ABSORBS,
+  constants::{DEFAULT_ABSORBS, NUM_CHALLENGE_BITS},
   cyclefold::util::absorb_primary_r1cs,
+  gadgets::scalar_as_base,
   r1cs::{LR1CSInstance, R1CSInstance, R1CSShape, R1CSWitness},
-  traits::{CurveCycleEquipped, Dual, Engine, ROConstants},
+  spartan::{
+    math::Math,
+    polys::{eq::EqPolynomial, multilinear::MultilinearPolynomial},
+  },
+  traits::{CurveCycleEquipped, Dual, Engine, ROConstants, ROTrait},
+  NovaError,
 };
 use ff::Field;
 use serde::{Deserialize, Serialize};
@@ -201,17 +200,20 @@ where
 
 #[cfg(test)]
 mod tests {
-  use crate::frontend::r1cs::NovaShape;
-  use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
-  use crate::hypernova::nifs::NIFS;
-  use crate::r1cs::{LR1CSInstance, R1CSInstance, R1CSShape, R1CSWitness};
-  use crate::spartan::math::Math;
-  use crate::traits::{CurveCycleEquipped, Dual, ROConstants};
-  use crate::CommitmentKey;
   use crate::{
-    frontend::{r1cs::NovaWitness, solver::SatisfyingAssignment, test_shape_cs::TestShapeCS},
+    frontend::{
+      num::AllocatedNum,
+      r1cs::{NovaShape, NovaWitness},
+      solver::SatisfyingAssignment,
+      test_shape_cs::TestShapeCS,
+      ConstraintSystem, SynthesisError,
+    },
+    hypernova::nifs::NIFS,
     provider::{Bn256EngineKZG, PallasEngine, Secp256k1Engine},
-    traits::{snark::default_ck_hint, Engine},
+    r1cs::{LR1CSInstance, R1CSInstance, R1CSShape, R1CSWitness},
+    spartan::math::Math,
+    traits::{snark::default_ck_hint, CurveCycleEquipped, Dual, Engine, ROConstants},
+    CommitmentKey,
   };
   use ff::{Field, PrimeField};
 

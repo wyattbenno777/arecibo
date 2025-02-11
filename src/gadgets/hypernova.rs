@@ -1,12 +1,10 @@
 use super::emulated::AllocatedEmulPoint;
-use crate::constants::NUM_MATRICES;
-use crate::frontend::SynthesisError;
-use crate::traits::commitment::CommitmentTrait;
-use crate::Commitment;
 use crate::{
-  frontend::{num::AllocatedNum, ConstraintSystem},
+  constants::NUM_MATRICES,
+  frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
   r1cs::LR1CSInstance,
-  traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
+  traits::{commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
+  Commitment,
 };
 use ff::{Field, PrimeField};
 use itertools::Itertools;

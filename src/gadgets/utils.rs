@@ -1,11 +1,12 @@
 //! This module implements various low-level gadgets
 use super::nonnative::bignat::{nat_to_limbs, BigNat};
-use crate::frontend::gadgets::Assignment;
-use crate::frontend::{
-  num::AllocatedNum,
-  ConstraintSystem, LinearCombination, SynthesisError, {AllocatedBit, Boolean},
+use crate::{
+  frontend::{
+    gadgets::Assignment, num::AllocatedNum, AllocatedBit, Boolean, ConstraintSystem,
+    LinearCombination, SynthesisError,
+  },
+  traits::Engine,
 };
-use crate::traits::Engine;
 use ff::{Field, PrimeField, PrimeFieldBits};
 use num_bigint::BigInt;
 

@@ -1,24 +1,18 @@
 //! CycleFold for Nova
-use crate::constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS};
-use crate::cyclefold::circuit::CycleFoldCircuit;
-use crate::cyclefold::util::{
-  absorb_cyclefold_r1cs, absorb_primary_commitment, absorb_primary_r1cs,
-};
-use crate::frontend::r1cs::NovaWitness;
-use crate::frontend::solver::SatisfyingAssignment;
-use crate::frontend::ConstraintSystem;
-use crate::gadgets::scalar_as_base;
-use crate::traits::AbsorbInROTrait;
-use crate::traits::{CurveCycleEquipped, ROTrait};
 use crate::{
-  constants::NUM_FE_IN_EMULATED_POINT,
+  constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT},
+  cyclefold::{
+    circuit::CycleFoldCircuit,
+    util::{absorb_cyclefold_r1cs, absorb_primary_commitment, absorb_primary_r1cs},
+  },
   errors::NovaError,
+  frontend::{r1cs::NovaWitness, solver::SatisfyingAssignment, ConstraintSystem},
+  gadgets::scalar_as_base,
   r1cs::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
-  traits::{Dual, Engine, ROConstants},
+  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstants, ROTrait},
   Commitment, CommitmentKey,
 };
-use ff::Field;
-use ff::PrimeFieldBits;
+use ff::{Field, PrimeFieldBits};
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 

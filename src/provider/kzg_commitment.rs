@@ -11,11 +11,9 @@ use rand_core::{CryptoRng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::provider::pedersen::Commitment;
-use crate::provider::traits::DlogGroup;
-use crate::provider::util::fb_msm;
 use crate::{
   digest::SimpleDigestible,
+  provider::{pedersen::Commitment, traits::DlogGroup, util::fb_msm},
   traits::{
     commitment::{CommitmentEngineTrait, Len},
     Engine as NovaEngine, Group, TranscriptReprTrait,

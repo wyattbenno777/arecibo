@@ -1,11 +1,11 @@
 //! This module defines the Nova augmented circuit used for Cyclefold
 
-use crate::gadgets::emulated::AllocatedEmulPoint;
 use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
   gadgets::{
     alloc_num_equals, alloc_scalar_as_base, alloc_zero, conditionally_select,
-    conditionally_select_vec, le_bits_to_num, AllocatedRelaxedR1CSInstance,
+    conditionally_select_vec, emulated::AllocatedEmulPoint, le_bits_to_num,
+    AllocatedRelaxedR1CSInstance,
   },
   traits::{
     commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
@@ -14,8 +14,10 @@ use crate::{
   Commitment,
 };
 
-use crate::frontend::gadgets::{boolean::Boolean, num::AllocatedNum, Assignment};
-use crate::frontend::{AllocatedBit, ConstraintSystem, SynthesisError};
+use crate::frontend::{
+  gadgets::{boolean::Boolean, num::AllocatedNum, Assignment},
+  AllocatedBit, ConstraintSystem, SynthesisError,
+};
 use ff::Field;
 use serde::{Deserialize, Serialize};
 

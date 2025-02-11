@@ -1,8 +1,7 @@
 //! Utilities for provider module.
 pub(in crate::provider) mod fb_msm;
 pub mod msm {
-  use halo2curves::msm::best_multiexp;
-  use halo2curves::CurveAffine;
+  use halo2curves::{msm::best_multiexp, CurveAffine};
 
   // this argument swap is useful until Rust gets named arguments
   // and saves significant complexity in macro code
@@ -37,9 +36,9 @@ pub mod iterators {
   use ff::Field;
   use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
   use rayon_scan::ScanParallelIterator;
-  use std::iter::DoubleEndedIterator;
   use std::{
     borrow::Borrow,
+    iter::DoubleEndedIterator,
     ops::{AddAssign, MulAssign},
   };
 
@@ -106,9 +105,9 @@ pub mod iterators {
 #[cfg(test)]
 pub mod test_utils {
   //! Contains utilities for testing and benchmarking.
-  use crate::spartan::polys::multilinear::MultilinearPolynomial;
-  use crate::traits::{
-    commitment::CommitmentEngineTrait, evaluation::EvaluationEngineTrait, Engine,
+  use crate::{
+    spartan::polys::multilinear::MultilinearPolynomial,
+    traits::{commitment::CommitmentEngineTrait, evaluation::EvaluationEngineTrait, Engine},
   };
   use ff::Field;
   use rand::rngs::StdRng;

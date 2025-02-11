@@ -1,22 +1,21 @@
 //! Module containing components to enable aggregation of IVC proofs.
 
-use crate::constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT};
-use crate::errors::NovaError;
-use crate::gadgets::scalar_as_base;
-use crate::nebula::augmented_circuit::AugmentedCircuitParams;
-use crate::nebula::layer_2::utils::absorb_U_bn;
-use crate::nebula::layer_2::utils::{absorb_U, random_fold_and_derandom};
-use crate::nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryNIFS, PrimaryRelaxedNIFS};
-use crate::r1cs::{CommitmentKeyHint, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness};
-use crate::traits::commitment::CommitmentEngineTrait;
-use crate::traits::commitment::Len;
-use crate::traits::ROTrait;
-use crate::traits::{Dual, Engine};
-use crate::CommitmentKey;
 use crate::{
-  nebula::rs::{PublicParams, RecursiveSNARK},
-  traits::CurveCycleEquipped,
-  R1CSWithArity,
+  constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT},
+  errors::NovaError,
+  gadgets::scalar_as_base,
+  nebula::{
+    augmented_circuit::AugmentedCircuitParams,
+    layer_2::utils::{absorb_U, absorb_U_bn, random_fold_and_derandom},
+    nifs::{CycleFoldRelaxedNIFS, PrimaryNIFS, PrimaryRelaxedNIFS},
+    rs::{PublicParams, RecursiveSNARK},
+  },
+  r1cs::{CommitmentKeyHint, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
+  traits::{
+    commitment::{CommitmentEngineTrait, Len},
+    CurveCycleEquipped, Dual, Engine, ROTrait,
+  },
+  CommitmentKey, R1CSWithArity,
 };
 use ff::Field;
 use std::sync::Arc;
@@ -24,8 +23,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use verifier_circuit::VerifierCircuit;
 
-use super::nifs::NIFS;
-use super::utils::Layer2FoldingData;
+use super::{nifs::NIFS, utils::Layer2FoldingData};
 use crate::nebula::traits::{Layer1PPTrait, Layer1RSTrait, MemoryCommitmentsTraits};
 
 pub mod compression;
@@ -664,21 +662,23 @@ where
 
 #[cfg(test)]
 mod test {
-  use super::compression::CompressedSNARK;
-  use super::{AggregationPublicParams, AggregationRecursiveSNARK, Layer1PPTrait, Layer1RSTrait};
-  use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
-  use crate::nebula::audit_rs::{AuditPublicParams, AuditRecursiveSNARK, AuditStepCircuit};
-  use crate::nebula::rs::{PublicParams, RecursiveSNARK};
-  use crate::nebula::traits::MemoryCommitmentsTraits;
-  use crate::provider::ipa_pc;
-  use crate::spartan;
-  use crate::traits::snark::default_ck_hint;
-  use crate::traits::{CurveCycleEquipped, Dual};
-  use crate::{nebula::rs::StepCircuit, provider::Bn256EngineIPA, traits::Engine};
-  use ff::Field;
-  use ff::PrimeField;
-  use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
-  use tracing_subscriber::{fmt, EnvFilter, Registry};
+  use super::{
+    compression::CompressedSNARK, AggregationPublicParams, AggregationRecursiveSNARK,
+    Layer1PPTrait, Layer1RSTrait,
+  };
+  use crate::{
+    frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
+    nebula::{
+      audit_rs::{AuditPublicParams, AuditRecursiveSNARK, AuditStepCircuit},
+      rs::{PublicParams, RecursiveSNARK, StepCircuit},
+      traits::MemoryCommitmentsTraits,
+    },
+    provider::{ipa_pc, Bn256EngineIPA},
+    spartan,
+    traits::{snark::default_ck_hint, CurveCycleEquipped, Dual, Engine},
+  };
+  use ff::{Field, PrimeField};
+  use tracing_subscriber::{fmt, prelude::__tracing_subscriber_SubscriberExt, EnvFilter, Registry};
   use tracing_texray::TeXRayLayer;
 
   type E1 = Bn256EngineIPA;

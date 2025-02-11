@@ -1,10 +1,10 @@
-use crate::constants::{DEFAULT_ABSORBS, NUM_CHALLENGE_BITS};
-use crate::errors::NovaError;
-use crate::gadgets::scalar_as_base;
-use crate::spartan::polys::{multilinear::MultilinearPolynomial, univariate::UniPoly};
-use crate::traits::Engine;
-use crate::traits::{AbsorbInROTrait, CurveCycleEquipped, ROConstants};
-use crate::traits::{Dual, ROTrait};
+use crate::{
+  constants::{DEFAULT_ABSORBS, NUM_CHALLENGE_BITS},
+  errors::NovaError,
+  gadgets::scalar_as_base,
+  spartan::polys::{multilinear::MultilinearPolynomial, univariate::UniPoly},
+  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstants, ROTrait},
+};
 use ff::Field;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};

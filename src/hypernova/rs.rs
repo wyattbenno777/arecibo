@@ -3,33 +3,35 @@
 //! This module implements a SNARK that proves the correct execution of an incremental computation
 use std::sync::Arc;
 
-use crate::constants::{
-  BASE_CONSTRAINTS, MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT, MAX_CONSTRAINTS_PER_SUMCHECK_ROUND,
-};
-use crate::cyclefold::util::{absorb_primary_relaxed_r1cs, FoldingData};
-use crate::digest::SimpleDigestible;
-use crate::frontend::num::AllocatedNum;
-use crate::frontend::{ConstraintSystem, SynthesisError};
-use crate::hypernova::augmented_circuit::{project_aug_circuit_size, AugmentedCircuit};
-use crate::nebula::traits::RecursiveSNARKFieldsTrait;
-use crate::traits::commitment::CommitmentEngineTrait;
 use crate::{
-  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
-  cyclefold::circuit::CycleFoldCircuit,
+  constants::{
+    BASE_CONSTRAINTS, BN_LIMB_WIDTH, BN_N_LIMBS, MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT,
+    MAX_CONSTRAINTS_PER_SUMCHECK_ROUND, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS,
+  },
+  cyclefold::{
+    circuit::CycleFoldCircuit,
+    util::{absorb_primary_relaxed_r1cs, FoldingData},
+  },
+  digest::SimpleDigestible,
   errors::NovaError,
   frontend::{
+    num::AllocatedNum,
     r1cs::{NovaShape, NovaWitness},
     shape_cs::ShapeCS,
     solver::SatisfyingAssignment,
+    ConstraintSystem, SynthesisError,
   },
   gadgets::scalar_as_base,
+  hypernova::augmented_circuit::{project_aug_circuit_size, AugmentedCircuit},
+  nebula::traits::RecursiveSNARKFieldsTrait,
   r1cs::{CommitmentKeyHint, R1CSInstance, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
-  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},
-  CommitmentKey, DigestComputer, ROConstants,
+  traits::{
+    commitment::CommitmentEngineTrait, AbsorbInROTrait, CurveCycleEquipped, Dual, Engine,
+    ROConstantsCircuit, ROTrait,
+  },
+  AugmentedCircuitParams, Commitment, CommitmentKey, DigestComputer, R1CSWithArity, ROConstants,
 };
-use crate::{AugmentedCircuitParams, Commitment, R1CSWithArity};
-use ff::Field;
-use ff::PrimeField;
+use ff::{Field, PrimeField};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 

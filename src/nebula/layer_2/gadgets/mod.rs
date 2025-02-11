@@ -1,19 +1,20 @@
 use super::nifs::CycleFoldNIFS;
-use crate::constants::NUM_CHALLENGE_BITS;
-use crate::cyclefold::gadgets::emulated::{self};
-use crate::frontend::num::AllocatedNum;
-use crate::frontend::{ConstraintSystem, SynthesisError};
-use crate::gadgets::emulated::AllocatedEmulPoint;
-use crate::gadgets::{alloc_bignat_constant, le_bits_to_num, BigNat, Num};
-use crate::nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryRelaxedNIFS};
-use crate::traits::commitment::CommitmentTrait;
-use crate::traits::Group;
-use crate::traits::ROCircuitTrait;
 use crate::{
-  constants::{BN_N_LIMBS, NIO_CYCLE_FOLD},
-  cyclefold::gadgets::AllocatedCycleFoldInstance,
-  gadgets::AllocatedPoint,
-  traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
+  constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS},
+  cyclefold::gadgets::{
+    emulated::{self},
+    AllocatedCycleFoldInstance,
+  },
+  frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
+  gadgets::{
+    alloc_bignat_constant, emulated::AllocatedEmulPoint, le_bits_to_num, AllocatedPoint, BigNat,
+    Num,
+  },
+  nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryRelaxedNIFS},
+  traits::{
+    commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, Group, ROCircuitTrait,
+    ROConstantsCircuit,
+  },
 };
 use itertools::Itertools;
 use r1cs::AllocatedRelaxedR1CSInstanceBn;

@@ -1,20 +1,18 @@
-use super::nifs::NIFS;
-use super::StepCircuit;
-use crate::frontend::gadgets::Assignment;
-use crate::frontend::shape_cs::ShapeCS;
-use crate::frontend::Boolean;
-use crate::gadgets::emulated::{AllocatedEmulLR1CSInstance, AllocatedEmulPoint};
-use crate::gadgets::hypernova::{LR1CSInstanceGadget, NIFSGadget, R1CSInstanceGadget};
-use crate::gadgets::{alloc_num_equals, alloc_zero, conditionally_select_vec};
-use crate::r1cs::{LR1CSInstance, R1CSInstance};
-use crate::spartan::math::Math;
-use crate::traits::Engine;
-use crate::Commitment;
+use super::{nifs::NIFS, StepCircuit};
 use crate::{
-  frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
-  gadgets::alloc_scalar_as_base,
-  traits::{CurveCycleEquipped, Dual, ROConstantsCircuit},
-  AugmentedCircuitParams,
+  frontend::{
+    gadgets::Assignment, num::AllocatedNum, shape_cs::ShapeCS, Boolean, ConstraintSystem,
+    SynthesisError,
+  },
+  gadgets::{
+    alloc_num_equals, alloc_scalar_as_base, alloc_zero, conditionally_select_vec,
+    emulated::{AllocatedEmulLR1CSInstance, AllocatedEmulPoint},
+    hypernova::{LR1CSInstanceGadget, NIFSGadget, R1CSInstanceGadget},
+  },
+  r1cs::{LR1CSInstance, R1CSInstance},
+  spartan::math::Math,
+  traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
+  AugmentedCircuitParams, Commitment,
 };
 use ff::Field;
 use itertools::Itertools;

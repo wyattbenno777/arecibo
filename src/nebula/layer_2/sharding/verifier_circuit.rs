@@ -1,11 +1,8 @@
-use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
-use crate::gadgets::emulated::AllocatedEmulPoint;
-use crate::traits::commitment::CommitmentTrait;
-use crate::traits::ROCircuitTrait;
 use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT},
   cyclefold::gadgets::{emulated::AllocatedEmulRelaxedR1CSInstance, AllocatedCycleFoldInstance},
-  gadgets::le_bits_to_num,
+  frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
+  gadgets::{emulated::AllocatedEmulPoint, le_bits_to_num},
   nebula::{
     augmented_circuit::AugmentedCircuitParams,
     layer_2::{
@@ -18,7 +15,10 @@ use crate::{
     rs::StepCircuit,
   },
   r1cs::RelaxedR1CSInstance,
-  traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
+  traits::{
+    commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
+    ROConstantsCircuit,
+  },
 };
 use ff::Field;
 

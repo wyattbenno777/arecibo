@@ -12,8 +12,7 @@ use crate::{
   traits::{commitment::CommitmentTrait, Engine, Group, ROCircuitTrait, ROConstantsCircuit},
 };
 
-use crate::frontend::gadgets::Assignment;
-use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
+use crate::frontend::{gadgets::Assignment, num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::Field;
 use itertools::Itertools;
 
@@ -218,15 +217,14 @@ impl<E: Engine> AllocatedCycleFoldData<E> {
 }
 
 pub mod emulated {
-  use crate::frontend::gadgets::Assignment;
-  use crate::frontend::{num::AllocatedNum, Boolean, ConstraintSystem, SynthesisError};
+  use crate::frontend::{
+    gadgets::Assignment, num::AllocatedNum, Boolean, ConstraintSystem, SynthesisError,
+  };
 
-  use crate::gadgets::conditionally_select;
-  use crate::gadgets::emulated::AllocatedEmulPoint;
-  use crate::r1cs::RelaxedR1CSInstance;
   use crate::{
     constants::{NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT},
-    gadgets::{alloc_zero, le_bits_to_num},
+    gadgets::{alloc_zero, conditionally_select, emulated::AllocatedEmulPoint, le_bits_to_num},
+    r1cs::RelaxedR1CSInstance,
     traits::{commitment::CommitmentTrait, Engine, ROCircuitTrait, ROConstantsCircuit},
   };
 

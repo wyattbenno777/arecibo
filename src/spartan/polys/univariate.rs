@@ -8,16 +8,14 @@ use rand::{CryptoRng, RngCore};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
-use std::ops::SubAssign;
 use std::{
   cmp::Ordering,
-  ops::{AddAssign, Index, IndexMut, MulAssign},
+  ops::{AddAssign, Index, IndexMut, MulAssign, SubAssign},
 };
 
-use crate::traits::{AbsorbInROTrait, Engine};
 use crate::{
   provider::util::iterators::DoubleEndedIteratorExt as _,
-  traits::{Group, TranscriptReprTrait},
+  traits::{AbsorbInROTrait, Engine, Group, TranscriptReprTrait},
 };
 
 // ax^2 + bx + c stored as vec![c, b, a]

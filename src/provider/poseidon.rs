@@ -1,13 +1,15 @@
 //! Poseidon Constants and Poseidon-based RO used in Nova
-use crate::frontend::{
-  gadgets::poseidon::{
-    Elt, IOPattern, PoseidonConstants, Simplex, Sponge, SpongeAPI, SpongeCircuit, SpongeOp,
-    SpongeTrait, Strength,
+use crate::{
+  frontend::{
+    gadgets::poseidon::{
+      Elt, IOPattern, PoseidonConstants, Simplex, Sponge, SpongeAPI, SpongeCircuit, SpongeOp,
+      SpongeTrait, Strength,
+    },
+    num::AllocatedNum,
+    AllocatedBit, Boolean, ConstraintSystem, SynthesisError,
   },
-  num::AllocatedNum,
-  ConstraintSystem, SynthesisError, {AllocatedBit, Boolean},
+  traits::{ROCircuitTrait, ROTrait},
 };
-use crate::traits::{ROCircuitTrait, ROTrait};
 use core::marker::PhantomData;
 use ff::{PrimeField, PrimeFieldBits};
 use generic_array::typenum::U24;
@@ -217,11 +219,13 @@ where
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::provider::{
-    Bn256EngineKZG, GrumpkinEngine, PallasEngine, Secp256k1Engine, Secq256k1Engine, VestaEngine,
-  };
   use crate::{
-    constants::NUM_CHALLENGE_BITS, frontend::solver::SatisfyingAssignment, gadgets::le_bits_to_num,
+    constants::NUM_CHALLENGE_BITS,
+    frontend::solver::SatisfyingAssignment,
+    gadgets::le_bits_to_num,
+    provider::{
+      Bn256EngineKZG, GrumpkinEngine, PallasEngine, Secp256k1Engine, Secq256k1Engine, VestaEngine,
+    },
     traits::Engine,
   };
 

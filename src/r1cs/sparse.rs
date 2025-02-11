@@ -10,8 +10,7 @@ use rand_core::{CryptoRng, RngCore};
 use rayon::prelude::*;
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::BTreeSet;
+use std::{cmp::Ordering, collections::BTreeSet};
 
 /// CSR format sparse matrix, We follow the names used by scipy.
 /// Detailed explanation here: <https://stackoverflow.com/questions/52299420/scipy-csr-matrix-understand-indptr>

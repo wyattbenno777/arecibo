@@ -212,12 +212,12 @@ pub fn compute_eval_table_sparse<E: Engine>(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
   use super::*;
-  use crate::provider::PallasEngine;
-  use crate::r1cs::util::{FWrap, GWrap};
-  use pasta_curves::pallas::Point as PallasPoint;
-  use pasta_curves::Fq as Scalar;
-  use proptest::collection::vec;
-  use proptest::prelude::*;
+  use crate::{
+    provider::PallasEngine,
+    r1cs::util::{FWrap, GWrap},
+  };
+  use pasta_curves::{pallas::Point as PallasPoint, Fq as Scalar};
+  use proptest::{collection::vec, prelude::*};
 
   impl<E: Engine> PolyEvalWitness<E> {
     fn alt_batch(p_vec: &[&Vec<E::Scalar>], s: &E::Scalar) -> Self {

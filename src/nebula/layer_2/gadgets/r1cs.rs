@@ -1,8 +1,10 @@
 use super::{AllocatedPoint, BigNat};
-use crate::frontend::{ConstraintSystem, SynthesisError};
-use crate::traits::commitment::CommitmentTrait;
-use crate::traits::ROCircuitTrait;
-use crate::{gadgets::f_to_nat, r1cs::RelaxedR1CSInstance, traits::Engine};
+use crate::{
+  frontend::{ConstraintSystem, SynthesisError},
+  gadgets::f_to_nat,
+  r1cs::RelaxedR1CSInstance,
+  traits::{commitment::CommitmentTrait, Engine, ROCircuitTrait},
+};
 use ff::Field;
 
 /// An Allocated Relaxed R1CS Instance with U.u as a BigNat
