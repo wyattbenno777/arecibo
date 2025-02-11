@@ -152,8 +152,6 @@ where
 
   pub fn new(pp: &PublicParams<E>, rs: RecursiveSNARK<E>) -> Result<Self, NovaError> {
     let ro_consts = ROConstants::<E>::default(); // TODO: Not sure if this is OK
-    let mut ro_1 = <E as Engine>::RO::new(ro_consts.clone(), 3);
-    let mut ro_2 = <E as Engine>::RO::new(ro_consts.clone(), 3);
 
     // TODO: Do I need to run an iteration for IS and FS in Nebula?
     // 1. Compute the U_{i+1}, W_{i+1}
@@ -172,7 +170,7 @@ where
       )?;
 
     let (rw, re) =
-      KZGChallengesGadget::get_challenges_native(&mut ro_1, &mut ro_2, r_U_primary.clone());
+      KZGChallengesGadget::get_challenges_native(r_U_primary.clone());
     let rw_eval = EvalGadget::evaluate_native(r_W_primary.clone().W, rw);
     let re_eval = EvalGadget::evaluate_native(r_W_primary.clone().E, re);
 
@@ -345,9 +343,6 @@ where
     let kzg_alloc_re = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges"), || Ok(self.kzg_challenges.1))?;
     kzg_alloc_re.inputize(cs.namespace(|| "kzg_alloc_re"))?;
 
-    let mut ro_1 = <Dual<E> as Engine>::ROCircuit::new(ROConstantsCircuit::<Dual<E>>::default(), 9);
-    let mut ro_2 = <Dual<E> as Engine>::ROCircuit::new(ROConstantsCircuit::<Dual<E>>::default(), 9);
-    
     let U_i1: AllocatedEmulRelaxedR1CSInstance<Dual<E>> = AllocatedEmulRelaxedR1CSInstance::alloc(
       cs.namespace(|| "U_i1"),
       Some(&self.U_i1),
@@ -356,7 +351,7 @@ where
     )?;
 
     let (alloc_rw, alloc_re) =
-      KZGChallengesGadget::get_challenges_gadget::<CS, _, E>(cs, &mut ro_1, &mut ro_2, U_i1)?;
+      KZGChallengesGadget::get_challenges_gadget::<CS, E>(cs, U_i1)?;
 
     cs.enforce(
       || "cW ≡ H(W.{x, y})",

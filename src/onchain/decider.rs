@@ -216,8 +216,7 @@ mod tests {
     constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
     cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance,
     frontend::{
-      num::AllocatedNum, r1cs::NovaShape, shape_cs::ShapeCS, Circuit, ConstraintSystem,
-      SynthesisError,
+      num::AllocatedNum, r1cs::NovaShape, shape_cs::ShapeCS, test_cs::TestConstraintSystem, Circuit, ConstraintSystem, SynthesisError
     },
     onchain::gadgets::KZGChallengesGadget,
     provider::Bn256EngineKZG,
@@ -283,15 +282,6 @@ mod tests {
       })?;
       kzg_alloc_re.inputize(cs.namespace(|| "kzg challenge E"))?;
 
-      let mut ro_1 = <Dual<Bn256EngineKZG> as Engine>::ROCircuit::new(
-        ROConstantsCircuit::<Dual<Bn256EngineKZG>>::default(),
-        9,
-      );
-      let mut ro_2 = <Dual<Bn256EngineKZG> as Engine>::ROCircuit::new(
-        ROConstantsCircuit::<Dual<Bn256EngineKZG>>::default(),
-        9,
-      );
-
       let alloc_relaxed_instance: AllocatedEmulRelaxedR1CSInstance<Dual<Bn256EngineKZG>> =
         AllocatedEmulRelaxedR1CSInstance::alloc(
           cs.namespace(|| "relaxed instance"),
@@ -300,10 +290,8 @@ mod tests {
           BN_N_LIMBS,
         )?;
 
-      let (alloc_rw, alloc_re) = KZGChallengesGadget::get_challenges_gadget::<CS, _, Bn256EngineKZG>(
+      let (alloc_rw, alloc_re) = KZGChallengesGadget::get_challenges_gadget::<CS, Bn256EngineKZG>(
         cs,
-        &mut ro_1,
-        &mut ro_2,
         alloc_relaxed_instance,
       )?;
 
@@ -334,11 +322,9 @@ mod tests {
     let relaxed_instance = RelaxedR1CSInstance::default(&ck, &r1cs_shape);
 
     let ro_consts = ROConstants::<Bn256EngineKZG>::default(); 
-    let mut ro_1 = <Bn256EngineKZG as Engine>::RO::new(ro_consts.clone(), 3);
-    let mut ro_2 = <Bn256EngineKZG as Engine>::RO::new(ro_consts.clone(), 3);
     // Call the native function
     let (rw_native, re_native) =
-      KZGChallengesGadget::get_challenges_native(&mut ro_1, &mut ro_2, relaxed_instance.clone());
+      KZGChallengesGadget::get_challenges_native(relaxed_instance.clone());
 
     let circuit = TestChallengeCircuit::new(relaxed_instance.clone(), rw_native, re_native);
     let mut rng = thread_rng();

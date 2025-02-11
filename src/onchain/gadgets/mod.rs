@@ -11,7 +11,7 @@ use crate::frontend::num::AllocatedNum;
 use crate::frontend::{ConstraintSystem, SynthesisError};
 use crate::gadgets::le_bits_to_num;
 use crate::r1cs::RelaxedR1CSInstance;
-use crate::traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, ROCircuitTrait, ROTrait};
+use crate::traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait, ROConstants, ROConstantsCircuit, ROTrait};
 use crate::Commitment;
 use ec_gpu_gen::threadpool::Worker;
 use ff::PrimeField;
@@ -22,35 +22,42 @@ pub struct KZGChallengesGadget {}
 
 impl KZGChallengesGadget {
   pub fn get_challenges_native<E: CurveCycleEquipped>(
-    ro_1: &mut E::RO,
-    ro_2: &mut E::RO,
     U_i: RelaxedR1CSInstance<E>,
   ) -> (E::Scalar, E::Scalar) {
-    U_i.comm_W.absorb_in_ro(ro_1);
-    let rw = ro_1.squeeze(NUM_HASH_BITS); 
-
-    U_i.comm_E.absorb_in_ro(ro_2);
-    let re = ro_2.squeeze(NUM_HASH_BITS);
+    let ro_consts = ROConstants::<E>::default(); 
+    let mut ro: <E as Engine>::RO = <E as Engine>::RO::new(ro_consts.clone(), 3);
+    U_i.comm_W.absorb_in_ro(&mut ro);
+    let rw = ro.squeeze(NUM_HASH_BITS); 
+    let mut ro: <E as Engine>::RO = <E as Engine>::RO::new(ro_consts.clone(), 3);
+    U_i.comm_E.absorb_in_ro(&mut ro);
+    let re = ro.squeeze(NUM_HASH_BITS);
 
     (rw, re)
   }
 
-  pub fn get_challenges_gadget<CS, RO, E: CurveCycleEquipped>(
+  pub fn get_challenges_gadget<CS, E: CurveCycleEquipped>(
     cs: &mut CS,
-    ro_1: &mut RO,
-    ro_2: &mut RO,
     U_i: AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
   ) -> Result<(AllocatedNum<E::Scalar>, AllocatedNum<E::Scalar>), SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
-    RO: ROCircuitTrait<E::Scalar>,
   {
-    U_i.comm_W.absorb_in_ro(cs.namespace(|| "absorb_W"), ro_1)?;
-    let rw = ro_1.squeeze(cs.namespace(|| "squeeze_W"), NUM_HASH_BITS)?;
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(
+      ROConstantsCircuit::<Dual<E>>::default(),
+      9,
+    );
+
+    U_i.comm_W.absorb_in_ro(cs.namespace(|| "absorb_W"), &mut ro)?;
+    let rw = ro.squeeze(cs.namespace(|| "squeeze_W"), NUM_HASH_BITS)?;
     let alloc_rw = le_bits_to_num(cs.namespace(|| "bits_to_num"), &rw)?;
 
-    U_i.comm_E.absorb_in_ro(cs.namespace(|| "absorb_E"), ro_2)?;
-    let re = ro_2.squeeze(cs.namespace(|| "squeeze_E"), NUM_HASH_BITS)?;
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(
+      ROConstantsCircuit::<Dual<E>>::default(),
+      9,
+    );
+
+    U_i.comm_E.absorb_in_ro(cs.namespace(|| "absorb_E"), &mut ro)?;
+    let re = ro.squeeze(cs.namespace(|| "squeeze_E"), NUM_HASH_BITS)?;
     let alloc_re = le_bits_to_num(cs.namespace(|| "bits_to_num"), &re)?;
 
     // Trivial constraint to ensure that the variables are used 
