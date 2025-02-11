@@ -3,10 +3,12 @@ use super::StepCircuit;
 use crate::frontend::gadgets::Assignment;
 use crate::frontend::shape_cs::ShapeCS;
 use crate::frontend::Boolean;
-use crate::gadgets::emulated::AllocatedEmulLR1CSInstance;
+use crate::gadgets::emulated::{AllocatedEmulLR1CSInstance, AllocatedEmulPoint};
+use crate::gadgets::hypernova::{LR1CSInstanceGadget, NIFSGadget, R1CSInstanceGadget};
 use crate::gadgets::{alloc_num_equals, alloc_zero, conditionally_select_vec};
 use crate::r1cs::{LR1CSInstance, R1CSInstance};
 use crate::spartan::math::Math;
+use crate::traits::Engine;
 use crate::Commitment;
 use crate::{
   frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
@@ -78,21 +80,66 @@ where
   E: CurveCycleEquipped,
   SC: StepCircuit<E::Scalar>,
 {
-  pub const fn new(
-    params: &'a AugmentedCircuitParams,
-    ro_consts: ROConstantsCircuit<Dual<E>>,
-    inputs: Option<AugmentedCircuitInputs<E>>,
-    step_circuit: &'a SC,
-    num_rounds: usize,
-  ) -> Self {
-    Self {
-      params,
-      ro_consts,
-      inputs,
-      step_circuit,
-      num_rounds,
+  pub fn synthesize<CS: ConstraintSystem<E::Scalar>>(
+    self,
+    cs: &mut CS,
+  ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
+    // Allocate the witness
+    let arity = self.step_circuit.arity();
+    let (pp_digest, i, z_0, z_i) = self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
+
+    // Base case: i = 0
+    //
+    // Get the default running instance.
+    let zero = alloc_zero(cs.namespace(|| "zero"));
+    let is_base_case = alloc_num_equals(cs.namespace(|| "is base case"), &i, &zero)?;
+    let U_default = self.synthesize_base_case(cs.namespace(|| "base case"))?;
+
+    // Compute i + 1
+    let i_new = AllocatedNum::alloc(cs.namespace(|| "i + 1"), || {
+      Ok(*i.get_value().get()? + E::Scalar::ONE)
+    })?;
+    cs.enforce(
+      || "check i + 1",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + i_new.get_variable() - CS::one() - i.get_variable(),
+    );
+
+    // Compute z_{i+1}
+    let z_input = conditionally_select_vec(
+      cs.namespace(|| "select input to F"),
+      &z_0,
+      &z_i,
+      &Boolean::from(is_base_case.clone()),
+    )?;
+
+    // Synthesize the step circuit and compute the next output zi+1 ← Fj(zi,ωi).
+    let z_next = self
+      .step_circuit
+      .synthesize(&mut cs.namespace(|| "F"), &z_input)?;
+    if z_next.len() != arity {
+      return Err(SynthesisError::IncompatibleLengthVector(
+        "z_next".to_string(),
+      ));
     }
+    Ok(z_next)
   }
+
+  pub fn synthesize_non_base_case<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+    pp_digest: &AllocatedNum<E::Scalar>,
+    ro_consts: &ROConstantsCircuit<Dual<E>>,
+    nifs: &NIFSGadget<E>,
+    U: &LR1CSInstanceGadget<E>,
+    u: &R1CSInstanceGadget<E>,
+    W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+  ) -> Result<(), SynthesisError> {
+    nifs.verify(cs.namespace(|| "NIFS.V"), pp_digest, ro_consts, U, u, W_new);
+    Ok(())
+  }
+
   fn alloc_witness<CS: ConstraintSystem<E::Scalar>>(
     &self,
     mut cs: CS,
@@ -144,46 +191,20 @@ where
     Ok(U_default)
   }
 
-  pub fn synthesize<CS: ConstraintSystem<E::Scalar>>(
-    self,
-    cs: &mut CS,
-  ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
-    // Allocate the witness
-    let arity = self.step_circuit.arity();
-    let (pp_digest, i, z_0, z_i) = self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
-    let zero = alloc_zero(cs.namespace(|| "zero"));
-    let is_base_case = alloc_num_equals(cs.namespace(|| "is base case"), &i, &zero)?;
-    let U_default = self.synthesize_base_case(cs.namespace(|| "base case"))?;
-
-    // Compute i + 1
-    let i_new = AllocatedNum::alloc(cs.namespace(|| "i + 1"), || {
-      Ok(*i.get_value().get()? + E::Scalar::ONE)
-    })?;
-    cs.enforce(
-      || "check i + 1",
-      |lc| lc,
-      |lc| lc,
-      |lc| lc + i_new.get_variable() - CS::one() - i.get_variable(),
-    );
-
-    // Compute z_{i+1}
-    let z_input = conditionally_select_vec(
-      cs.namespace(|| "select input to F"),
-      &z_0,
-      &z_i,
-      &Boolean::from(is_base_case.clone()),
-    )?;
-
-    // Compute the next output zi+1 ← Fj(zi,ωi).
-    let z_next = self
-      .step_circuit
-      .synthesize(&mut cs.namespace(|| "F"), &z_input)?;
-    if z_next.len() != arity {
-      return Err(SynthesisError::IncompatibleLengthVector(
-        "z_next".to_string(),
-      ));
+  pub const fn new(
+    params: &'a AugmentedCircuitParams,
+    ro_consts: ROConstantsCircuit<Dual<E>>,
+    inputs: Option<AugmentedCircuitInputs<E>>,
+    step_circuit: &'a SC,
+    num_rounds: usize,
+  ) -> Self {
+    Self {
+      params,
+      ro_consts,
+      inputs,
+      step_circuit,
+      num_rounds,
     }
-    Ok(z_next)
   }
 }
 
