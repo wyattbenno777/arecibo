@@ -73,11 +73,11 @@ where
   #[tracing::instrument(skip_all, name = "nebula::PublicParams::setup")]
   pub fn setup(
     step_circuit: &impl StepCircuit<E::Scalar>,
-    ck_hint_primary: &CommitmentKeyHint<E>,
+    ck_hint: &CommitmentKeyHint<E>,
     ck_hint_cyclefold: &CommitmentKeyHint<Dual<E>>,
   ) -> Self {
     // This value is used to validate inputs to API
-    let F_arity_primary = step_circuit.arity();
+    let F_arity = step_circuit.arity();
 
     // Get the round constants used in the poseidon hash function and poseidon hash function circuit
     let ro_consts = ROConstants::<Dual<E>>::default();
@@ -91,39 +91,38 @@ where
       step_circuit,
     );
     let augmented_circuit_params = AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
-    let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
+    let circuit: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
       &augmented_circuit_params,
       ro_consts_circuit.clone(),
       None,
       step_circuit,
-      0,
+      num_rounds,
     );
     let mut cs: ShapeCS<E> = ShapeCS::new();
-    let _ = circuit_primary.synthesize(&mut cs);
-    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape(ck_hint_primary);
-    let ck_primary = Arc::new(ck_primary);
-    let circuit_shape_primary = R1CSWithArity::new(r1cs_shape_primary, F_arity_primary);
+    let _ = circuit.synthesize(&mut cs);
+    let (r1cs_shape, ck) = cs.r1cs_shape(ck_hint);
+    let ck = Arc::new(ck);
+    let circuit_shape = R1CSWithArity::new(r1cs_shape, F_arity);
 
-    // // Get the structure for the CycleFold circuit and corresponding commitment key
-    // let mut cs: ShapeCS<Dual<E>> = ShapeCS::new();
-    // let circuit_cyclefold: CycleFoldCircuit<E> = CycleFoldCircuit::default();
-    // let _ = circuit_cyclefold.synthesize(&mut cs);
-    // let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape(ck_hint_cyclefold);
-    // let ck_cyclefold = Arc::new(ck_cyclefold);
-    // let circuit_shape_cyclefold = R1CSWithArity::new(r1cs_shape_cyclefold, 0);
+    // Get the structure for the CycleFold circuit and corresponding commitment key
+    let mut cs: ShapeCS<Dual<E>> = ShapeCS::new();
+    let circuit_cyclefold: CycleFoldCircuit<E> = CycleFoldCircuit::default();
+    let _ = circuit_cyclefold.synthesize(&mut cs);
+    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape(ck_hint_cyclefold);
+    let ck_cyclefold = Arc::new(ck_cyclefold);
+    let circuit_shape_cyclefold = R1CSWithArity::new(r1cs_shape_cyclefold, 0);
 
-    // Self {
-    //   F_arity_primary,
-    //   ro_consts,
-    //   ro_consts_circuit,
-    //   ck_primary,
-    //   circuit_shape_primary,
-    //   augmented_circuit_params,
-    //   ck_cyclefold,
-    //   circuit_shape_cyclefold,
-    //   digest: OnceCell::new(),
-    // }
-    todo!()
+    Self {
+      F_arity,
+      ro_consts,
+      ro_consts_circuit,
+      ck,
+      circuit_shape,
+      augmented_circuit_params,
+      ck_cyclefold,
+      circuit_shape_cyclefold,
+      digest: OnceCell::new(),
+    }
   }
 
   /// Calculate the digest of the public parameters.
