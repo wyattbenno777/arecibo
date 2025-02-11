@@ -22,7 +22,7 @@ use crate::{
 
 // ax^2 + bx + c stored as vec![c, b, a]
 // ax^3 + bx^2 + cx + d stored as vec![d, c, b, a]
-#[derive(Debug, Clone, PartialEq, Eq, RefCast)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, RefCast)]
 #[repr(transparent)]
 pub struct UniPoly<Scalar> {
   pub coeffs: Vec<Scalar>,

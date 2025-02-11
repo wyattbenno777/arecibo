@@ -4,7 +4,6 @@ use crate::gadgets::scalar_as_base;
 use crate::spartan::math::Math;
 use crate::spartan::polys::eq::EqPolynomial;
 use crate::spartan::polys::multilinear::MultilinearPolynomial;
-use crate::spartan::sumcheck::SumcheckProof;
 use crate::traits::ROTrait;
 use crate::NovaError;
 use crate::{
@@ -15,6 +14,8 @@ use crate::{
 };
 use ff::Field;
 use serde::{Deserialize, Serialize};
+
+use super::poseidon_sumcheck::SumcheckProof;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound = "")]

@@ -40,10 +40,33 @@ where
     U: &LR1CSInstanceGadget<E>,
     u: &R1CSInstanceGadget<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-  ) where
+  ) -> Result<LR1CSInstanceGadget<E>, SynthesisError>
+  where
     CS: ConstraintSystem<E::Scalar>,
   {
     // Verify the NIFS
+    todo!()
+  }
+}
+
+pub struct SumcheckProofGadget<E>
+where
+  E: CurveCycleEquipped,
+{
+  _engine: PhantomData<E>,
+}
+
+impl<E> SumcheckProofGadget<E>
+where
+  E: CurveCycleEquipped,
+{
+  pub fn alloc<CS>(mut cs: CS) -> Self
+  where
+    CS: ConstraintSystem<E::Scalar>,
+  {
+    Self {
+      _engine: PhantomData,
+    }
   }
 }
 
