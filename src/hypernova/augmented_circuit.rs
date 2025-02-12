@@ -123,6 +123,7 @@ where
       W_new,
     )?;
 
+    // Check non-base case hash check
     let should_be_false = AllocatedBit::nor(
       cs.namespace(|| "check_non_base_pass nor base_case"),
       &check_non_base_pass,
@@ -548,43 +549,12 @@ mod tests {
   type E = Bn256EngineIPA;
 
   #[test]
-  fn test_base_aug_circuit_size_bn254() {
-    // Get the round constants used in the poseidon hash function and poseidon hash function circuit
-    let ro_consts_circuit = ROConstantsCircuit::<Dual<E>>::default();
-    let circuit = TrivialCircuit::default();
-    // Get the structure for the AugmentedCircuit and corresponding commitment key
-    let augmented_circuit_params = crate::AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
-    let num_rounds = project_aug_circuit_size::<E>(
-      BASE_CONSTRAINTS,
-      MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT,
-      MAX_CONSTRAINTS_PER_SUMCHECK_ROUND,
-      &circuit,
-    );
-    let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
-      &augmented_circuit_params,
-      ro_consts_circuit.clone(),
-      None,
-      &circuit,
-      0,
-    );
-    let mut cs: ShapeCS<E> = ShapeCS::new();
-    let _ = circuit_primary.synthesize(&mut cs);
-    println!("Constraints: {}", cs.num_constraints());
-    println!("Num rounds: {}", num_rounds);
-  }
-
-  #[test]
   fn test_circuit_constants_sumcheck() {
     // Get the round constants used in the poseidon hash function and poseidon hash function circuit
     let ro_consts_circuit = ROConstantsCircuit::<Dual<E>>::default();
-
-    // Constraint Generation #1: The Step Circuit
     let test_circuit = TrivialCircuit::default();
-    let mut cs: ShapeCS<E> = ShapeCS::new();
-    let _ = test_circuit.synthesize(&mut cs, &[]);
-    println!("test_circuit constraints: {}", cs.num_constraints());
 
-    // Get the structure for the AugmentedCircuit and corresponding commitment key
+    // Constraint Generation #1: No inputs and no sumcheck
     let augmented_circuit_params = crate::AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
     let num_rounds = project_aug_circuit_size::<E>(
       BASE_CONSTRAINTS,
@@ -602,9 +572,9 @@ mod tests {
     let mut cs: ShapeCS<E> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
     let base_cons = cs.num_constraints();
-    println!("Constraints: {}", base_cons);
+    println!("Base constraints: {}", base_cons);
 
-    // 1 sumcheck round
+    // Constraint Generation #1: No inputs and 1 sumcheck round
     let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
       &augmented_circuit_params,
       ro_consts_circuit.clone(),
@@ -615,14 +585,17 @@ mod tests {
     let mut cs: ShapeCS<E> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
     let base_with_sumcheck = cs.num_constraints();
-    println!("Constraints with one sumcheck: {}", base_with_sumcheck);
+    println!(
+      "Constraints with one sumcheck round: {}",
+      base_with_sumcheck
+    );
     let num_sumcheck_constraints = base_with_sumcheck - base_cons;
     println!(
       "Num sumcheck constraints for one round: {}",
       num_sumcheck_constraints
     );
 
-    // 2 sumcheck round
+    // Constraint Generation #3: No inputs and 2 sumcheck rounds
     let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
       &augmented_circuit_params,
       ro_consts_circuit.clone(),
@@ -633,14 +606,17 @@ mod tests {
     let mut cs: ShapeCS<E> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
     let base_with_sumcheck2 = cs.num_constraints();
-    println!("Constraints with two sumcheck: {}", base_with_sumcheck2);
+    println!(
+      "Constraints with two sumcheck rounds: {}",
+      base_with_sumcheck2
+    );
     let num_sumcheck_constraints = base_with_sumcheck2 - base_with_sumcheck;
     println!(
       "Num sumcheck constraints for two round: {}",
       num_sumcheck_constraints
     );
 
-    // 3 sumcheck round
+    // Constraint Generation #4: No inputs and 3 sumcheck round
     let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
       &augmented_circuit_params,
       ro_consts_circuit.clone(),
@@ -651,14 +627,17 @@ mod tests {
     let mut cs: ShapeCS<E> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
     let base_with_sumcheck3 = cs.num_constraints();
-    println!("Constraints with three sumcheck: {}", base_with_sumcheck3);
+    println!(
+      "Constraints with three sumcheck rounds: {}",
+      base_with_sumcheck3
+    );
     let num_sumcheck_constraints = base_with_sumcheck3 - base_with_sumcheck2;
     println!(
       "Num sumcheck constraints for three round: {}",
       num_sumcheck_constraints
     );
 
-    // 16 sumcheck round
+    // Constraint Generation #5: No inputs and 15 sumcheck round
     let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
       &augmented_circuit_params,
       ro_consts_circuit.clone(),
@@ -669,10 +648,13 @@ mod tests {
     let mut cs: ShapeCS<E> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
     let base_with_sumcheck15 = cs.num_constraints();
-    println!("Constraints with 15 sumcheck: {}", base_with_sumcheck15);
+    println!(
+      "Constraints with 15 sumcheck rounds: {}",
+      base_with_sumcheck15
+    );
     let num_sumcheck_constraints = base_with_sumcheck15 - base_cons;
     println!(
-      "Num sumcheck constraints for 15 round: {}",
+      "Num sumcheck constraints for 15 rounds: {}",
       num_sumcheck_constraints
     );
 
@@ -688,7 +670,7 @@ mod tests {
     // Get the round constants used in the poseidon hash function and poseidon hash function circuit
     let ro_consts_circuit = ROConstantsCircuit::<Dual<E>>::default();
 
-    // Constraint Generation #1: The Step Circuit
+    // Constraint Generation #1: The Step Circuit with 0 inputs
     let test_circuit = TrivialCircuit::default();
     let augmented_circuit_params = crate::AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
     let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
@@ -703,7 +685,7 @@ mod tests {
     let base_cons = cs.num_constraints();
     println!("Constraints: {}", base_cons);
 
-    // Constraint Generation #2: The Step Circuit
+    // Constraint Generation #2: The Step Circuit with 1 inputs
     let test_circuit = TrivialCircuit2::default();
     let augmented_circuit_params = crate::AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
     let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
@@ -719,7 +701,7 @@ mod tests {
     println!("Constraints2: {}", base_cons2);
     println!("Constraints per input2: {}", base_cons2 - base_cons);
 
-    // Constraint Generation #3: The Step Circuit
+    // Constraint Generation #3: The Step Circuit with 2 inputs
     let test_circuit = TrivialCircuit3::default();
     let augmented_circuit_params = crate::AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
     let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
