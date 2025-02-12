@@ -1,4 +1,4 @@
-use super::{nifs::NIFS, StepCircuit};
+use super::{nifs::NIFS, rs::StepCircuit};
 use crate::frontend::AllocatedBit;
 use crate::traits::ROCircuitTrait;
 use crate::{
@@ -441,7 +441,7 @@ mod tests {
       MAX_CONSTRAINTS_PER_SUMCHECK_ROUND,
     },
     frontend::{num::AllocatedNum, shape_cs::ShapeCS, ConstraintSystem, SynthesisError},
-    hypernova::{augmented_circuit::project_aug_circuit_size, StepCircuit},
+    hypernova::{augmented_circuit::project_aug_circuit_size, rs::StepCircuit},
     provider::Bn256EngineIPA,
     spartan::math::Math,
     traits::{Dual, ROConstantsCircuit},

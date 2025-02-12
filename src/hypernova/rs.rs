@@ -10,6 +10,7 @@ use crate::{
   digest::SimpleDigestible,
   errors::NovaError,
   frontend::{
+    num::AllocatedNum,
     r1cs::{NovaShape, NovaWitness},
     shape_cs::ShapeCS,
     solver::SatisfyingAssignment,
@@ -25,12 +26,10 @@ use crate::{
   traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},
   AugmentedCircuitParams, CommitmentKey, DigestComputer, R1CSWithArity, ROConstants,
 };
-use ff::Field;
+use ff::{Field, PrimeField};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-
-use super::StepCircuit;
 
 /// The public parameters used in the CycleFold recursive SNARK proof and verification
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -340,6 +339,21 @@ where
   }
 }
 
+/// Step circuit used for Hypernova
+pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
+  /// Arity of the circuit. This is needed to build the public parameters
+  fn arity(&self) -> usize;
+
+  /// Synthesize the circuit
+  fn synthesize<CS>(
+    &self,
+    cs: &mut CS,
+    z: &[AllocatedNum<F>],
+  ) -> Result<Vec<AllocatedNum<F>>, SynthesisError>
+  where
+    CS: ConstraintSystem<F>;
+}
+
 #[allow(dead_code)]
 fn debug_step<E, SC>(circuit: AugmentedCircuit<'_, E, SC>) -> Result<(), NovaError>
 where
@@ -361,7 +375,7 @@ where
 mod test {
   use crate::{
     frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
-    hypernova::StepCircuit,
+    hypernova::rs::StepCircuit,
     provider::Bn256EngineIPA,
     traits::{snark::default_ck_hint, CurveCycleEquipped},
     NovaError,
