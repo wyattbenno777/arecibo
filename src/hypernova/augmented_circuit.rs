@@ -1,16 +1,19 @@
 use super::{nifs::NIFS, StepCircuit};
+use crate::traits::ROCircuitTrait;
 use crate::{
   and_then_field,
+  constants::{DEFAULT_ABSORBS, NUM_HASH_BITS},
   frontend::{
     gadgets::Assignment, num::AllocatedNum, shape_cs::ShapeCS, Boolean, ConstraintSystem,
     SynthesisError,
   },
   gadgets::{
     alloc_num_equals, alloc_scalar_as_base, alloc_zero, conditionally_select_vec,
-    emulated::{AllocatedEmulLR1CSInstance, AllocatedEmulPoint},
+    emulated::AllocatedEmulPoint,
     hypernova::{
       alloc_sized_vec, increment, AllocatedLR1CSInstance, AllocatedNIFS, AllocatedR1CSInstance,
     },
+    le_bits_to_num,
   },
   map_field,
   r1cs::{LR1CSInstance, R1CSInstance},
@@ -18,7 +21,6 @@ use crate::{
   traits::{commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
   AugmentedCircuitParams, Commitment,
 };
-use ff::Field;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
@@ -104,10 +106,14 @@ where
     // Non-base case: i > 0
     // ////////////////////
     //
-    // 1. U <- NIFS.V
-    let U = self.synthesize_non_base_case(
+    // 1. Hash check
+    // 2. U <- NIFS.V
+    let U_non_base_case = self.synthesize_non_base_case(
       cs.namespace(|| "non base case"),
       &pp_digest,
+      &i,
+      &z_0,
+      &z_i,
       &self.ro_consts,
       &nifs,
       &U,
@@ -115,7 +121,14 @@ where
       W_new,
     )?;
 
-    // Compute i + 1
+    // select the new running primary instance
+    let U_new = U_default.conditionally_select(
+      cs.namespace(|| "compute U_new"),
+      &U_non_base_case,
+      &Boolean::from(is_base_case.clone()),
+    )?;
+
+    // Compute i++
     let i_new = increment(cs.namespace(|| "i++"), &i)?;
 
     // Compute z_{i+1}
@@ -137,6 +150,20 @@ where
         "z_next".to_string(),
       ));
     }
+
+    // output hash
+    let hash = self.calculate_hash(
+      cs.namespace(|| "calculate_hash"),
+      &pp_digest,
+      &i_new,
+      &z_0,
+      &z_next,
+      &U_new,
+    )?;
+    hash.inputize(cs.namespace(|| "u.x[0] = hash"))?;
+    // TODO: Cyclefold
+    let zero = alloc_zero(cs.namespace(|| "zero"));
+    zero.inputize(cs.namespace(|| "zero"))?;
     Ok(z_next)
   }
 
@@ -144,12 +171,27 @@ where
     &self,
     mut cs: CS,
     pp_digest: &AllocatedNum<E::Scalar>,
+    i: &AllocatedNum<E::Scalar>,
+    z_0: &[AllocatedNum<E::Scalar>],
+    z_i: &[AllocatedNum<E::Scalar>],
     ro_consts: &ROConstantsCircuit<Dual<E>>,
     nifs: &AllocatedNIFS<E>,
     U: &AllocatedLR1CSInstance<E>,
     u: &AllocatedR1CSInstance<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
   ) -> Result<AllocatedLR1CSInstance<E>, SynthesisError> {
+    // Hash check: u.X[0] = H(pp, i, z0, zi, U)
+    self.first_hash_check(
+      cs.namespace(|| "first_hash_check"),
+      pp_digest,
+      i,
+      z_0,
+      z_i,
+      U,
+      u,
+    )?;
+
+    // NIFS.V
     nifs.verify(
       cs.namespace(|| "NIFS.V"),
       pp_digest,
@@ -159,6 +201,55 @@ where
       W_new,
       self.num_rounds,
     )
+  }
+
+  pub fn first_hash_check<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+    pp_digest: &AllocatedNum<E::Scalar>,
+    i: &AllocatedNum<E::Scalar>,
+    z_0: &[AllocatedNum<E::Scalar>],
+    z_i: &[AllocatedNum<E::Scalar>],
+    U: &AllocatedLR1CSInstance<E>,
+    u: &AllocatedR1CSInstance<E>,
+  ) -> Result<(), SynthesisError> {
+    let hash = self.calculate_hash(cs.namespace(|| "calculate_hash"), pp_digest, i, z_0, z_i, U)?;
+    let check_primary = alloc_num_equals(
+      cs.namespace(|| "u.X[0] = H(params, i, z0, zi, U)"),
+      &u.x0,
+      &hash,
+    )?;
+    cs.enforce(
+      || "check_primary == 1",
+      |lc| lc + check_primary.get_variable(),
+      |lc| lc + CS::one(),
+      |lc| lc + CS::one(),
+    );
+    Ok(())
+  }
+
+  pub fn calculate_hash<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+    pp_digest: &AllocatedNum<E::Scalar>,
+    i: &AllocatedNum<E::Scalar>,
+    z_0: &[AllocatedNum<E::Scalar>],
+    z_i: &[AllocatedNum<E::Scalar>],
+    U: &AllocatedLR1CSInstance<E>,
+  ) -> Result<AllocatedNum<E::Scalar>, SynthesisError> {
+    let mut ro_p = <Dual<E> as Engine>::ROCircuit::new(self.ro_consts.clone(), DEFAULT_ABSORBS);
+    ro_p.absorb(pp_digest);
+    ro_p.absorb(i);
+    for e in z_0 {
+      ro_p.absorb(e)
+    }
+    for e in z_i {
+      ro_p.absorb(e)
+    }
+    U.absorb_in_ro(cs.namespace(|| "absorb U_p"), &mut ro_p)?;
+    let hash_bits = ro_p.squeeze(cs.namespace(|| "primary hash bits"), NUM_HASH_BITS)?;
+    let hash = le_bits_to_num(cs.namespace(|| "primary hash"), &hash_bits)?;
+    Ok(hash)
   }
 
   fn alloc_witness<CS: ConstraintSystem<E::Scalar>>(
@@ -228,8 +319,8 @@ where
   pub fn synthesize_base_case<CS: ConstraintSystem<E::Scalar>>(
     &self,
     mut cs: CS,
-  ) -> Result<AllocatedEmulLR1CSInstance<E>, SynthesisError> {
-    let U_default = AllocatedEmulLR1CSInstance::default(
+  ) -> Result<AllocatedLR1CSInstance<E>, SynthesisError> {
+    let U_default = AllocatedLR1CSInstance::default(
       cs.namespace(|| "Allocated U_default"),
       self.params.limb_width,
       self.params.n_limbs,

@@ -3,58 +3,13 @@
 use ff::Field;
 
 use super::{
-  alloc_bignat_constant, alloc_zero, conditionally_select_allocated_bit,
-  conditionally_select_bignat, f_to_nat, BigNat,
+  alloc_bignat_constant, conditionally_select_allocated_bit, conditionally_select_bignat, f_to_nat,
+  BigNat,
 };
 use crate::{
-  constants::NUM_MATRICES,
   frontend::{num::AllocatedNum, AllocatedBit, Boolean, ConstraintSystem, SynthesisError},
-  traits::{CurveCycleEquipped, Dual, Engine, Group, ROCircuitTrait},
+  traits::{Group, ROCircuitTrait},
 };
-use itertools::Itertools;
-
-#[derive(Clone, Debug)]
-/// A non-native circuit version of a `RelaxedR1CSInstance`. This is used for the in-circuit
-/// representation of the primary running instance
-pub struct AllocatedEmulLR1CSInstance<E>
-where
-  E: CurveCycleEquipped,
-{
-  pub comm_W: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-  pub(crate) u: AllocatedNum<E::Scalar>,
-  pub(crate) x0: AllocatedNum<E::Scalar>,
-  pub(crate) x1: AllocatedNum<E::Scalar>,
-  pub(crate) rx: Vec<AllocatedNum<E::Scalar>>,
-  pub(crate) vs: Vec<AllocatedNum<E::Scalar>>,
-}
-
-impl<E> AllocatedEmulLR1CSInstance<E>
-where
-  E: CurveCycleEquipped,
-{
-  pub fn default<CS: ConstraintSystem<E::Scalar>>(
-    mut cs: CS,
-    limb_width: usize,
-    n_limbs: usize,
-    num_rounds: usize,
-  ) -> Result<Self, SynthesisError> {
-    let comm_W =
-      AllocatedEmulPoint::default(cs.namespace(|| "default comm_W"), limb_width, n_limbs)?;
-    let u = alloc_zero(cs.namespace(|| "u = 0"));
-    let x0 = u.clone();
-    let x1 = u.clone();
-    let rx = (0..num_rounds).map(|_| u.clone()).collect_vec();
-    let vs = (0..NUM_MATRICES).map(|_| u.clone()).collect_vec();
-    Ok(Self {
-      comm_W,
-      u,
-      x0,
-      x1,
-      rx,
-      vs,
-    })
-  }
-}
 
 /// An allocated version of a curve point from the non-native curve
 #[derive(Clone, Debug)]
