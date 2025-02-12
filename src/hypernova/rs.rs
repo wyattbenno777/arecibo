@@ -302,8 +302,8 @@ where
     }
 
     // Hash check
-    //
-    // Verify the hashes equal the public IO for the final primary instance
+    // ////////////////////////////////
+    // 1. Compute H(pp, i, z0, zi, r_U)
     let mut ro = <Dual<E> as Engine>::RO::new(pp.ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(pp.digest());
     ro.absorb(E::Scalar::from(num_steps as u64));
@@ -315,6 +315,8 @@ where
     }
     self.r_U.absorb_in_ro(&mut ro);
     let hash = ro.squeeze(NUM_HASH_BITS);
+    // ////////////////////////////////////////////
+    // 2. Check if H(pp, i, z0, zi, r_U) = l_u.X[0]
     if scalar_as_base::<Dual<E>>(hash) != self.l_u.X[0] {
       return Err(NovaError::ProofVerifyError);
     }
