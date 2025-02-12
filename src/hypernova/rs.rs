@@ -271,7 +271,6 @@ where
       .map(|v| v.get_value().ok_or(SynthesisError::AssignmentMissing))
       .collect::<Result<Vec<_>, _>>()?;
     self.i += 1;
-
     Ok(())
   }
 
@@ -336,7 +335,6 @@ where
     );
     res_r_U?;
     res_l_u?;
-
     Ok(self.zi.to_vec())
   }
 }
