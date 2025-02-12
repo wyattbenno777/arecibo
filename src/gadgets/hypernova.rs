@@ -312,7 +312,7 @@ where
     Ok(Self {
       coeffs: alloc_sized_vec(
         cs.namespace(|| "coeffs"),
-        inst.map(|poly| &poly.coeffs),
+        map_field!(inst, coeffs),
         NUM_UNIVARIATE_COEFFS,
       )?,
     })
@@ -425,14 +425,14 @@ where
   {
     let (comm_W, x0, x1) = alloc_instance_witness::<_, E>(
       cs.namespace(|| "allocate instance witness"),
-      inst.map(|x| x.comm_W),
-      inst.map(|x| &x.X),
+      map_field!(inst, comm_W).copied(),
+      map_field!(inst, X),
       limb_width,
       n_limbs,
     )?;
-    let u = alloc_scalar(cs.namespace(|| "allocate u"), inst.map(|x| x.u))?;
-    let rx = alloc_sized_vec(cs.namespace(|| "rx"), inst.map(|x| &x.rx), num_rounds)?;
-    let vs = alloc_sized_vec(cs.namespace(|| "vs"), inst.map(|x| &x.vs), NUM_MATRICES)?;
+    let u = alloc_scalar(cs.namespace(|| "allocate u"), map_field!(inst, u).copied())?;
+    let rx = alloc_sized_vec(cs.namespace(|| "rx"), map_field!(inst, rx), num_rounds)?;
+    let vs = alloc_sized_vec(cs.namespace(|| "vs"), map_field!(inst, vs), NUM_MATRICES)?;
     Ok(Self {
       comm_W,
       u,
@@ -613,8 +613,8 @@ where
   {
     let (comm_W, x0, x1) = alloc_instance_witness::<_, E>(
       cs.namespace(|| "allocate instance witness"),
-      inst.map(|x| x.comm_W),
-      inst.map(|x| &x.X),
+      map_field!(inst, comm_W).copied(),
+      map_field!(inst, X),
       limb_width,
       n_limbs,
     )?;
