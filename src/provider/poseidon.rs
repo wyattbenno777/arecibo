@@ -225,7 +225,7 @@ where
     self.squeezed = true;
     let parameter = IOPattern(vec![
       SpongeOp::Absorb(self.state.len() as u32),
-      SpongeOp::Squeeze(1u32),
+      SpongeOp::Squeeze(len as u32),
     ]);
     let mut ns = cs.namespace(|| "ns");
 
