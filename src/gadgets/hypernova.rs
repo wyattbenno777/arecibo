@@ -275,8 +275,8 @@ where
     for i in 0..num_rounds {
       let poly = &self.polys[i];
       let s0 = poly.eval_at_zero();
-      let s1 = poly.eval_at_one(cs.namespace(|| "eval at one"))?;
-      let s0_s1 = s0.add(cs.namespace(|| "s0 + s1"), &s1)?;
+      let s1 = poly.eval_at_one(cs.namespace(|| format!("eval at one {i}")))?;
+      let s0_s1 = s0.add(cs.namespace(|| format!("s0 + s1 {i}")), &s1)?;
       enforce_equal(
         &mut cs,
         || format!("poly(0) + poly(1) == e {i}"),
@@ -292,6 +292,66 @@ where
       rx.push(r_i);
     }
     Ok((e, rx))
+  }
+}
+pub struct AllocatedUniPoly<F>
+where
+  F: PrimeField,
+{
+  coeffs: Vec<AllocatedNum<F>>,
+}
+
+impl<F> AllocatedUniPoly<F>
+where
+  F: PrimeField,
+{
+  pub fn alloc<CS>(mut cs: CS, inst: Option<&UniPoly<F>>) -> Result<Self, SynthesisError>
+  where
+    CS: ConstraintSystem<F>,
+  {
+    Ok(Self {
+      coeffs: alloc_sized_vec(
+        cs.namespace(|| "coeffs"),
+        inst.map(|poly| &poly.coeffs),
+        NUM_UNIVARIATE_COEFFS,
+      )?,
+    })
+  }
+
+  pub fn eval_at_zero(&self) -> AllocatedNum<F> {
+    self.coeffs[0].clone()
+  }
+
+  pub fn eval_at_one<CS>(&self, mut cs: CS) -> Result<AllocatedNum<F>, SynthesisError>
+  where
+    CS: ConstraintSystem<F>,
+  {
+    let mut eval = alloc_zero(cs.namespace(|| "eval"));
+    for i in 0..NUM_UNIVARIATE_COEFFS {
+      eval = eval.add(cs.namespace(|| format!("add_{i}")), &self.coeffs[i])?
+    }
+    Ok(eval)
+  }
+
+  pub fn eval<CS>(&self, mut cs: CS, r: &AllocatedNum<F>) -> Result<AllocatedNum<F>, SynthesisError>
+  where
+    CS: ConstraintSystem<F>,
+  {
+    let mut eval = self.coeffs[0].clone();
+    let mut power = r.clone();
+    for i in 1..NUM_UNIVARIATE_COEFFS {
+      let term = self.coeffs[i].mul(cs.namespace(|| format!("r_{i} * coeff_{i}")), &power)?;
+      eval = eval.add(cs.namespace(|| format!("eval+= r_{i} * coeff")), &term)?;
+      power = power.mul(cs.namespace(|| format!("r_^{i}")), r)?;
+    }
+    Ok(eval)
+  }
+
+  pub fn absorb_in_ro(&self, ro: &mut impl ROCircuitTrait<F>) -> Result<(), SynthesisError> {
+    for i in 0..NUM_UNIVARIATE_COEFFS {
+      ro.absorb(&self.coeffs[i]);
+    }
+    Ok(())
   }
 }
 
@@ -334,67 +394,6 @@ where
       eval = eval.mul(cs.namespace(|| format!("eval * term {i}")), &term)?;
     }
     Ok(eval)
-  }
-}
-
-pub struct AllocatedUniPoly<F>
-where
-  F: PrimeField,
-{
-  coeffs: Vec<AllocatedNum<F>>,
-}
-
-impl<F> AllocatedUniPoly<F>
-where
-  F: PrimeField,
-{
-  pub fn alloc<CS>(mut cs: CS, inst: Option<&UniPoly<F>>) -> Result<Self, SynthesisError>
-  where
-    CS: ConstraintSystem<F>,
-  {
-    Ok(Self {
-      coeffs: alloc_sized_vec(
-        cs.namespace(|| "coeffs"),
-        inst.map(|poly| &poly.coeffs),
-        NUM_UNIVARIATE_COEFFS,
-      )?,
-    })
-  }
-
-  pub fn eval_at_zero(&self) -> AllocatedNum<F> {
-    self.coeffs[0].clone()
-  }
-
-  pub fn eval_at_one<CS>(&self, mut cs: CS) -> Result<AllocatedNum<F>, SynthesisError>
-  where
-    CS: ConstraintSystem<F>,
-  {
-    let mut eval = alloc_zero(cs.namespace(|| "eval at one"));
-    for i in 0..NUM_UNIVARIATE_COEFFS {
-      eval = eval.add(cs.namespace(|| "add_{i}"), &self.coeffs[i])?
-    }
-    Ok(eval)
-  }
-
-  pub fn eval<CS>(&self, mut cs: CS, r: &AllocatedNum<F>) -> Result<AllocatedNum<F>, SynthesisError>
-  where
-    CS: ConstraintSystem<F>,
-  {
-    let mut eval = self.coeffs[0].clone();
-    let mut r_i = r.clone();
-    for i in 1..NUM_UNIVARIATE_COEFFS {
-      let term = self.coeffs[i].mul(cs.namespace(|| format!("r_{i} * coeff_{i}")), &r_i)?;
-      eval = eval.add(cs.namespace(|| format!("add_{i}")), &term)?;
-      r_i = r_i.square(cs.namespace(|| format!("r_{i}^2")))?;
-    }
-    Ok(eval)
-  }
-
-  pub fn absorb_in_ro(&self, ro: &mut impl ROCircuitTrait<F>) -> Result<(), SynthesisError> {
-    for i in 0..NUM_UNIVARIATE_COEFFS {
-      ro.absorb(&self.coeffs[i]);
-    }
-    Ok(())
   }
 }
 

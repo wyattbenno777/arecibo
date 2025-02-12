@@ -10,7 +10,7 @@ pub mod ro_sumcheck;
 pub mod rs;
 
 /// Step circuit used for Hypernova
-pub trait StepCircuit<F: PrimeField> {
+pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
   /// Arity of the circuit. This is needed to build the public parameters
   fn arity(&self) -> usize;
 

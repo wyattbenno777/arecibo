@@ -4,13 +4,15 @@ pub(crate) mod util;
 
 use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
+  cyclefold::util::absorb_primary_commitment,
   digest::{DigestComputer, SimpleDigestible},
   errors::NovaError,
   gadgets::{f_to_nat, nat_to_limbs, scalar_as_base},
   hypernova::error::HyperNovaError,
   spartan::{math::Math, polys::multilinear::MultilinearPolynomial},
   traits::{
-    commitment::CommitmentEngineTrait, AbsorbInROTrait, Engine, ROTrait, TranscriptReprTrait,
+    commitment::CommitmentEngineTrait, AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROTrait,
+    TranscriptReprTrait,
   },
   zip_with, Commitment, CommitmentKey, DerandKey, CE,
 };
@@ -388,13 +390,25 @@ impl<E: Engine> R1CSShape<E> {
     assert_eq!(W.W.len(), self.num_vars);
     assert_eq!(U.X.len(), self.num_io);
 
-    let (mut Az, mut Bz, mut Cz) = self.multiply_witness(&W.W, &U.u, &U.X)?;
-    Az.resize(self.num_vars * 2, E::Scalar::ZERO);
-    Bz.resize(self.num_vars * 2, E::Scalar::ZERO);
-    Cz.resize(self.num_vars * 2, E::Scalar::ZERO);
-    assert_eq!(U.vs[0], MultilinearPolynomial::new(Az).evaluate(&U.rx));
-    assert_eq!(U.vs[1], MultilinearPolynomial::new(Bz).evaluate(&U.rx));
-    assert_eq!(U.vs[2], MultilinearPolynomial::new(Cz).evaluate(&U.rx));
+    let (Az, Bz, Cz) = self.multiply_witness(&W.W, &U.u, &U.X)?;
+
+    // Helper function for resizing polynomials
+    let pad_poly = |mut vec: Vec<E::Scalar>| {
+      vec.resize(self.num_cons.next_power_of_two(), E::Scalar::ZERO);
+      vec
+    };
+    assert_eq!(
+      U.vs[0],
+      MultilinearPolynomial::new(pad_poly(Az)).evaluate(&U.rx)
+    );
+    assert_eq!(
+      U.vs[1],
+      MultilinearPolynomial::new(pad_poly(Bz)).evaluate(&U.rx)
+    );
+    assert_eq!(
+      U.vs[2],
+      MultilinearPolynomial::new(pad_poly(Cz)).evaluate(&U.rx)
+    );
 
     // verify if comm_W is a commitment to W
     if U.comm_W != CE::<E>::commit(ck, &W.W, &W.r_W) {
@@ -1071,6 +1085,23 @@ where
       vs,
       u,
     })
+  }
+
+  pub(crate) fn absorb_in_ro(&self, ro: &mut <Dual<E> as Engine>::RO)
+  where
+    E: CurveCycleEquipped,
+  {
+    absorb_primary_commitment::<E, Dual<E>>(&self.comm_W, ro);
+    ro.absorb(self.u);
+    for x in &self.X {
+      ro.absorb(*x);
+    }
+    for x in &self.rx {
+      ro.absorb(*x);
+    }
+    for x in &self.vs {
+      ro.absorb(*x);
+    }
   }
 }
 

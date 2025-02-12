@@ -249,10 +249,14 @@ where
     };
     (0..len)
       .map(|i| {
-        let hash = Elt::ensure_allocated(&hash[i], &mut ns.namespace(|| "ensure allocated"), true)?;
+        let hash = Elt::ensure_allocated(
+          &hash[i],
+          &mut ns.namespace(|| format!("ensure allocated_{i}")),
+          true,
+        )?;
         Ok(
           hash
-            .to_bits_le_strict(ns.namespace(|| "poseidon hash to boolean"))?
+            .to_bits_le_strict(ns.namespace(|| format!("poseidon hash to boolean_{i}")))?
             .iter()
             .map(|boolean| match boolean {
               Boolean::Is(ref x) => x.clone(),

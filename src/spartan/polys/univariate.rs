@@ -13,10 +13,7 @@ use std::{
   ops::{AddAssign, Index, IndexMut, MulAssign, SubAssign},
 };
 
-use crate::{
-  provider::util::iterators::DoubleEndedIteratorExt as _,
-  traits::{AbsorbInROTrait, Engine, Group, TranscriptReprTrait},
-};
+use crate::traits::{AbsorbInROTrait, Engine, Group, TranscriptReprTrait};
 
 // ax^2 + bx + c stored as vec![c, b, a]
 // ax^3 + bx^2 + cx + d stored as vec![d, c, b, a]

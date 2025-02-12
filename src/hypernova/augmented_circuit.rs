@@ -1,4 +1,5 @@
 use super::{nifs::NIFS, StepCircuit};
+use crate::frontend::AllocatedBit;
 use crate::traits::ROCircuitTrait;
 use crate::{
   and_then_field,
@@ -8,7 +9,7 @@ use crate::{
     SynthesisError,
   },
   gadgets::{
-    alloc_num_equals, alloc_scalar_as_base, alloc_zero, conditionally_select_vec,
+    alloc_num_equals, alloc_zero, conditionally_select_vec,
     emulated::AllocatedEmulPoint,
     hypernova::{
       alloc_sized_vec, increment, AllocatedLR1CSInstance, AllocatedNIFS, AllocatedR1CSInstance,
@@ -24,6 +25,7 @@ use crate::{
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone)]
 pub struct AugmentedCircuit<'a, E, SC>
 where
   SC: StepCircuit<E::Scalar>,
@@ -36,13 +38,13 @@ where
   num_rounds: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct AugmentedCircuitInputs<E>
 where
   E: CurveCycleEquipped,
 {
-  pp_digest: E::Base,
+  pp_digest: E::Scalar,
   i: E::Scalar,
   z_0: Vec<E::Scalar>,
   z_i: Option<Vec<E::Scalar>>,
@@ -57,7 +59,7 @@ where
   E: CurveCycleEquipped,
 {
   pub fn new(
-    pp_digest: E::Base,
+    pp_digest: E::Scalar,
     i: E::Scalar,
     z_0: Vec<E::Scalar>,
     z_i: Option<Vec<E::Scalar>>,
@@ -108,7 +110,7 @@ where
     //
     // 1. Hash check
     // 2. U <- NIFS.V
-    let U_non_base_case = self.synthesize_non_base_case(
+    let (U_non_base_case, check_non_base_pass) = self.synthesize_non_base_case(
       cs.namespace(|| "non base case"),
       &pp_digest,
       &i,
@@ -120,6 +122,18 @@ where
       &u,
       W_new,
     )?;
+
+    let should_be_false = AllocatedBit::nor(
+      cs.namespace(|| "check_non_base_pass nor base_case"),
+      &check_non_base_pass,
+      &is_base_case,
+    )?;
+    cs.enforce(
+      || "check_non_base_pass nor base_case = false",
+      |lc| lc + should_be_false.get_variable(),
+      |lc| lc + CS::one(),
+      |lc| lc,
+    );
 
     // select the new running primary instance
     let U_new = U_default.conditionally_select(
@@ -162,8 +176,7 @@ where
     )?;
     hash.inputize(cs.namespace(|| "u.x[0] = hash"))?;
     // TODO: Cyclefold
-    let zero = alloc_zero(cs.namespace(|| "zero"));
-    zero.inputize(cs.namespace(|| "zero"))?;
+    zero.inputize(cs.namespace(|| "zero_inputized"))?;
     Ok(z_next)
   }
 
@@ -179,9 +192,9 @@ where
     U: &AllocatedLR1CSInstance<E>,
     u: &AllocatedR1CSInstance<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-  ) -> Result<AllocatedLR1CSInstance<E>, SynthesisError> {
+  ) -> Result<(AllocatedLR1CSInstance<E>, AllocatedBit), SynthesisError> {
     // Hash check: u.X[0] = H(pp, i, z0, zi, U)
-    self.first_hash_check(
+    let hash_check = self.first_hash_check(
       cs.namespace(|| "first_hash_check"),
       pp_digest,
       i,
@@ -192,7 +205,7 @@ where
     )?;
 
     // NIFS.V
-    nifs.verify(
+    let U = nifs.verify(
       cs.namespace(|| "NIFS.V"),
       pp_digest,
       ro_consts,
@@ -200,7 +213,8 @@ where
       u,
       W_new,
       self.num_rounds,
-    )
+    )?;
+    Ok((U, hash_check))
   }
 
   pub fn first_hash_check<CS: ConstraintSystem<E::Scalar>>(
@@ -212,20 +226,14 @@ where
     z_i: &[AllocatedNum<E::Scalar>],
     U: &AllocatedLR1CSInstance<E>,
     u: &AllocatedR1CSInstance<E>,
-  ) -> Result<(), SynthesisError> {
+  ) -> Result<AllocatedBit, SynthesisError> {
     let hash = self.calculate_hash(cs.namespace(|| "calculate_hash"), pp_digest, i, z_0, z_i, U)?;
-    let check_primary = alloc_num_equals(
+    let hash_check = alloc_num_equals(
       cs.namespace(|| "u.X[0] = H(params, i, z0, zi, U)"),
       &u.x0,
       &hash,
     )?;
-    cs.enforce(
-      || "check_primary == 1",
-      |lc| lc + check_primary.get_variable(),
-      |lc| lc + CS::one(),
-      |lc| lc + CS::one(),
-    );
-    Ok(())
+    Ok(hash_check)
   }
 
   pub fn calculate_hash<CS: ConstraintSystem<E::Scalar>>(
@@ -237,17 +245,17 @@ where
     z_i: &[AllocatedNum<E::Scalar>],
     U: &AllocatedLR1CSInstance<E>,
   ) -> Result<AllocatedNum<E::Scalar>, SynthesisError> {
-    let mut ro_p = <Dual<E> as Engine>::ROCircuit::new(self.ro_consts.clone(), DEFAULT_ABSORBS);
-    ro_p.absorb(pp_digest);
-    ro_p.absorb(i);
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(self.ro_consts.clone(), DEFAULT_ABSORBS);
+    ro.absorb(pp_digest);
+    ro.absorb(i);
     for e in z_0 {
-      ro_p.absorb(e)
+      ro.absorb(e)
     }
     for e in z_i {
-      ro_p.absorb(e)
+      ro.absorb(e)
     }
-    U.absorb_in_ro(cs.namespace(|| "absorb U_p"), &mut ro_p)?;
-    let hash_bits = ro_p.squeeze(cs.namespace(|| "primary hash bits"), NUM_HASH_BITS)?;
+    U.absorb_in_ro(cs.namespace(|| "absorb U"), &mut ro)?;
+    let hash_bits = ro.squeeze(cs.namespace(|| "primary hash bits"), NUM_HASH_BITS)?;
     let hash = le_bits_to_num(cs.namespace(|| "primary hash"), &hash_bits)?;
     Ok(hash)
   }
@@ -270,10 +278,9 @@ where
     SynthesisError,
   > {
     // Allocate primitives: pp_digest, i, z_0
-    let pp_digest = alloc_scalar_as_base::<Dual<E>, _>(
-      cs.namespace(|| "params"),
-      map_field!(self.inputs, ref, pp_digest).copied(),
-    )?;
+    let pp_digest = AllocatedNum::alloc(cs.namespace(|| "pp_digest"), || {
+      Ok(self.inputs.get()?.pp_digest)
+    })?;
     let i = AllocatedNum::alloc(cs.namespace(|| "i"), || Ok(self.inputs.get()?.i))?;
     let z_0 = alloc_sized_vec(
       cs.namespace(|| "z_0"),
@@ -433,11 +440,10 @@ mod tests {
       MAX_CONSTRAINTS_PER_SUMCHECK_ROUND,
     },
     frontend::{num::AllocatedNum, shape_cs::ShapeCS, ConstraintSystem, SynthesisError},
-    gadgets::alloc_zero,
     hypernova::{augmented_circuit::project_aug_circuit_size, StepCircuit},
     provider::Bn256EngineIPA,
     spartan::math::Math,
-    traits::{Dual, Engine, ROConstantsCircuit},
+    traits::{Dual, ROConstantsCircuit},
   };
 
   /// A trivial step circuit that simply returns the input
@@ -540,7 +546,6 @@ mod tests {
 
   use super::AugmentedCircuit;
   type E = Bn256EngineIPA;
-  type F = <E as Engine>::Scalar;
 
   #[test]
   fn test_base_aug_circuit_size_bn254() {
