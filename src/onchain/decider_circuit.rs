@@ -377,8 +377,9 @@ where
       );
     }
     let alloc_rw_eval = EvalGadget::evaluate_gadget::<&mut CS, E>(cs,W_i1_W.clone(), &kzg_alloc_rw)?;
-    println!("alloc_rw_eval: {:?}", alloc_rw_eval.get_value());
-    println!("kzg_alloc_rw_eval: {:?}", kzg_alloc_rw_eval.get_value());
+    println!("alloc_rw_eval: {:?}", alloc_rw_eval.get_variable());
+    println!("kzg_alloc_rw_eval: {:?}", kzg_alloc_rw_eval.get_variable());
+    println!("equal: {:?}", kzg_alloc_rw_eval.get_variable() == alloc_rw_eval.get_variable());
     cs.enforce(
       || "evalW == pW(cW)",
       |lc| lc,

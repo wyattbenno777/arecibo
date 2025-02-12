@@ -23,7 +23,7 @@ use ec_gpu_gen::threadpool::Worker;
 pub struct EvaluationDomain<F: PrimeField + gpu::GpuName> {
     coeffs: Vec<F>,
     exp: u32,
-    omega: F,
+    pub omega: F,
     omegainv: F,
     geninv: F,
     minv: F,

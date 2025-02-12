@@ -90,13 +90,11 @@ pub struct EvalGadget {}
 
 impl EvalGadget {
   pub fn evaluate_native<F: PrimeField + GpuName>(mut v: Vec<F>, point: F) -> F {
-    v.resize(v.len().next_power_of_two(), F::ZERO);
-    // Create an evaluation domain from the coefficients
+    // v.resize(v.len().next_power_of_two(), F::ZERO);
     let mut domain = EvaluationDomain::from_coeffs(v).expect("Failed to create evaluation domain");
 
-    // Perform FFT to transform the polynomial into evaluation form
-    let worker = Worker::new(); // Assuming you have a worker for parallel computation
-    domain.fft(&worker, &mut None).expect("FFT failed");
+    let worker = Worker::new(); 
+    domain.ifft(&worker, &mut None).expect("FFT failed");
 
     // Evaluate the polynomial at the given point
     let eval = domain.evaluate_at(point);
@@ -114,42 +112,46 @@ impl EvalGadget {
     CS: ConstraintSystem<E::Scalar>,
     E::Scalar: GpuName,
   {
-    // Convert AllocatedNum to native field elements
-    let mut native_v: Vec<E::Scalar> = v
-      .iter()
-      .map(|num| num.get_value().unwrap_or(E::Scalar::from(0)))
-      .collect();
+    // // Convert AllocatedNum to native field elements
+    // let mut native_v: Vec<E::Scalar> = v
+    //   .iter()
+    //   .map(|num| num.get_value().unwrap_or(E::Scalar::from(0)))
+    //   .collect();
 
-    // Resize to the next power of two
-    native_v.resize(native_v.len().next_power_of_two(), E::Scalar::from(0));
+    // // Resize to the next power of two
+    // native_v.resize(native_v.len().next_power_of_two(), E::Scalar::from(0));
 
-    // Create an evaluation domain from the coefficients
-    let mut domain =
-      EvaluationDomain::from_coeffs(native_v).expect("Failed to create evaluation domain");
+    // // Create an evaluation domain from the coefficients
+    // let mut domain =
+    //   EvaluationDomain::from_coeffs(native_v).expect("Failed to create evaluation domain");
 
-    // Perform FFT to transform the polynomial into evaluation form
-    let worker = Worker::new();
-    domain.fft(&worker, &mut None).expect("FFT failed");
+    // // Perform FFT to transform the polynomial into evaluation form
+    // let worker = Worker::new();
+    // domain.ifft(&worker, &mut None).expect("FFT failed");
 
-    // Evaluate the polynomial at the given point
-    let point_value = point.get_value().unwrap_or(E::Scalar::from(0));
-    let eval = domain.evaluate_at(point_value);
-    println!("eval gadget: {:?}", eval);
+    // // Evaluate the polynomial at the given point
+    // let point_value = point.get_value().unwrap_or(E::Scalar::from(0));
+    // let eval = domain.evaluate_at(point_value);
+    // println!("1. Eval gadget: {:?}", eval);
 
-    // Convert the result back to AllocatedNum
-    AllocatedNum::alloc(&mut cs, || Ok(eval))
+    // // Convert the result back to AllocatedNum
+    // AllocatedNum::alloc(&mut cs, || Ok(eval))
     // let alloc_zero = AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(0)))?;
     // v.resize(v.len().next_power_of_two(), alloc_zero);
     // let n = v.len() as usize;
     // let gen = nth_root_of_unity::<E::Scalar>(n).ok_or(SynthesisError::PolynomialDegreeTooLarge)?; // TODO: Use a better error
-    // let alloc_one = AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(1)))?;
-    // let log2_v = usize::BITS - v.len().leading_zeros() - 1;
-    // let domain = AllocatedRadix2Domain::new(&mut cs, gen, log2_v as u64, alloc_one)?;
+    let native_v = v.iter().map(|x| x.get_value().unwrap_or(E::Scalar::from(0))).collect::<Vec<_>>();
+    let mut domain = EvaluationDomain::from_coeffs(native_v).expect("Failed to create evaluation domain");
+    let omega = domain.omega;
+    v.resize(domain.into_coeffs().len(), AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(0)))?);
+    let alloc_one = AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(1)))?;
+    let log2_v = usize::BITS - v.len().leading_zeros() - 1;
+    let domain = AllocatedRadix2Domain::new(&mut cs, omega, log2_v as u64, alloc_one)?;
 
-    // let alloc_evaluations = AllocatedEvaluations::from_vec_and_domain(v, domain, true);
-    // let eval = alloc_evaluations.interpolate_and_evaluate(&mut cs, point)?;
-    // println!("eval gadget: {:?}", eval.get_value());
-    // Ok(eval)
+    let alloc_evaluations = AllocatedEvaluations::from_vec_and_domain(v, domain, true);
+    let eval = alloc_evaluations.interpolate_and_evaluate(&mut cs, point)?;
+    println!("2. Eval gadget: {:?}", eval.get_value());
+    Ok(eval)
   }
 }
 
@@ -189,14 +191,14 @@ impl<E: PairingEngine> KZGProof<E> {
     E::G1: DlogGroup<ScalarExt = E::Fr, AffineExt = E::G1Affine>,
     E::Fr: GpuName,
   {
-    let mut v = v.to_vec();
-    v.resize(v.len().next_power_of_two(), E::Fr::from(0));
+    // let mut v = v.to_vec();
+    // v.resize(v.len().next_power_of_two(), E::Fr::from(0));
     // Create an evaluation domain from the coefficients
-    let mut domain = EvaluationDomain::from_coeffs(v).expect("Failed to create evaluation domain");
+    let mut domain = EvaluationDomain::from_coeffs(v.to_vec())
+      .expect("Failed to create evaluation domain");
 
-    // Perform FFT to transform the polynomial into evaluation form
-    let worker = Worker::new(); // Assuming you have a worker for parallel computation
-    domain.fft(&worker, &mut None).expect("FFT failed");
+    let worker = Worker::new(); 
+    domain.ifft(&worker, &mut None).expect("FFT failed");
 
     let polynomial = DensePolynomial::from_coeffs(domain.into_coeffs());
     if polynomial.degree() >= params.powers_of_g().len() {
