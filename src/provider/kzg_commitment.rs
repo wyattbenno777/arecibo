@@ -1,7 +1,7 @@
 //! Commitment engine for KZG commitments
 //!
 
-use std::{marker::PhantomData, ops::Div};
+use std::marker::PhantomData;
 
 use ff::{Field, PrimeField, PrimeFieldBits};
 use group::{prime::PrimeCurveAffine, Curve, Group as _};
@@ -12,13 +12,12 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::{
-  digest::SimpleDigestible, errors::PCSError, provider::{pedersen::Commitment, traits::DlogGroup, util::fb_msm}, traits::{
+  digest::SimpleDigestible, provider::{pedersen::Commitment, traits::DlogGroup, util::fb_msm}, traits::{
     commitment::{CommitmentEngineTrait, Len},
     Engine as NovaEngine, Group, TranscriptReprTrait,
-  }, NovaError
+  }, 
 };
 
-use crate::frontend::groth16::aggregate::poly::DensePolynomial;
 
 /// `UniversalParams` are the universal parameters for the KZG10 scheme.
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
@@ -224,51 +223,6 @@ pub struct KZGCommitmentEngine<E> {
   _p: PhantomData<E>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct KZGProof<E: Engine> {
-  pub proof: E::G1,
-  pub eval: E::Fr,
-}
-
-impl<E: Engine> KZGCommitmentEngine<E> {
-  pub fn prove_with_challenge(
-    params: &KZGProverKey<E>,
-    challenge: E::Fr,
-    v: &[E::Fr],
-  ) -> Result<KZGProof<E>, PCSError>
-  where
-    E::G1: DlogGroup<ScalarExt = E::Fr, AffineExt = E::G1Affine>,
-  {
-    let polynomial = DensePolynomial::from_coeffs(v.to_vec());
-    if polynomial.degree() >= params.powers_of_g().len() {
-      return Err(PCSError::LengthError);
-    }
-
-    let divisor = DensePolynomial::from_coeffs(vec![-challenge, E::Fr::ONE]);
-    let (witness_poly, remainder_poly) = polynomial.quot_rem(&divisor);
-
-    let eval = if remainder_poly.is_zero() {
-      E::Fr::ZERO
-    } else {
-      remainder_poly.coeffs()[0]
-    };
-
-    if witness_poly.degree() >= params.powers_of_g().len() {
-      return Err(PCSError::LengthError);
-    }
-
-    let proof = E::G1::vartime_multiscalar_mul(
-      &witness_poly.coeffs(),
-      &params.powers_of_g()[..witness_poly.coeffs().len()],
-    );
-
-    Ok(KZGProof {
-      proof,
-      eval,
-    })
-  }
-}
-
 impl<E: Engine, NE: NovaEngine<GE = E::G1, Scalar = E::Fr>> CommitmentEngineTrait<NE>
   for KZGCommitmentEngine<E>
 where
@@ -341,3 +295,4 @@ where
     }
   }
 }
+

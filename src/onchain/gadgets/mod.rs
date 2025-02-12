@@ -6,16 +6,26 @@
 use crate::constants::NUM_HASH_BITS;
 use crate::cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance;
 use crate::cyclefold::util::absorb_primary_commitment;
+use crate::errors::PCSError;
 use crate::frontend::domain::EvaluationDomain;
 use crate::frontend::gpu::GpuName;
+use crate::frontend::groth16::aggregate::poly::DensePolynomial;
 use crate::frontend::num::AllocatedNum;
 use crate::frontend::{ConstraintSystem, SynthesisError};
 use crate::gadgets::{le_bits_to_num, scalar_as_base};
+use crate::provider::kzg_commitment::KZGProverKey;
+use crate::provider::traits::DlogGroup;
 use crate::r1cs::RelaxedR1CSInstance;
 use crate::traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait, ROConstants, ROConstantsCircuit, ROTrait};
 use crate::Commitment;
 use ec_gpu_gen::threadpool::Worker;
 use ff::PrimeField;
+use domain::{AllocatedEvaluations, AllocatedRadix2Domain};
+use pairing::Engine as PairingEngine;
+use serde::{Deserialize, Serialize};
+use super::utils::nth_root_of_unity;
+
+pub mod domain;
 
 /// Gadget that computes the KZG challenges.
 /// It also offers the rust native implementation compatible with the gadget.
@@ -90,13 +100,14 @@ impl EvalGadget {
 
     // Evaluate the polynomial at the given point
     let eval = domain.evaluate_at(point);
-
+    println!("challenge: {:?}", point);
+    println!("eval native: {:?}", eval);
     eval
   }
 
   pub fn evaluate_gadget<CS, E: CurveCycleEquipped>(
     mut cs: CS,
-    v: &Vec<AllocatedNum<E::Scalar>>,
+    mut v: Vec<AllocatedNum<E::Scalar>>,
     point: &AllocatedNum<E::Scalar>,
   ) -> Result<AllocatedNum<E::Scalar>, SynthesisError>
   where
@@ -123,9 +134,22 @@ impl EvalGadget {
     // Evaluate the polynomial at the given point
     let point_value = point.get_value().unwrap_or(E::Scalar::from(0));
     let eval = domain.evaluate_at(point_value);
+    println!("eval gadget: {:?}", eval);
 
     // Convert the result back to AllocatedNum
     AllocatedNum::alloc(&mut cs, || Ok(eval))
+    // let alloc_zero = AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(0)))?;
+    // v.resize(v.len().next_power_of_two(), alloc_zero);
+    // let n = v.len() as usize;
+    // let gen = nth_root_of_unity::<E::Scalar>(n).ok_or(SynthesisError::PolynomialDegreeTooLarge)?; // TODO: Use a better error
+    // let alloc_one = AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(1)))?;
+    // let log2_v = usize::BITS - v.len().leading_zeros() - 1;
+    // let domain = AllocatedRadix2Domain::new(&mut cs, gen, log2_v as u64, alloc_one)?;
+
+    // let alloc_evaluations = AllocatedEvaluations::from_vec_and_domain(v, domain, true);
+    // let eval = alloc_evaluations.interpolate_and_evaluate(&mut cs, point)?;
+    // println!("eval gadget: {:?}", eval.get_value());
+    // Ok(eval)
   }
 }
 
@@ -146,5 +170,63 @@ impl DeciderNovaGadget {
     let cmE = U_cmE; // + cmT * r;
 
     Ok((cmW, cmE))
+  }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KZGProof<E: PairingEngine> {
+  pub proof: E::G1,
+  pub eval: E::Fr,
+}
+
+impl<E: PairingEngine> KZGProof<E> {
+  pub fn prove_with_challenge(
+    params: &KZGProverKey<E>,
+    challenge: E::Fr,
+    v: &[E::Fr],
+  ) -> Result<KZGProof<E>, PCSError>
+  where
+    E::G1: DlogGroup<ScalarExt = E::Fr, AffineExt = E::G1Affine>,
+    E::Fr: GpuName,
+  {
+    let mut v = v.to_vec();
+    v.resize(v.len().next_power_of_two(), E::Fr::from(0));
+    // Create an evaluation domain from the coefficients
+    let mut domain = EvaluationDomain::from_coeffs(v).expect("Failed to create evaluation domain");
+
+    // Perform FFT to transform the polynomial into evaluation form
+    let worker = Worker::new(); // Assuming you have a worker for parallel computation
+    domain.fft(&worker, &mut None).expect("FFT failed");
+
+    let polynomial = DensePolynomial::from_coeffs(domain.into_coeffs());
+    if polynomial.degree() >= params.powers_of_g().len() {
+      return Err(PCSError::LengthError);
+    }
+
+    let divisor = DensePolynomial::from_coeffs(vec![-challenge, E::Fr::from(1)]);
+    let (witness_poly, remainder_poly) = polynomial.quot_rem(&divisor);
+
+    let eval = if remainder_poly.is_zero() {
+      E::Fr::from(0)
+    } else {
+      remainder_poly.coeffs()[0]
+    };
+
+    println!("challenge 1: {:?}", challenge);
+    println!("eval 1: {:?}", eval);
+
+    if witness_poly.degree() >= params.powers_of_g().len() {
+      return Err(PCSError::LengthError);
+    }
+
+    let proof = E::G1::vartime_multiscalar_mul(
+      &witness_poly.coeffs(),
+      &params.powers_of_g()[..witness_poly.coeffs().len()],
+    );
+
+    Ok(KZGProof {
+      proof,
+      eval,
+    })
   }
 }

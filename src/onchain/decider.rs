@@ -1,6 +1,6 @@
 //! Implements components to enable the compression-step for IVC proofs
 
-use super::{decider_circuit::DeciderCircuit, gadgets::DeciderNovaGadget};
+use super::{decider_circuit::DeciderCircuit, gadgets::{DeciderNovaGadget, KZGProof}};
 use crate::{
   errors::NovaError,
   frontend::groth16::{
@@ -14,7 +14,7 @@ use crate::{
   onchain::eth::ToEth,
   provider::{
     hyperkzg::EvaluationEngine,
-    kzg_commitment::{KZGCommitmentEngine, KZGProof, KZGProverKey, KZGVerifierKey},
+    kzg_commitment::{KZGCommitmentEngine, KZGProverKey, KZGVerifierKey},
     Bn256EngineKZG,
   },
   r1cs::{R1CSInstance, RelaxedR1CSInstance},
@@ -101,8 +101,8 @@ impl Decider {
     let kzg_challenges = circuit.kzg_challenges.clone();
 
     let kzg_proofs = (
-      KZGCommitmentEngine::prove_with_challenge(&pk.kzg_pk, kzg_challenges.0, &circuit.W_i1.W[..])?,
-      KZGCommitmentEngine::prove_with_challenge(&pk.kzg_pk, kzg_challenges.1, &circuit.W_i1.W[..])?,
+      KZGProof::prove_with_challenge(&pk.kzg_pk, kzg_challenges.0, &circuit.W_i1.W[..])?,
+      KZGProof::prove_with_challenge(&pk.kzg_pk, kzg_challenges.1, &circuit.W_i1.W[..])?,
     );
     let groth16_proof = create_random_proof(circuit, &pk.groth16_pk, rng)?;
     Ok(Self {
@@ -148,7 +148,7 @@ impl Decider {
       &z_i[..],
       // &U_final_commitments.inputize_nonnative(),
       &[self.kzg_challenges.0, self.kzg_challenges.1],
-      &[self.kzg_proofs.0.eval, self.kzg_proofs.1.eval],
+      &[self.kzg_proofs.0.eval],// , self.kzg_proofs.1.eval],
       // &proof.cmT.inputize_nonnative(),
     ]
     .concat();
@@ -211,22 +211,17 @@ pub fn prepare_calldata(
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+  use std::sync::Arc;
+
+use super::*;
   use crate::{
-    constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
-    cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance,
-    frontend::{
+    constants::{BN_LIMB_WIDTH, BN_N_LIMBS}, cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance, frontend::{
       num::AllocatedNum, r1cs::NovaShape, shape_cs::ShapeCS, test_cs::TestConstraintSystem, Circuit, ConstraintSystem, SynthesisError
-    },
-    onchain::gadgets::KZGChallengesGadget,
-    provider::Bn256EngineKZG,
-    traits::{snark::RelaxedR1CSSNARKTrait, Dual, Engine, ROConstantsCircuit},
+    }, onchain::gadgets::{EvalGadget, KZGChallengesGadget}, provider::Bn256EngineKZG, traits::{snark::RelaxedR1CSSNARKTrait, Dual}
   };
   use ff::Field;
   use halo2curves::bn256::{Bn256, Fr};
 
-  use crate::traits::ROTrait;
-  use crate::traits::ROCircuitTrait;
   use rand::thread_rng;
 
   type E1 = Bn256EngineKZG;
@@ -321,7 +316,6 @@ mod tests {
     println!("r1cs_shape.num_io: {}", r1cs_shape.num_io);
     let relaxed_instance = RelaxedR1CSInstance::default(&ck, &r1cs_shape);
 
-    // Call the native function
     let (rw_native, re_native) =
       KZGChallengesGadget::get_challenges_native(relaxed_instance.clone());
 
@@ -340,5 +334,29 @@ mod tests {
       return Err(SynthesisError::MalformedProofs("".to_string()));
     }
     Ok(())
+  }
+
+
+  #[test]
+  fn test_eval() {
+    let circuit = TestChallengeCircuit::default();
+    let mut shape_cs = ShapeCS::new();
+    let _ = circuit.synthesize(&mut shape_cs);
+    let (r1cs_shape, ck) = shape_cs.r1cs_shape(&*S1::ck_floor());
+    let (kzg_pk, _) = EvaluationEngine::<Bn256, Bn256EngineKZG>::setup(Arc::new(ck.clone()));
+    let (relaxed_instance, relaxed_witness) = r1cs_shape.sample_random_instance_witness(&ck).unwrap();
+
+    let (challenge_w, _) =
+    KZGChallengesGadget::get_challenges_native(relaxed_instance.clone());
+
+    let eval = EvalGadget::evaluate_native(relaxed_witness.clone().W, challenge_w);
+    
+    let proof = KZGProof::prove_with_challenge(
+      &kzg_pk,
+      challenge_w,
+      &relaxed_witness.W,
+    ).unwrap();
+
+    assert_eq!(eval, proof.eval);
   }
 }

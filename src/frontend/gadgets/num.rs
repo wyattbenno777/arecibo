@@ -8,7 +8,7 @@ use crate::frontend::{ConstraintSystem, LinearCombination, SynthesisError, Varia
 use crate::frontend::gadgets::boolean::{self, AllocatedBit, Boolean};
 
 /// Represents an allocated number in the circuit.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct AllocatedNum<Scalar: PrimeField> {
   value: Option<Scalar>,
   variable: Variable,
