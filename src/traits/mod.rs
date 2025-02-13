@@ -1,6 +1,8 @@
 //! This module defines various traits required by the users of the library to implement.
-use crate::errors::NovaError;
-use crate::frontend::{num::AllocatedNum, AllocatedBit, ConstraintSystem, SynthesisError};
+use crate::{
+  errors::NovaError,
+  frontend::{num::AllocatedNum, AllocatedBit, ConstraintSystem, SynthesisError},
+};
 use core::fmt::Debug;
 use ff::{PrimeField, PrimeFieldBits};
 use num_bigint::BigInt;
@@ -124,6 +126,14 @@ pub trait ROCircuitTrait<Base: PrimeField> {
     cs: CS,
     num_bits: usize,
   ) -> Result<Vec<AllocatedBit>, SynthesisError>;
+
+  /// Returns a challenge of `num_bits` by hashing the internal state
+  fn squeeze_vec<CS: ConstraintSystem<Base>>(
+    &mut self,
+    cs: CS,
+    num_bits: usize,
+    len: usize,
+  ) -> Result<Vec<Vec<AllocatedBit>>, SynthesisError>;
 }
 
 /// An alias for constants associated with `E::RO`

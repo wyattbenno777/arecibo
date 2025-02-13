@@ -1,15 +1,19 @@
 use ff::Field;
 use rayon::prelude::*;
 
-use crate::provider::util::field::batch_invert;
-use crate::spartan::math::Math;
-use crate::spartan::polys::{
-  eq::EqPolynomial, masked_eq::MaskedEqPolynomial, multilinear::MultilinearPolynomial,
-  power::PowPolynomial,
+use crate::{
+  provider::util::field::batch_invert,
+  spartan::{
+    math::Math,
+    polys::{
+      eq::EqPolynomial, masked_eq::MaskedEqPolynomial, multilinear::MultilinearPolynomial,
+      power::PowPolynomial,
+    },
+    sumcheck::SumcheckProof,
+  },
+  traits::commitment::CommitmentEngineTrait,
+  Commitment, CommitmentKey, Engine, NovaError,
 };
-use crate::spartan::sumcheck::SumcheckProof;
-use crate::traits::commitment::CommitmentEngineTrait;
-use crate::{Commitment, CommitmentKey, Engine, NovaError};
 
 /// Defines a trait for implementing sum-check in a generic manner
 pub trait SumcheckEngine<E: Engine>: Send + Sync {

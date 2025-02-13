@@ -10,8 +10,7 @@ use crate::{
   traits::Engine,
   CommitmentKey,
 };
-use ff::Field;
-use ff::PrimeField;
+use ff::{Field, PrimeField};
 
 /// `NovaWitness` provide a method for acquiring an `R1CSInstance` and `R1CSWitness` from implementers.
 pub trait NovaWitness<E: Engine> {

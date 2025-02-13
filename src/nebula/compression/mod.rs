@@ -5,21 +5,20 @@ use super::{
   nifs::{CycleFoldRelaxedNIFS, PrimaryNIFS, PrimaryRelaxedNIFS},
   traits::{Layer1PPTrait, Layer1RSTrait},
 };
-use crate::nebula::traits::RecursiveSNARKFieldsTrait;
-use crate::traits::commitment::CommitmentEngineTrait;
 use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
-  gadgets::scalar_as_base,
-  traits::{snark::RelaxedR1CSSNARKTrait, Engine, TranscriptEngineTrait},
-  DerandKey,
-};
-use crate::{cyclefold::util::absorb_primary_relaxed_r1cs, traits::ROTrait};
-use crate::{
+  cyclefold::util::absorb_primary_relaxed_r1cs,
   errors::NovaError,
+  gadgets::scalar_as_base,
+  nebula::traits::RecursiveSNARKFieldsTrait,
   r1cs::{R1CSInstance, RelaxedR1CSInstance},
-  traits::{snark::BatchedRelaxedR1CSSNARKTrait, CurveCycleEquipped, Dual},
+  traits::{
+    commitment::CommitmentEngineTrait,
+    snark::{BatchedRelaxedR1CSSNARKTrait, RelaxedR1CSSNARKTrait},
+    AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROTrait, TranscriptEngineTrait,
+  },
+  Commitment, DerandKey,
 };
-use crate::{traits::AbsorbInROTrait, Commitment};
 use ff::Field;
 use serde::{Deserialize, Serialize};
 /// A type that holds the prover key for [`CompressedSNARK`]

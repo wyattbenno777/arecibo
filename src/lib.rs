@@ -36,6 +36,7 @@ mod cyclefold;
 pub mod nebula;
 // pub mod supernova;
 pub use errors::NovaError;
+pub(crate) use nebula::AugmentedCircuitParams;
 use traits::ROConstants;
 
 /// A type that holds parameters for the primary and secondary circuits of Nova and SuperNova

@@ -11,3 +11,5 @@ pub mod ic;
 pub mod layer_2;
 pub mod rs;
 pub mod traits;
+
+pub use augmented_circuit::AugmentedCircuitParams;

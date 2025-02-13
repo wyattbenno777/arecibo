@@ -1,8 +1,8 @@
 //! This module defines a collection of traits that define the behavior of a commitment engine
 //! We require the commitment engine to provide a commitment to vectors with a single group element
-use crate::provider::traits::DlogGroup;
 use crate::{
   errors::NovaError,
+  provider::traits::DlogGroup,
   traits::{AbsorbInROTrait, Engine, TranscriptReprTrait},
 };
 use core::{

@@ -1,8 +1,12 @@
 //! This module defines Cyclefold circuit
 
-use crate::frontend::gadgets::poseidon::poseidon_hash_allocated;
-use crate::frontend::{AllocatedBit, Boolean, ConstraintSystem, PoseidonConstants, SynthesisError};
-use crate::gadgets::conditionally_select;
+use crate::{
+  frontend::{
+    gadgets::poseidon::poseidon_hash_allocated, AllocatedBit, Boolean, ConstraintSystem,
+    PoseidonConstants, SynthesisError,
+  },
+  gadgets::conditionally_select,
+};
 use ff::Field;
 
 use crate::{

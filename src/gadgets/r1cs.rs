@@ -4,9 +4,11 @@ use super::{
   nonnative::{bignat::BigNat, util::f_to_nat},
   utils::conditionally_select,
 };
-use crate::frontend::gadgets::{boolean::Boolean, num::AllocatedNum};
-use crate::frontend::{ConstraintSystem, SynthesisError};
 use crate::{
+  frontend::{
+    gadgets::{boolean::Boolean, num::AllocatedNum},
+    ConstraintSystem, SynthesisError,
+  },
   gadgets::ecc::AllocatedPoint,
   r1cs::RelaxedR1CSInstance,
   traits::{commitment::CommitmentTrait, Engine, Group, ROCircuitTrait},

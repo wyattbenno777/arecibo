@@ -2,18 +2,14 @@
 
 use std::marker::PhantomData;
 
-use crate::constants::NUM_FE_IN_EMULATED_POINT;
-use crate::constants::NUM_HASH_BITS;
-use crate::cyclefold::util::absorb_primary_commitment;
-use crate::gadgets::scalar_as_base;
-use crate::traits::commitment::CommitmentEngineTrait;
-use crate::traits::CurveCycleEquipped;
-use crate::traits::Dual;
-use crate::traits::ROTrait;
-use crate::Commitment;
 use crate::{
-  traits::{Engine, ROConstants},
-  CommitmentKey,
+  constants::{NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
+  cyclefold::util::absorb_primary_commitment,
+  gadgets::scalar_as_base,
+  traits::{
+    commitment::CommitmentEngineTrait, CurveCycleEquipped, Dual, Engine, ROConstants, ROTrait,
+  },
+  Commitment, CommitmentKey,
 };
 use ff::Field;
 

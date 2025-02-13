@@ -1,17 +1,15 @@
-use crate::errors::NovaError;
-use crate::gadgets::scalar_as_base;
-use crate::nebula::nifs::PrimaryRelaxedNIFS;
-use crate::r1cs::{R1CSShape, RelaxedR1CSWitness};
-use crate::traits::commitment::CommitmentEngineTrait;
-use crate::traits::{AbsorbInROTrait, ROConstants};
-use crate::CommitmentKey;
 use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_CHALLENGE_BITS},
   cyclefold::util::absorb_primary_commitment,
-  gadgets::{f_to_nat, nat_to_limbs},
-  r1cs::RelaxedR1CSInstance,
-  traits::{CurveCycleEquipped, Dual, Engine, ROTrait},
-  Commitment,
+  errors::NovaError,
+  gadgets::{f_to_nat, nat_to_limbs, scalar_as_base},
+  nebula::nifs::PrimaryRelaxedNIFS,
+  r1cs::{R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
+  traits::{
+    commitment::CommitmentEngineTrait, AbsorbInROTrait, CurveCycleEquipped, Dual, Engine,
+    ROConstants, ROTrait,
+  },
+  Commitment, CommitmentKey,
 };
 use ff::PrimeFieldBits;
 use serde::{Deserialize, Serialize};

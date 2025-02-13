@@ -8,21 +8,16 @@ use rand::{CryptoRng, RngCore};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
-use std::ops::SubAssign;
 use std::{
   cmp::Ordering,
-  ops::{AddAssign, Index, IndexMut, MulAssign},
+  ops::{AddAssign, Index, IndexMut, MulAssign, SubAssign},
 };
 
-use crate::traits::{AbsorbInROTrait, Engine};
-use crate::{
-  provider::util::iterators::DoubleEndedIteratorExt as _,
-  traits::{Group, TranscriptReprTrait},
-};
+use crate::traits::{AbsorbInROTrait, Engine, Group, TranscriptReprTrait};
 
 // ax^2 + bx + c stored as vec![c, b, a]
 // ax^3 + bx^2 + cx + d stored as vec![d, c, b, a]
-#[derive(Debug, Clone, PartialEq, Eq, RefCast)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, RefCast)]
 #[repr(transparent)]
 pub struct UniPoly<Scalar> {
   pub coeffs: Vec<Scalar>,
@@ -169,7 +164,13 @@ impl<Scalar: PrimeField> UniPoly<Scalar> {
   }
 
   pub fn evaluate(&self, r: &Scalar) -> Scalar {
-    self.coeffs.iter().rlc(r)
+    let mut eval = self.coeffs[0];
+    let mut power = *r;
+    for coeff in self.coeffs.iter().skip(1) {
+      eval += power * coeff;
+      power *= r;
+    }
+    eval
   }
 
   pub fn compress(&self) -> CompressedUniPoly<Scalar> {

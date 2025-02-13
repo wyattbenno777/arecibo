@@ -1,13 +1,8 @@
-use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
-use crate::traits::commitment::CommitmentTrait;
-use crate::traits::ROCircuitTrait;
 use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT},
-  cyclefold::gadgets::{
-    emulated::{self, AllocatedEmulRelaxedR1CSInstance},
-    AllocatedCycleFoldInstance,
-  },
-  gadgets::le_bits_to_num,
+  cyclefold::gadgets::{emulated::AllocatedEmulRelaxedR1CSInstance, AllocatedCycleFoldInstance},
+  frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
+  gadgets::{emulated::AllocatedEmulPoint, le_bits_to_num},
   nebula::{
     augmented_circuit::AugmentedCircuitParams,
     layer_2::{
@@ -20,7 +15,10 @@ use crate::{
     rs::StepCircuit,
   },
   r1cs::RelaxedR1CSInstance,
-  traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
+  traits::{
+    commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
+    ROConstantsCircuit,
+  },
 };
 use ff::Field;
 
@@ -226,8 +224,8 @@ where
       AllocatedNum<E::Scalar>,                                 // pp_digest
       AllocatedEmulRelaxedR1CSInstance<Dual<E>>,               // U1
       AllocatedEmulRelaxedR1CSInstance<Dual<E>>,               // U2
-      emulated::AllocatedEmulPoint<<Dual<E> as Engine>::GE>,   // E_new
-      emulated::AllocatedEmulPoint<<Dual<E> as Engine>::GE>,   // W_new
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,             // E_new
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,             // W_new
       AllocatedRelaxedR1CSInstanceBn<Dual<E>, NIO_CYCLE_FOLD>, // U2_secondary
       NIFSVerifierGadget<E>,                                   // nifs
     ),
@@ -266,7 +264,7 @@ where
       params.limb_width,
       params.n_limbs,
     )?;
-    let E_new = emulated::AllocatedEmulPoint::alloc(
+    let E_new = AllocatedEmulPoint::alloc(
       cs.namespace(|| "E_new"),
       folding_data
         .as_ref()
@@ -275,7 +273,7 @@ where
       params.limb_width,
       params.n_limbs,
     )?;
-    let W_new = emulated::AllocatedEmulPoint::alloc(
+    let W_new = AllocatedEmulPoint::alloc(
       cs.namespace(|| "W_new"),
       folding_data
         .as_ref()
