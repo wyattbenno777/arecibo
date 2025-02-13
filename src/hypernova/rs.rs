@@ -22,7 +22,10 @@ use crate::{
     augmented_circuit::{project_aug_circuit_size, AugmentedCircuit, AugmentedCircuitInputs},
     nifs::NIFS,
   },
-  r1cs::{CommitmentKeyHint, LR1CSInstance, R1CSInstance, R1CSWitness},
+  r1cs::{
+    CommitmentKeyHint, LR1CSInstance, R1CSInstance, R1CSWitness, RelaxedR1CSInstance,
+    RelaxedR1CSWitness,
+  },
   traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},
   AugmentedCircuitParams, CommitmentKey, DigestComputer, R1CSWithArity, ROConstants,
 };
@@ -149,6 +152,8 @@ where
   r_W: R1CSWitness<E>,
   l_u: R1CSInstance<E>,
   l_w: R1CSWitness<E>,
+  r_U_cyclefold: RelaxedR1CSInstance<Dual<E>>,
+  r_W_cyclefold: RelaxedR1CSWitness<Dual<E>>,
   z0: Vec<E::Scalar>,
   i: usize,
   zi: Vec<E::Scalar>,
@@ -203,11 +208,18 @@ where
       .map(|v| v.get_value().ok_or(SynthesisError::AssignmentMissing))
       .collect::<Result<Vec<_>, _>>()?;
 
+    // Get the running CycleFold instance and witness pair
+    let r1cs_cyclefold = &pp.circuit_shape_cyclefold.r1cs_shape;
+    let r_U_cyclefold = RelaxedR1CSInstance::default(&*pp.ck_cyclefold, r1cs_cyclefold);
+    let r_W_cyclefold = RelaxedR1CSWitness::default(r1cs_cyclefold);
+
     Ok(Self {
       r_W,
       r_U,
       l_w,
       l_u,
+      r_W_cyclefold,
+      r_U_cyclefold,
       z0: z0.to_vec(),
       i: 0,
       zi,
@@ -229,12 +241,17 @@ where
     // Parse Πi (self) as ((Ui, Wi), (ui, wi)) and then:
     //
     // 1. compute (Ui+1,Wi+1,T) ← NIFS.P(pk,(Ui,Wi),(ui,wi)),
-    let (nifs, (r_U, r_W)) = NIFS::prove(
-      &pp.circuit_shape.r1cs_shape,
+    let (nifs, (r_U, r_W), (r_U_cyclefold, r_W_cyclefold)) = NIFS::prove(
+      (
+        &pp.circuit_shape.r1cs_shape,
+        &pp.circuit_shape_cyclefold.r1cs_shape,
+      ),
+      &pp.ck_cyclefold,
       &pp.ro_consts,
       &pp.digest(),
       (&self.r_U, &self.r_W),
       (&self.l_u, &self.l_w),
+      (&self.r_U_cyclefold, &self.r_W_cyclefold),
     )?;
 
     // 2. compute (ui+1, wi+1) ← trace(F ′, (vk, Ui, ui, (i, z0, zi), ωi, T )),
