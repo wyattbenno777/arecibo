@@ -511,6 +511,7 @@ where
       &r_i,
     )?;
 
+    // Check that u references U in the output of the prior iteration
     let should_be_false = AllocatedBit::nor(
       cs.namespace(|| "check_non_base_pass nor base_case"),
       &check_non_base_pass,

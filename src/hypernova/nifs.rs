@@ -245,8 +245,8 @@ pub struct CycleFoldNIFS<E>
 where
   E: CurveCycleEquipped,
 {
-  comm_T: Commitment<Dual<E>>,
-  l_u: R1CSInstance<Dual<E>>,
+  pub(crate) comm_T: Commitment<Dual<E>>,
+  pub(crate) l_u: R1CSInstance<Dual<E>>,
 }
 
 impl<E> CycleFoldNIFS<E>

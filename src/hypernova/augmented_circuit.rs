@@ -1,9 +1,12 @@
 use super::{nifs::NIFS, rs::StepCircuit};
+use crate::cyclefold::gadgets::AllocatedCycleFoldData;
+use crate::cyclefold::util::FoldingData;
 use crate::frontend::AllocatedBit;
+use crate::gadgets::AllocatedRelaxedR1CSInstance;
 use crate::traits::ROCircuitTrait;
 use crate::{
   and_then_field,
-  constants::{DEFAULT_ABSORBS, NUM_HASH_BITS},
+  constants::{DEFAULT_ABSORBS, NIO_CYCLE_FOLD, NUM_HASH_BITS},
   frontend::{
     gadgets::Assignment, num::AllocatedNum, shape_cs::ShapeCS, Boolean, ConstraintSystem,
     SynthesisError,
@@ -52,6 +55,7 @@ where
   U: Option<LR1CSInstance<E>>,
   u: Option<R1CSInstance<E>>,
   W_new: Option<Commitment<E>>,
+  data_cyclefold: Option<FoldingData<Dual<E>>>,
 }
 
 impl<E> AugmentedCircuitInputs<E>
@@ -67,6 +71,7 @@ where
     U: Option<LR1CSInstance<E>>,
     u: Option<R1CSInstance<E>>,
     W_new: Option<Commitment<E>>,
+    data_cyclefold: Option<FoldingData<Dual<E>>>,
   ) -> Self {
     Self {
       pp_digest,
@@ -77,6 +82,7 @@ where
       U,
       u,
       W_new,
+      data_cyclefold,
     }
   }
 }
@@ -92,7 +98,7 @@ where
   ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
     // Allocate the witness
     let arity = self.step_circuit.arity();
-    let (pp_digest, i, z_0, z_i, nifs, U, u, W_new) =
+    let (pp_digest, i, z_0, z_i, nifs, U, u, W_new, data_cyclefold) =
       self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
 
     // Base case: i = 0
@@ -103,27 +109,32 @@ where
     let is_base_case = alloc_num_equals(cs.namespace(|| "is base case"), &i, &zero)?;
     // ////////////////////////////////////
     // 2. Get the default running instance.
-    let U_default = self.synthesize_base_case(cs.namespace(|| "base case"))?;
+    let (U_default, U_cyclefold_default) =
+      self.synthesize_base_case(cs.namespace(|| "base case"))?;
 
     // Non-base case: i > 0
     // ////////////////////
     //
-    // 1. Hash check
+    // 1. Compute Hash check
     // 2. U <- NIFS.V
-    let (U_non_base_case, check_non_base_pass) = self.synthesize_non_base_case(
-      cs.namespace(|| "non base case"),
-      &pp_digest,
-      &i,
-      &z_0,
-      &z_i,
-      &self.ro_consts,
-      &nifs,
-      &U,
-      &u,
-      W_new,
-    )?;
+    let (U_non_base_case, U_cyclefold_non_base_case, check_non_base_pass) = self
+      .synthesize_non_base_case(
+        cs.namespace(|| "non base case"),
+        &pp_digest,
+        &i,
+        &z_0,
+        &z_i,
+        &self.ro_consts,
+        &nifs,
+        &U,
+        &u,
+        W_new,
+        &data_cyclefold,
+      )?;
 
-    // Check non-base case hash check
+    // Check that u references U in the output of the prior iteration
+    //
+    // Hash check: u.X[0] = H(pp, i, z0, zi, U) && u.X[1] = H(pp, i, U_cyclefold)
     let should_be_false = AllocatedBit::nor(
       cs.namespace(|| "check_non_base_pass nor base_case"),
       &check_non_base_pass,
@@ -136,37 +147,49 @@ where
       |lc| lc,
     );
 
-    // select the new running primary instance
+    // Select the new running instances.
+    // /////////////////////////////////
+    //
+    // 1. Select the new U based on whether this is the base case
+    // 2. Select the new U_cyclefold based on whether this is the base case
     let U_new = U_default.conditionally_select(
       cs.namespace(|| "compute U_new"),
       &U_non_base_case,
       &Boolean::from(is_base_case.clone()),
     )?;
+    let U_new_cyclefold = U_cyclefold_default.conditionally_select(
+      cs.namespace(|| "compute U_new_cyclefold"),
+      &U_cyclefold_non_base_case,
+      &Boolean::from(is_base_case.clone()),
+    )?;
 
-    // Compute i++
-    let i_new = increment(cs.namespace(|| "i++"), &i)?;
-
-    // Compute z_{i+1}
+    // Synthesize the step circuit (F) and compute the next output.
+    // ///////////////////////////////////////////////////////////
+    //
+    // 1. Select the z input based on whether this is the base case
+    // 2. Compute the next output z_next ← F(z_input)
     let z_input = conditionally_select_vec(
       cs.namespace(|| "select input to F"),
       &z_0,
       &z_i,
       &Boolean::from(is_base_case.clone()),
     )?;
-
-    // Synthesize the step circuit (F) and compute the next output zi+1 ← F(zi,ωi).
     let z_next = self
       .step_circuit
       .synthesize(&mut cs.namespace(|| "F"), &z_input)?;
-
+    // //////////////////////////////////////////////////
     // Check step_circuit_i (F_i) conforms to structure F
     if z_next.len() != arity {
       return Err(SynthesisError::IncompatibleLengthVector(
         "z_next".to_string(),
       ));
     }
+    // Compute i++
+    let i_new = increment(cs.namespace(|| "i++"), &i)?;
 
-    // output hash
+    // Output hash
+    // ///////////
+    // u.X[0] = H(pp, i, z0, zi, U)
     let hash = self.calculate_hash(
       cs.namespace(|| "calculate_hash"),
       &pp_digest,
@@ -176,8 +199,18 @@ where
       &U_new,
     )?;
     hash.inputize(cs.namespace(|| "u.x[0] = hash"))?;
-    // TODO: Cyclefold
-    zero.inputize(cs.namespace(|| "zero_inputized"))?;
+    // //////////////////////////////////////////////////////////////////
+    // Calculate the second component of the public IO as the hash of the
+    // calculated CycleFold running instance
+    //
+    // u.X[1] = H(pp, i, U_cyclefold)
+    let hash_cyclefold = self.calculate_hash_cyclefold(
+      cs.namespace(|| "calculate_hash_cyclefold"),
+      &pp_digest,
+      &i_new,
+      &U_new_cyclefold,
+    )?;
+    hash_cyclefold.inputize(cs.namespace(|| "u.x[1] = hash_cyclefold"))?;
     Ok(z_next)
   }
 
@@ -193,19 +226,31 @@ where
     U: &AllocatedLR1CSInstance<E>,
     u: &AllocatedR1CSInstance<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-  ) -> Result<(AllocatedLR1CSInstance<E>, AllocatedBit), SynthesisError> {
+    data_cyclefold: &AllocatedCycleFoldData<Dual<E>>,
+  ) -> Result<
+    (
+      AllocatedLR1CSInstance<E>,
+      AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+      AllocatedBit,
+    ),
+    SynthesisError,
+  > {
     // Hash check: u.X[0] = H(pp, i, z0, zi, U)
-    let hash_check = self.first_hash_check(
-      cs.namespace(|| "first_hash_check"),
+    //             u.X[1] = H(pp, i, U_cyclefold)
+    let io_check = self.io_check(
+      cs.namespace(|| "io_check"),
       pp_digest,
       i,
       z_0,
       z_i,
       U,
       u,
+      &data_cyclefold.U,
     )?;
 
-    // NIFS.V
+    // # NIFS.V
+    //
+    // Compute folded U and U_cyclefold
     let U = nifs.verify(
       cs.namespace(|| "NIFS.V"),
       pp_digest,
@@ -215,10 +260,49 @@ where
       W_new,
       self.num_rounds,
     )?;
-    Ok((U, hash_check))
+    let U_cyclefold = data_cyclefold.apply_fold(
+      cs.namespace(|| "fold u_cyclefold into U_cyclefold"),
+      self.ro_consts.clone(),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    Ok((U, U_cyclefold, io_check))
   }
 
-  pub fn first_hash_check<CS: ConstraintSystem<E::Scalar>>(
+  pub fn io_check<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+    pp_digest: &AllocatedNum<E::Scalar>,
+    i: &AllocatedNum<E::Scalar>,
+    z_0: &[AllocatedNum<E::Scalar>],
+    z_i: &[AllocatedNum<E::Scalar>],
+    U: &AllocatedLR1CSInstance<E>,
+    u: &AllocatedR1CSInstance<E>,
+    U_cyclefold: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+  ) -> Result<AllocatedBit, SynthesisError> {
+    // Hash check: u.X[0] = H(pp, i, z0, zi, U)
+    let hash_check =
+      self.hash_check(cs.namespace(|| "hash_check"), pp_digest, i, z_0, z_i, U, u)?;
+
+    // Hash check: u.X[1] = H(pp, i, U_cyclefold)
+    let hash_check_cyclefold = self.hash_check_cyclefold(
+      cs.namespace(|| "hash_check_cyclefold"),
+      pp_digest,
+      i,
+      U_cyclefold,
+      u,
+    )?;
+
+    // Check for u_i.x0 && u_i.x1
+    let io_check = AllocatedBit::and(
+      cs.namespace(|| "both IOs match"),
+      &hash_check,
+      &hash_check_cyclefold,
+    )?;
+    Ok(io_check)
+  }
+
+  pub fn hash_check<CS: ConstraintSystem<E::Scalar>>(
     &self,
     mut cs: CS,
     pp_digest: &AllocatedNum<E::Scalar>,
@@ -232,6 +316,23 @@ where
     let hash_check = alloc_num_equals(
       cs.namespace(|| "u.X[0] = H(params, i, z0, zi, U)"),
       &u.x0,
+      &hash,
+    )?;
+    Ok(hash_check)
+  }
+
+  pub fn hash_check_cyclefold<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+    pp_digest: &AllocatedNum<E::Scalar>,
+    i: &AllocatedNum<E::Scalar>,
+    U: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+    u: &AllocatedR1CSInstance<E>,
+  ) -> Result<AllocatedBit, SynthesisError> {
+    let hash = self.calculate_hash_cyclefold(cs.namespace(|| "calculate_hash"), pp_digest, i, U)?;
+    let hash_check = alloc_num_equals(
+      cs.namespace(|| "u.X[1] = H(params, i, U_cyclefold)"),
+      &u.x1,
       &hash,
     )?;
     Ok(hash_check)
@@ -261,6 +362,22 @@ where
     Ok(hash)
   }
 
+  pub fn calculate_hash_cyclefold<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+    pp_digest: &AllocatedNum<E::Scalar>,
+    i: &AllocatedNum<E::Scalar>,
+    U: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+  ) -> Result<AllocatedNum<E::Scalar>, SynthesisError> {
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(self.ro_consts.clone(), DEFAULT_ABSORBS);
+    ro.absorb(pp_digest);
+    ro.absorb(i);
+    U.absorb_in_ro(cs.namespace(|| "absorb U"), &mut ro)?;
+    let hash_bits = ro.squeeze(cs.namespace(|| "primary hash bits"), NUM_HASH_BITS)?;
+    let hash = le_bits_to_num(cs.namespace(|| "primary hash"), &hash_bits)?;
+    Ok(hash)
+  }
+
   fn alloc_witness<CS: ConstraintSystem<E::Scalar>>(
     &self,
     mut cs: CS,
@@ -275,6 +392,7 @@ where
       AllocatedLR1CSInstance<E>,                   // U
       AllocatedR1CSInstance<E>,                    // u
       AllocatedEmulPoint<<Dual<E> as Engine>::GE>, // W_new
+      AllocatedCycleFoldData<Dual<E>>,             // data_cyclefold
     ),
     SynthesisError,
   > {
@@ -321,20 +439,38 @@ where
       self.params.limb_width,
       self.params.n_limbs,
     )?;
-    Ok((pp_digest, i, z_0, z_i, nifs, U, u, W_new))
+
+    let data_cyclefold = AllocatedCycleFoldData::alloc(
+      cs.namespace(|| "data_c_1"),
+      and_then_field!(self.inputs, data_cyclefold),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    Ok((pp_digest, i, z_0, z_i, nifs, U, u, W_new, data_cyclefold))
   }
 
   pub fn synthesize_base_case<CS: ConstraintSystem<E::Scalar>>(
     &self,
     mut cs: CS,
-  ) -> Result<AllocatedLR1CSInstance<E>, SynthesisError> {
+  ) -> Result<
+    (
+      AllocatedLR1CSInstance<E>,
+      AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+    ),
+    SynthesisError,
+  > {
     let U_default = AllocatedLR1CSInstance::default(
       cs.namespace(|| "Allocated U_default"),
       self.params.limb_width,
       self.params.n_limbs,
       self.num_rounds,
     )?;
-    Ok(U_default)
+    let U_cyclefold_default = AllocatedRelaxedR1CSInstance::default(
+      cs.namespace(|| "Allocate U_c_default"),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    Ok((U_default, U_cyclefold_default))
   }
 
   pub const fn new(

@@ -1,12 +1,13 @@
 //! IVC scheme with Hypernova
 //!
 //! This module implements a SNARK that proves the correct execution of an incremental computation
+use crate::traits::AbsorbInROTrait;
 use crate::{
   constants::{
     BASE_CONSTRAINTS, BN_LIMB_WIDTH, BN_N_LIMBS, DEFAULT_ABSORBS,
     MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT, MAX_CONSTRAINTS_PER_SUMCHECK_ROUND, NUM_HASH_BITS,
   },
-  cyclefold::circuit::CycleFoldCircuit,
+  cyclefold::{circuit::CycleFoldCircuit, util::FoldingData},
   digest::SimpleDigestible,
   errors::NovaError,
   frontend::{
@@ -191,6 +192,7 @@ where
       None,
       None,
       None,
+      None,
     );
     let circuit = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
@@ -256,6 +258,11 @@ where
 
     // 2. compute (ui+1, wi+1) ← trace(F ′, (vk, Ui, ui, (i, z0, zi), ωi, T )),
     let mut cs = SatisfyingAssignment::<E>::new();
+    let cyclefold_data = FoldingData::new(
+      self.r_U_cyclefold.clone(),
+      nifs.cyclefold_nifs.l_u.clone(),
+      nifs.cyclefold_nifs.comm_T,
+    );
     let inputs: AugmentedCircuitInputs<E> = AugmentedCircuitInputs::new(
       pp.digest(),
       E::Scalar::from(self.i as u64),
@@ -265,6 +272,7 @@ where
       Some(self.r_U.clone()),
       Some(self.l_u.clone()),
       Some(r_U.comm_W),
+      Some(cyclefold_data),
     );
     let circuit = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
@@ -281,6 +289,8 @@ where
     self.r_W = r_W;
     self.l_u = l_u;
     self.l_w = l_w;
+    self.r_U_cyclefold = r_U_cyclefold;
+    self.r_W_cyclefold = r_W_cyclefold;
 
     // Update statement being proven
     self.zi = zi
@@ -331,27 +341,47 @@ where
     }
     self.r_U.absorb_in_ro(&mut ro);
     let hash = ro.squeeze(NUM_HASH_BITS);
+    // //////////////////////////////////
+    // 2. Compute H(pp, i, r_U_cyclefold)
+    let mut ro = <Dual<E> as Engine>::RO::new(pp.ro_consts.clone(), DEFAULT_ABSORBS);
+    ro.absorb(pp.digest());
+    self.r_U_cyclefold.absorb_in_ro(&mut ro);
+    let hash_cyclefold = ro.squeeze(NUM_HASH_BITS);
     // ////////////////////////////////////////////
-    // 2. Check if H(pp, i, z0, zi, r_U) = l_u.X[0]
-    if scalar_as_base::<Dual<E>>(hash) != self.l_u.X[0] {
+    // 3. Check if H(pp, i, z0, zi, r_U) = l_u.X[0] && H(pp, i, r_U_cyclefold) = l_u.X[1]
+    if scalar_as_base::<Dual<E>>(hash) != self.l_u.X[0]
+      || scalar_as_base::<Dual<E>>(hash_cyclefold) != self.l_u.X[1]
+    {
       return Err(NovaError::ProofVerifyError);
     }
 
     // Verify the satisfiability of running relaxed instances, and the final primary instance.
-    let (res_r_U, res_l_u) = rayon::join(
+    let (res_r_U, (res_l_u, res_r_U_cyclefold)) = rayon::join(
       || {
         pp.circuit_shape
           .r1cs_shape
           .is_sat_linearized(&pp.ck, &self.r_U, &self.r_W)
       },
       || {
-        pp.circuit_shape
-          .r1cs_shape
-          .is_sat(&pp.ck, &self.l_u, &self.l_w)
+        rayon::join(
+          || {
+            pp.circuit_shape
+              .r1cs_shape
+              .is_sat(&pp.ck, &self.l_u, &self.l_w)
+          },
+          || {
+            pp.circuit_shape_cyclefold.r1cs_shape.is_sat_relaxed(
+              &pp.ck_cyclefold,
+              &self.r_U_cyclefold,
+              &self.r_W_cyclefold,
+            )
+          },
+        )
       },
     );
     res_r_U?;
     res_l_u?;
+    res_r_U_cyclefold?;
     Ok(self.zi.to_vec())
   }
 }
