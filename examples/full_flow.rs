@@ -9,9 +9,9 @@
 /// - generate the Solidity contract that verifies the proof
 /// - verify the proof in the EVM
 use arecibo::{
-  frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
+  frontend::{num::AllocatedNum, Circuit, ConstraintSystem, SynthesisError},
   nebula::rs::{PublicParams, RecursiveSNARK, StepCircuit},
-  onchain::{decider::{prepare_calldata, Decider}, eth::evm::{compile_solidity, Evm}, utils::{get_formatted_calldata, get_function_selector_for_nova_cyclefold_verifier}, verifiers::{groth16::SolidityGroth16VerifierKey, kzg::SolidityKZGVerifierKey, nebula::{get_decider_template_for_cyclefold_decider, NovaCycleFoldVerifierKey}}},
+  onchain::{decider::{prepare_calldata, Decider}, decider_circuit::DeciderCircuit, eth::evm::{compile_solidity, Evm}, utils::{get_formatted_calldata, get_function_selector_for_nova_cyclefold_verifier}, verifiers::{groth16::SolidityGroth16VerifierKey, kzg::SolidityKZGVerifierKey, nebula::{get_decider_template_for_cyclefold_decider, NovaCycleFoldVerifierKey}}},
   provider::{Bn256EngineKZG, GrumpkinEngine},
   traits::{snark::RelaxedR1CSSNARKTrait, Engine},
 };
@@ -216,3 +216,4 @@ fn main() {
   let s = get_formatted_calldata(calldata.clone());
   fs::write("./examples/solidity-calldata.inputs", s.join(",\n")).expect("");
 }
+

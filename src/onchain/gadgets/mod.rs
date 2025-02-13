@@ -61,7 +61,7 @@ impl KZGChallengesGadget {
 
     U_i.comm_W.absorb_in_ro(cs.namespace(|| "absorb_W"), &mut ro)?;
     let rw = ro.squeeze(cs.namespace(|| "squeeze_W"), NUM_HASH_BITS)?;
-    let alloc_rw = le_bits_to_num(cs.namespace(|| "bits_to_num"), &rw)?;
+    let alloc_rw = le_bits_to_num(cs.namespace(|| "bits_to_num rw"), &rw)?;
 
     let mut ro = <Dual<E> as Engine>::ROCircuit::new(
       ROConstantsCircuit::<Dual<E>>::default(),
@@ -70,7 +70,7 @@ impl KZGChallengesGadget {
 
     U_i.comm_E.absorb_in_ro(cs.namespace(|| "absorb_E"), &mut ro)?;
     let re = ro.squeeze(cs.namespace(|| "squeeze_E"), NUM_HASH_BITS)?;
-    let alloc_re = le_bits_to_num(cs.namespace(|| "bits_to_num"), &re)?;
+    let alloc_re = le_bits_to_num(cs.namespace(|| "bits_to_num re"), &re)?;
 
     // Trivial constraint to ensure that the variables are used 
     cs.enforce(
@@ -98,8 +98,6 @@ impl EvalGadget {
 
     // Evaluate the polynomial at the given point
     let eval = domain.evaluate_at(point);
-    println!("challenge: {:?}", point);
-    println!("eval native: {:?}", eval);
     eval
   }
 
@@ -112,6 +110,20 @@ impl EvalGadget {
     CS: ConstraintSystem<E::Scalar>,
     E::Scalar: GpuName,
   {
+    // // Convert AllocatedNum to native field elements
+    // let native_v = v.iter().map(|x| x.get_value().unwrap_or(E::Scalar::from(0))).collect::<Vec<_>>();
+    // let mut domain = EvaluationDomain::from_coeffs(native_v).expect("Failed to create evaluation domain");
+
+    // // Perform FFT to transform the polynomial into evaluation form
+    // let worker = Worker::new();
+    // domain.ifft(&worker, &mut None).expect("FFT failed");
+
+    // // Evaluate the polynomial at the given point
+    // let point_value = point.get_value().unwrap_or(E::Scalar::from(0));
+    // let eval = domain.evaluate_at(point_value);
+
+    // // Convert the result back to AllocatedNum
+    // let alloc_eval = AllocatedNum::alloc(&mut cs, || Ok(eval))?;
     let alloc_one = AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(1)))?;
 
     let native_v = v.iter().map(|x| x.get_value().unwrap_or(E::Scalar::from(0))).collect::<Vec<_>>();
@@ -121,14 +133,12 @@ impl EvalGadget {
     // TODO: Check if nth_root_of_unity is faster than EvaluationDomain::from_coeffs
     // let omega_1 = nth_root_of_unity::<E::Scalar>(n).ok_or(SynthesisError::PolynomialDegreeTooLarge)?;
     v.resize(n, AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(0)))?);
-    println!("Allocated one: {:?}", alloc_one.get_value());
 
     let log2_v = usize::BITS - v.len().leading_zeros() - 1;
     let alloc_domain = AllocatedRadix2Domain::new(&mut cs, omega, log2_v as u64, alloc_one)?;
 
     let alloc_evaluations = AllocatedEvaluations::from_vec_and_domain(v, alloc_domain, true);
     let eval = alloc_evaluations.interpolate_and_evaluate(&mut cs, point)?;
-    println!("2. Eval gadget: {:?}", eval.get_value());
     Ok(eval)
   }
 }
@@ -188,10 +198,7 @@ impl<E: PairingEngine> KZGProof<E> {
     } else {
       remainder_poly.coeffs()[0]
     };
-
-    println!("challenge 1: {:?}", challenge);
-    println!("eval 1: {:?}", eval);
-
+    
     if witness_poly.degree() >= params.powers_of_g().len() {
       return Err(PCSError::LengthError);
     }

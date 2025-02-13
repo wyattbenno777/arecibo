@@ -837,7 +837,6 @@ impl<E: Engine> RelaxedR1CSInstance<E> {
   /// Produces a default `RelaxedR1CSInstance` given `R1CSGens` and `R1CSShape`
   pub fn default(_ck: &CommitmentKey<E>, S: &R1CSShape<E>) -> Self {
     let (comm_W, comm_E) = (Commitment::<E>::default(), Commitment::<E>::default());
-    println!("S.num_io: {}", S.num_io);
     Self {
       comm_W,
       comm_E,

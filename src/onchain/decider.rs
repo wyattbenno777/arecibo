@@ -1,6 +1,9 @@
 //! Implements components to enable the compression-step for IVC proofs
 
-use super::{decider_circuit::DeciderCircuit, gadgets::{DeciderNovaGadget, KZGProof}};
+use super::{
+  decider_circuit::DeciderCircuit,
+  gadgets::{DeciderNovaGadget, KZGProof},
+};
 use crate::{
   errors::NovaError,
   frontend::groth16::{
@@ -213,21 +216,29 @@ pub fn prepare_calldata(
 mod tests {
   use std::sync::Arc;
 
-use super::*;
+  use super::*;
   use crate::{
-    constants::{BN_LIMB_WIDTH, BN_N_LIMBS}, cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance, frontend::{
-      num::AllocatedNum, r1cs::NovaShape, shape_cs::ShapeCS, test_cs::TestConstraintSystem, Circuit, ConstraintSystem, SynthesisError
-    }, onchain::gadgets::{EvalGadget, KZGChallengesGadget}, provider::Bn256EngineKZG, traits::{snark::RelaxedR1CSSNARKTrait, Dual}
+    constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
+    cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance,
+    frontend::{
+      num::AllocatedNum, r1cs::NovaShape, shape_cs::ShapeCS, test_cs::TestConstraintSystem,
+      Circuit, ConstraintSystem, SynthesisError,
+    },
+    nebula::rs::StepCircuit,
+    onchain::gadgets::{EvalGadget, KZGChallengesGadget},
+    provider::{Bn256EngineKZG, GrumpkinEngine},
+    traits::{snark::RelaxedR1CSSNARKTrait, Dual},
   };
   use ff::Field;
   use halo2curves::bn256::{Bn256, Fr};
-
   use rand::thread_rng;
 
   type E1 = Bn256EngineKZG;
+  type E2 = GrumpkinEngine;
   type EE1 = crate::provider::hyperkzg::EvaluationEngine<Bn256, E1>;
+  type EE2 = crate::provider::ipa_pc::EvaluationEngine<E2>;
   type S1 = crate::spartan::snark::RelaxedR1CSSNARK<E1, EE1>; // non-preprocessing SNARK
-
+  type S2 = crate::spartan::snark::RelaxedR1CSSNARK<E2, EE2>; // non-preprocessing SNARK
   /// Test circuit to be folded
   #[derive(Clone, Debug)]
   pub struct TestChallengeCircuit {
@@ -267,12 +278,12 @@ use super::*;
       self,
       cs: &mut CS,
     ) -> Result<(), SynthesisError> {
-      let kzg_alloc_rw = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges"), || {
+      let kzg_alloc_rw = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges rw"), || {
         Ok(self.challenge_w)
       })?;
       kzg_alloc_rw.inputize(cs.namespace(|| "kzg challenge W"))?;
 
-      let kzg_alloc_re = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges"), || {
+      let kzg_alloc_re = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges re"), || {
         Ok(self.challenge_e)
       })?;
       kzg_alloc_re.inputize(cs.namespace(|| "kzg challenge E"))?;
@@ -290,11 +301,21 @@ use super::*;
         alloc_relaxed_instance,
       )?;
 
+      println!(
+        "Equal test challenges rw: {:?}",
+        kzg_alloc_rw.get_value() == alloc_rw.get_value()
+      );
+
       cs.enforce(
         || "cW ≡ H(W.{x, y})",
         |lc| lc,
         |lc| lc,
         |lc| lc + kzg_alloc_rw.get_variable() - alloc_rw.get_variable(),
+      );
+
+      println!(
+        "Equal test challenges re: {:?}",
+        kzg_alloc_re.get_value() == alloc_re.get_value()
       );
 
       cs.enforce(
@@ -307,13 +328,32 @@ use super::*;
     }
   }
 
+  struct TrivialCircuit {
+    a: Option<Fr>,
+    b: Option<Fr>,
+    c: Option<Fr>,
+  }
+
+  impl Circuit<Fr> for TrivialCircuit {
+    fn synthesize<CS: ConstraintSystem<Fr>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+      // Allocate the variables for a, b, and c
+      let a = cs.alloc(|| "a", || self.a.ok_or(SynthesisError::AssignmentMissing))?;
+      let b = cs.alloc(|| "b", || self.b.ok_or(SynthesisError::AssignmentMissing))?;
+      let c = cs.alloc(|| "c", || self.c.ok_or(SynthesisError::AssignmentMissing))?;
+
+      // Enforce the constraint a * b = c
+      cs.enforce(|| "a * b = c", |lc| lc + a, |lc| lc + b, |lc| lc + c);
+
+      Ok(())
+    }
+  }
+
   #[test]
-  fn test_challenges() -> Result<(), SynthesisError> {
+  fn test_kzg_challenges_with_groth16_proof() -> Result<(), SynthesisError> {
     let circuit = TestChallengeCircuit::default();
     let mut shape_cs = ShapeCS::new();
     let _ = circuit.synthesize(&mut shape_cs);
     let (r1cs_shape, ck) = shape_cs.r1cs_shape(&*S1::ck_floor());
-    println!("r1cs_shape.num_io: {}", r1cs_shape.num_io);
     let relaxed_instance = RelaxedR1CSInstance::default(&ck, &r1cs_shape);
 
     let (rw_native, re_native) =
@@ -329,42 +369,123 @@ use super::*;
       &groth16_proof,
       &[rw_native, re_native],
     )?;
-    println!("verified: {}", verified);
     if !verified {
       return Err(SynthesisError::MalformedProofs("".to_string()));
     }
     Ok(())
   }
 
-
   #[test]
-  fn test_eval() {
+  fn test_eval_proof_with_challenge() {
     let circuit = TestChallengeCircuit::default();
     let mut shape_cs = ShapeCS::new();
     let _ = circuit.synthesize(&mut shape_cs);
     let (r1cs_shape, ck) = shape_cs.r1cs_shape(&*S1::ck_floor());
     let (kzg_pk, _) = EvaluationEngine::<Bn256, Bn256EngineKZG>::setup(Arc::new(ck.clone()));
-    let (relaxed_instance, relaxed_witness) = r1cs_shape.sample_random_instance_witness(&ck).unwrap();
+    let (relaxed_instance, relaxed_witness) =
+      r1cs_shape.sample_random_instance_witness(&ck).unwrap();
 
     let (challenge_w, challenge_e) =
-    KZGChallengesGadget::get_challenges_native(relaxed_instance.clone());
+      KZGChallengesGadget::get_challenges_native(relaxed_instance.clone());
 
     let eval_w = EvalGadget::evaluate_native(relaxed_witness.clone().W, challenge_w);
     let eval_e = EvalGadget::evaluate_native(relaxed_witness.clone().E, challenge_e);
-    
-    let proof_w = KZGProof::prove_with_challenge(
-      &kzg_pk,
-      challenge_w,
-      &relaxed_witness.W,
-    ).unwrap();
 
-    let proof_e = KZGProof::prove_with_challenge( 
-      &kzg_pk,
-      challenge_e,
-      &relaxed_witness.E,
-    ).unwrap();
+    let proof_w = KZGProof::prove_with_challenge(&kzg_pk, challenge_w, &relaxed_witness.W).unwrap();
+
+    let proof_e = KZGProof::prove_with_challenge(&kzg_pk, challenge_e, &relaxed_witness.E).unwrap();
 
     assert_eq!(eval_w, proof_w.eval);
     assert_eq!(eval_e, proof_e.eval);
+  }
+
+  #[test]
+  fn test_eval_gadget() {
+    let circuit = TrivialCircuit {
+      a: Some(Fr::from(2)),
+      b: Some(Fr::from(3)),
+      c: Some(Fr::from(6)),
+    };
+    let mut cs = TestConstraintSystem::new();
+    circuit.synthesize(&mut cs).unwrap();
+    let random_vec = vec![Fr::random(&mut thread_rng()); 10];
+    let random_allocated_vec = random_vec
+      .iter()
+      .enumerate()
+      .map(|(i, x)| {
+        AllocatedNum::alloc(cs.namespace(|| format!("random_allocated_vec_{i}")), || {
+          Ok(*x)
+        })
+        .unwrap()
+      })
+      .collect::<Vec<_>>();
+    let point = Fr::random(&mut thread_rng());
+    let alloc_point = AllocatedNum::alloc(cs.namespace(|| "alloc_point"), || Ok(point)).unwrap();
+    let eval_native = EvalGadget::evaluate_native(random_vec, point);
+    let eval_gadget =
+      EvalGadget::evaluate_gadget::<_, Bn256EngineKZG>(&mut cs, random_allocated_vec, &alloc_point)
+        .unwrap();
+    assert!(cs.is_satisfied());
+    assert_eq!(eval_native, eval_gadget.get_value().unwrap());
+  }
+
+  /// Test circuit to be folded
+  #[derive(Clone, Copy, Debug)]
+  pub struct CubicFCircuit {}
+
+  impl CubicFCircuit {
+    fn new() -> Self {
+      Self {}
+    }
+  }
+  impl StepCircuit<halo2curves::bn256::Fr> for CubicFCircuit {
+    fn arity(&self) -> usize {
+      1
+    }
+    fn synthesize<CS: ConstraintSystem<halo2curves::bn256::Fr>>(
+      &self,
+      cs: &mut CS,
+      z_in: &[AllocatedNum<halo2curves::bn256::Fr>],
+    ) -> Result<Vec<AllocatedNum<halo2curves::bn256::Fr>>, SynthesisError> {
+      let five = AllocatedNum::alloc(cs.namespace(|| "five"), || {
+        Ok(halo2curves::bn256::Fr::from(5u64))
+      })?;
+      let z_i = z_in[0].clone();
+      let z_i_sq = z_i.mul(cs.namespace(|| "z_i_sq"), &z_i)?;
+      let z_i_cube = z_i_sq.mul(cs.namespace(|| "z_i_cube"), &z_i)?;
+      let result = z_i_cube.add(cs.namespace(|| "add z_i"), &z_i)?;
+      let result = result.add(cs.namespace(|| "add five"), &five)?;
+
+      Ok(vec![result])
+    }
+    fn non_deterministic_advice(&self) -> Vec<halo2curves::bn256::Fr> {
+      vec![]
+    }
+  }
+  #[test]
+  fn test_decider_proof() {
+    let num_steps = 5;
+    let f_circuit = CubicFCircuit::new();
+    let rs_pp = PublicParams::<E1>::setup(&f_circuit, &*S1::ck_floor(), &*S2::ck_floor());
+    let z0 = vec![<Bn256EngineKZG as Engine>::Scalar::from(3u64)];
+    let mut recursive_snark: RecursiveSNARK<Bn256EngineKZG> =
+      RecursiveSNARK::<Bn256EngineKZG>::new(&rs_pp, &f_circuit, &z0).unwrap();
+    let mut IC_i = <Bn256EngineKZG as Engine>::Scalar::ZERO;
+    for _i in 0..num_steps {
+      recursive_snark
+        .prove_step(&rs_pp, &f_circuit, IC_i)
+        .unwrap();
+
+      IC_i = recursive_snark.increment_commitment(&rs_pp, &f_circuit);
+    }
+
+    let res = recursive_snark.verify(&rs_pp, num_steps, &z0, IC_i);
+    println!("RecursiveSNARK::verify: {:?}", res.is_ok(),);
+    res.unwrap();
+    let decider_circuit =
+      DeciderCircuit::<Bn256EngineKZG>::new(&rs_pp, recursive_snark.clone()).unwrap();
+    let mut cs = TestConstraintSystem::new();
+    let _ = decider_circuit.synthesize(&mut cs);
+    assert!(cs.is_satisfied());
   }
 }

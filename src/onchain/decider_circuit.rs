@@ -177,12 +177,8 @@ where
 
     let (rw, re) =
       KZGChallengesGadget::get_challenges_native(r_U_primary.clone());
-    println!("Challenges rw: {:?}", rw);
-    println!("Challenges re: {:?}", re);
     let rw_eval = EvalGadget::evaluate_native(r_W_primary.clone().W, rw);
     let re_eval = EvalGadget::evaluate_native(r_W_primary.clone().E, re);
-    println!("Evaluations rw: {:?}", rw_eval);
-    println!("Evaluations re: {:?}", re_eval);
 
     Ok(Self {
       arith: pp.circuit_shape_primary.r1cs_shape.clone(),
@@ -325,9 +321,9 @@ where
     // Step 7.1: Check correct computation of the KZG challenges.
     //           - cE ≡ H(E.{x, y}), cW ≡ H(W.{x, y}).
 
-    let kzg_alloc_rw = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges"), || Ok(self.kzg_challenges.0))?;
+    let kzg_alloc_rw = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges rw"), || Ok(self.kzg_challenges.0))?;
     kzg_alloc_rw.inputize(cs.namespace(|| "kzg_alloc_rw"))?;
-    let kzg_alloc_re = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges"), || Ok(self.kzg_challenges.1))?;
+    let kzg_alloc_re = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges re"), || Ok(self.kzg_challenges.1))?;
     kzg_alloc_re.inputize(cs.namespace(|| "kzg_alloc_re"))?;
 
     let U_i1: AllocatedEmulRelaxedR1CSInstance<Dual<E>> = AllocatedEmulRelaxedR1CSInstance::alloc(
@@ -367,6 +363,15 @@ where
         || Ok(*x)
       )
     }).collect::<Result<Vec<_>, _>>()?;
+    
+    for x in &W_i1_W {
+      cs.enforce(
+        || "W_i1.W",
+        |lc| lc + x.get_variable(),
+        |lc| lc,
+        |lc| lc,
+      );
+    }
 
     let W_i1_E = self.W_i1.E.iter().map(|x| {
       AllocatedNum::alloc(
@@ -375,10 +380,17 @@ where
       )
     }).collect::<Result<Vec<_>, _>>()?;
 
-    let alloc_rw_eval = EvalGadget::evaluate_gadget::<&mut CS, E>(cs,W_i1_W.clone(), &kzg_alloc_rw)?;
-    println!("alloc_rw_eval: {:?}", alloc_rw_eval.get_value());
-    println!("kzg_alloc_rw_eval: {:?}", kzg_alloc_rw_eval.get_value());
-    println!("equal vals: {:?}", kzg_alloc_rw_eval.get_value() == alloc_rw_eval.get_value());
+    for x in &W_i1_E {
+      cs.enforce(
+        || "W_i1.E",
+        |lc| lc + x.get_variable(),
+        |lc| lc,
+        |lc| lc,
+      );
+    }
+
+    let alloc_rw_eval = EvalGadget::evaluate_gadget::<&mut CS, E>(cs,W_i1_W, &kzg_alloc_rw)?;
+    println!("Equal rw eval vals: {:?}", kzg_alloc_rw_eval.get_value() == alloc_rw_eval.get_value());
     cs.enforce(
       || "evalW == pW(cW)",
       |lc| lc,
@@ -387,13 +399,11 @@ where
     );
 
     let alloc_re_eval = EvalGadget::evaluate_gadget::<&mut CS, E>(cs, W_i1_E, &kzg_alloc_re)?;
-    println!("alloc_re_eval: {:?}", alloc_re_eval.get_value());
-    println!("kzg_alloc_re_eval: {:?}", kzg_alloc_re_eval.get_value());
-    println!("equal vals: {:?}", kzg_alloc_re_eval.get_value() == alloc_re_eval.get_value());
+    println!("Equal re eval vals: {:?}", kzg_alloc_re_eval.get_value() == alloc_re_eval.get_value());
     cs.enforce(
       || "evalE == pE(cE)",
       |lc| lc,
-      |lc| lc,
+      |lc| lc,  
       |lc| lc + kzg_alloc_re_eval.get_variable() - alloc_re_eval.get_variable(),
     );
 

@@ -504,7 +504,6 @@ where
             identity_count += 1;
         }
     }
-    println!("Found {} identity elements among {} elements", identity_count, l_affine.len());
     for e in l_affine.iter() {
         if e.is_identity().into() {
             return Err(SynthesisError::UnconstrainedVariable);
