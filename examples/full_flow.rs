@@ -170,50 +170,50 @@ fn main() {
   //   start.elapsed()
   // );
   // res.unwrap();
-  println!("=========================================================");
+  // println!("=========================================================");
 
-  // Now, let's generate the Solidity code that verifies this Decider final proof
-  let function_selector = get_function_selector_for_nova_cyclefold_verifier(recursive_snark.z0.len() * 2 + 1);
+  // // Now, let's generate the Solidity code that verifies this Decider final proof
+  // let function_selector = get_function_selector_for_nova_cyclefold_verifier(recursive_snark.z0.len() * 2 + 1);
 
-  let calldata: Vec<u8> = prepare_calldata(
-    function_selector,
-    Fr::from(recursive_snark.i as u64),
-    &recursive_snark.z0,
-    &recursive_snark.zi,
-    &recursive_snark.r_U_primary,
-    &recursive_snark.l_u_primary,
-    &proof,
-  ).unwrap();
+  // let calldata: Vec<u8> = prepare_calldata(
+  //   function_selector,
+  //   Fr::from(recursive_snark.i as u64),
+  //   &recursive_snark.z0,
+  //   &recursive_snark.zi,
+  //   &recursive_snark.r_U_primary,
+  //   &recursive_snark.l_u_primary,
+  //   &proof,
+  // ).unwrap();
 
-  // prepare the setup params for the solidity verifier
-  let nova_cyclefold_vk = NovaCycleFoldVerifierKey::from(
-    (
-      decider_vk.pp_hash,
-      SolidityGroth16VerifierKey::from(decider_vk.groth16_vk),
-      SolidityKZGVerifierKey::from((decider_vk.kzg_vk, Vec::new())),
-      recursive_snark.z0.len(),
-    )
-  );
+  // // prepare the setup params for the solidity verifier
+  // let nova_cyclefold_vk = NovaCycleFoldVerifierKey::from(
+  //   (
+  //     decider_vk.pp_hash,
+  //     SolidityGroth16VerifierKey::from(decider_vk.groth16_vk),
+  //     SolidityKZGVerifierKey::from((decider_vk.kzg_vk, Vec::new())),
+  //     recursive_snark.z0.len(),
+  //   )
+  // );
 
-  // generate the solidity code
-  let decider_solidity_code = get_decider_template_for_cyclefold_decider(nova_cyclefold_vk);
+  // // generate the solidity code
+  // let decider_solidity_code = get_decider_template_for_cyclefold_decider(nova_cyclefold_vk);
 
-  // verify the proof against the solidity code in the EVM
-  let nova_cyclefold_verifier_bytecode = compile_solidity(&decider_solidity_code, "NovaDecider");
-  let mut evm = Evm::default();
-  let verifier_address = evm.create(nova_cyclefold_verifier_bytecode);
-  let (_, output) = evm.call(verifier_address, calldata.clone());
-  assert_eq!(*output.last().unwrap(), 1);
+  // // verify the proof against the solidity code in the EVM
+  // let nova_cyclefold_verifier_bytecode = compile_solidity(&decider_solidity_code, "NovaDecider");
+  // let mut evm = Evm::default();
+  // let verifier_address = evm.create(nova_cyclefold_verifier_bytecode);
+  // let (_, output) = evm.call(verifier_address, calldata.clone());
+  // assert_eq!(*output.last().unwrap(), 1);
 
-  // save smart contract and the calldata
-  println!("storing nova-verifier.sol and the calldata into files");
-  use std::fs;
-  fs::write(
-    "./examples/nova-verifier.sol",
-    decider_solidity_code.clone(),
-  ).expect("Unable to write to file");
-  fs::write("./examples/solidity-calldata.calldata", calldata.clone()).expect("");
-  let s = get_formatted_calldata(calldata.clone());
-  fs::write("./examples/solidity-calldata.inputs", s.join(",\n")).expect("");
+  // // save smart contract and the calldata
+  // println!("storing nova-verifier.sol and the calldata into files");
+  // use std::fs;
+  // fs::write(
+  //   "./examples/nova-verifier.sol",
+  //   decider_solidity_code.clone(),
+  // ).expect("Unable to write to file");
+  // fs::write("./examples/solidity-calldata.calldata", calldata.clone()).expect("");
+  // let s = get_formatted_calldata(calldata.clone());
+  // fs::write("./examples/solidity-calldata.inputs", s.join(",\n")).expect("");
 }
 
