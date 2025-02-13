@@ -128,8 +128,6 @@ pub fn nth_root_of_unity<F: PrimeField>(n: usize) -> Option<F> {
     let root = F::MULTIPLICATIVE_GENERATOR.pow(&cofactor.to_u64_digits());
 
     // Verify the order is correct: root^n should = 1 and root^(n-1) should != 1
-    assert!(root.pow(&[n as u64]) == F::ONE);
-    assert!(root.pow(&[(n-1) as u64]) != F::ONE);
     if root.pow(&[n as u64]) != F::ONE || root.pow(&[(n-1) as u64]) == F::ONE {
         return None;
     }
