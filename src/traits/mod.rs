@@ -92,6 +92,9 @@ pub trait ROTrait<Base: PrimeField, Scalar> {
 
   /// Returns a challenge of `num_bits` by hashing the internal state
   fn squeeze(&mut self, num_bits: usize) -> Scalar;
+
+  /// Returns a challenge of `num_bits` by hashing the internal state
+  fn squeeze_vec(&mut self, num_bits: usize, len: usize) -> Vec<Scalar>;
 }
 
 /// A helper trait that defines the behavior of a hash function that we use as an RO in the circuit model

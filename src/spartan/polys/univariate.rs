@@ -2,18 +2,19 @@
 //! Main components:
 //! - `UniPoly`: an univariate dense polynomial in coefficient form (big endian),
 //! - `CompressedUniPoly`: a univariate dense polynomial, compressed (omitted linear term), in coefficient form (little endian),
+use crate::traits::ROTrait;
+use ff::PrimeField;
+use rand::{CryptoRng, RngCore};
+use rayon::prelude::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use ref_cast::RefCast;
+use serde::{Deserialize, Serialize};
 use std::ops::SubAssign;
 use std::{
   cmp::Ordering,
   ops::{AddAssign, Index, IndexMut, MulAssign},
 };
 
-use ff::PrimeField;
-use rand::{CryptoRng, RngCore};
-use rayon::prelude::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
-use ref_cast::RefCast;
-use serde::{Deserialize, Serialize};
-
+use crate::traits::{AbsorbInROTrait, Engine};
 use crate::{
   provider::util::iterators::DoubleEndedIteratorExt as _,
   traits::{Group, TranscriptReprTrait},
@@ -283,6 +284,14 @@ impl<Scalar: PrimeField> SubAssign<&Self> for UniPoly<Scalar> {
 impl<Scalar: PrimeField> AsRef<Vec<Scalar>> for UniPoly<Scalar> {
   fn as_ref(&self) -> &Vec<Scalar> {
     &self.coeffs
+  }
+}
+
+impl<E: Engine> AbsorbInROTrait<E> for UniPoly<E::Base> {
+  fn absorb_in_ro(&self, ro: &mut E::RO) {
+    for x in &self.coeffs {
+      ro.absorb(*x);
+    }
   }
 }
 

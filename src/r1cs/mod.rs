@@ -2,11 +2,14 @@
 mod sparse;
 pub(crate) mod util;
 
+use crate::spartan::math::Math;
+use crate::spartan::polys::multilinear::MultilinearPolynomial;
 use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
   digest::{DigestComputer, SimpleDigestible},
   errors::NovaError,
   gadgets::{f_to_nat, nat_to_limbs, scalar_as_base},
+  hypernova::error::HyperNovaError,
   traits::{
     commitment::CommitmentEngineTrait, AbsorbInROTrait, Engine, ROTrait, TranscriptReprTrait,
   },
@@ -14,9 +17,9 @@ use crate::{
 };
 use core::cmp::max;
 use ff::Field;
+use itertools::Itertools;
 use once_cell::sync::OnceCell;
 use rand_core::{CryptoRng, OsRng, RngCore};
-
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -48,8 +51,8 @@ pub struct R1CSResult<E: Engine> {
 /// A type that holds a witness for a given R1CS instance
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct R1CSWitness<E: Engine> {
-  W: Vec<E::Scalar>,
-  r_W: E::Scalar,
+  pub(crate) W: Vec<E::Scalar>,
+  pub(crate) r_W: E::Scalar,
 }
 
 /// A type that holds an R1CS instance
@@ -376,6 +379,32 @@ impl<E: Engine> R1CSShape<E> {
     Ok(())
   }
 
+  /// Checks if the R1CS instance is satisfiable given a witness and its shape
+  pub fn is_sat_linearized(
+    &self,
+    ck: &CommitmentKey<E>,
+    U: &LR1CSInstance<E>,
+    W: &R1CSWitness<E>,
+  ) -> Result<(), NovaError> {
+    assert_eq!(W.W.len(), self.num_vars);
+    assert_eq!(U.X.len(), self.num_io);
+
+    let (mut Az, mut Bz, mut Cz) = self.multiply_witness(&W.W, &U.u, &U.X)?;
+    Az.resize(self.num_vars * 2, E::Scalar::ZERO);
+    Bz.resize(self.num_vars * 2, E::Scalar::ZERO);
+    Cz.resize(self.num_vars * 2, E::Scalar::ZERO);
+    assert_eq!(U.vs[0], MultilinearPolynomial::new(Az).evaluate(&U.rx));
+    assert_eq!(U.vs[1], MultilinearPolynomial::new(Bz).evaluate(&U.rx));
+    assert_eq!(U.vs[2], MultilinearPolynomial::new(Cz).evaluate(&U.rx));
+
+    // verify if comm_W is a commitment to W
+    if U.comm_W != CE::<E>::commit(ck, &W.W, &W.r_W) {
+      return Err(NovaError::UnSat);
+    }
+
+    Ok(())
+  }
+
   /// A method to compute a commitment to the cross-term `T` given a
   /// Relaxed R1CS instance-witness pair and an R1CS instance-witness pair
   pub fn commit_T(
@@ -655,6 +684,33 @@ impl<E: Engine> R1CSWitness<E> {
   /// Commits to the witness using the supplied generators
   pub fn commit(&self, ck: &CommitmentKey<E>) -> Commitment<E> {
     CE::<E>::commit(ck, &self.W, &self.r_W)
+  }
+
+  /// Folds an incoming `R1CSWitness` into the current one
+  pub fn fold(&self, W2: &R1CSWitness<E>, rho: E::Scalar) -> Result<Self, NovaError> {
+    let (W1, r_W1) = (&self.W, &self.r_W);
+    let (W2, r_W2) = (&W2.W, &W2.r_W);
+    if W1.len() != W2.len() {
+      return Err(NovaError::InvalidWitnessLength);
+    }
+    let W = zip_with!((W1.par_iter(), W2), |a, b| *a + rho * *b).collect::<Vec<E::Scalar>>();
+    let r_W = *r_W1 + rho * r_W2;
+    Ok(Self { W, r_W })
+  }
+
+  /// Produces a default `RelaxedR1CSWitness` given an `R1CSShape`
+  pub fn default(S: &R1CSShape<E>) -> Self {
+    Self {
+      W: vec![E::Scalar::ZERO; S.num_vars],
+      r_W: E::Scalar::ZERO,
+    }
+  }
+
+  /// Pads the provided witness to the correct length
+  pub fn pad(&self, S: &R1CSShape<E>) -> Self {
+    let mut W = self.W.clone();
+    W.extend(vec![E::Scalar::ZERO; S.num_vars - W.len()]);
+    Self { W, r_W: self.r_W }
   }
 }
 
@@ -952,6 +1008,70 @@ impl<E: Engine> AbsorbInROTrait<E> for RelaxedR1CSInstance<E> {
         ro.absorb(scalar_as_base::<E>(limb));
       }
     }
+  }
+}
+
+/// A type that holds a linearized R1CS instance
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct LR1CSInstance<E: Engine> {
+  pub(crate) comm_W: Commitment<E>,
+  pub(crate) X: Vec<E::Scalar>,
+  /// (Random) evaluation point
+  pub(crate) rx: Vec<E::Scalar>,
+  /// Evaluation targets
+  pub(crate) vs: Vec<E::Scalar>,
+  pub(crate) u: E::Scalar,
+}
+
+impl<E> LR1CSInstance<E>
+where
+  E: Engine,
+{
+  /// Produces a default [`LR1CSInstance]` given `R1CSShape`
+  pub fn default(S: &R1CSShape<E>) -> Self {
+    let comm_W = Commitment::<E>::default();
+    Self {
+      comm_W,
+      u: E::Scalar::ZERO,
+      X: vec![E::Scalar::ZERO; S.num_io],
+      rx: vec![E::Scalar::random(&mut OsRng); S.num_cons.log_2() + 1],
+      vs: vec![E::Scalar::ZERO; 3],
+    }
+  }
+
+  /// Fold and [`LR1CSInstance`] with an [`R1CSInstance`]
+  pub fn fold(
+    &self,
+    U2: &R1CSInstance<E>,
+    rho: E::Scalar,
+    rx: &[E::Scalar],
+    sigmas: &[E::Scalar],
+    thetas: &[E::Scalar],
+  ) -> Result<Self, NovaError> {
+    let (X1, u1, comm_W_1) = (&self.X, self.u, &self.comm_W);
+    let (X2, comm_W_2) = (&U2.X, &U2.comm_W);
+    if self.rx.len() != rx.len() {
+      return Err(HyperNovaError::InvalidEvaluationPoint.into());
+    }
+    if sigmas.len() != thetas.len() {
+      return Err(HyperNovaError::InvalidTargets.into());
+    }
+    let comm_W = *comm_W_1 + *comm_W_2 * rho;
+    let u = u1 + rho;
+    let X = zip_with!((X1.par_iter(), X2), |a, b| *a + rho * *b).collect::<Vec<E::Scalar>>();
+    let vs: Vec<E::Scalar> = sigmas
+      .iter()
+      .zip_eq(thetas.iter())
+      .map(|(sigma, theta)| *sigma + *theta * rho)
+      .collect();
+    Ok(Self {
+      comm_W,
+      X,
+      rx: rx.to_vec(),
+      vs,
+      u,
+    })
   }
 }
 

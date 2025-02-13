@@ -26,6 +26,7 @@ pub mod constants;
 pub mod errors;
 pub mod frontend;
 pub mod gadgets;
+pub mod hypernova;
 pub mod provider;
 pub mod r1cs;
 pub mod spartan;

@@ -14,7 +14,7 @@ pub(crate) mod math;
 pub mod polys;
 pub mod ppsnark;
 pub mod snark;
-mod sumcheck;
+pub(crate) mod sumcheck;
 
 use crate::{
   r1cs::{R1CSShape, SparseMatrix},
@@ -169,7 +169,7 @@ impl<E: Engine> PolyEvalInstance<E> {
 }
 
 /// Binds "row" variables of (A, B, C) matrices viewed as 2d multilinear polynomials
-fn compute_eval_table_sparse<E: Engine>(
+pub fn compute_eval_table_sparse<E: Engine>(
   S: &R1CSShape<E>,
   rx: &[E::Scalar],
 ) -> (Vec<E::Scalar>, Vec<E::Scalar>, Vec<E::Scalar>) {
