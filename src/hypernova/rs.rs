@@ -67,7 +67,7 @@ where
   /// The same note for public parameter hints apply as in the case for Nova's public parameters:
   /// For some final compressing SNARKs the size of the commitment key must be larger, so we include
   /// `ck_hint_primary` and `ck_hint_cyclefold` parameters to accommodate this.
-  #[tracing::instrument(skip_all, name = "nebula::PublicParams::setup")]
+  #[tracing::instrument(skip_all, name = "HyperNova::PublicParams::setup")]
   pub fn setup(
     step_circuit: &impl StepCircuit<E::Scalar>,
     ck_hint: &CommitmentKeyHint<E>,
@@ -158,8 +158,8 @@ impl<E> RecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
 {
-  /// Create a new instance of RecursiveSNARK
-  #[tracing::instrument(skip_all, name = "nebula::RecursiveSNARK::new")]
+  /// Create a new instance of [`RecursiveSNARK`]
+  #[tracing::instrument(skip_all, name = "HyperNova::RecursiveSNARK::new")]
   pub fn new<C>(pp: &PublicParams<E>, step_circuit: &C, z0: &[E::Scalar]) -> Result<Self, NovaError>
   where
     C: StepCircuit<E::Scalar>,
@@ -216,7 +216,7 @@ where
 
   /// Create a new [`RecursiveSNARK`] (or updates the provided [`RecursiveSNARK`])
   /// by executing a step of the incremental computation
-  #[tracing::instrument(skip_all, name = "nebula::RecursiveSNARK::prove_step")]
+  #[tracing::instrument(skip_all, name = "HyperNova::RecursiveSNARK::prove_step")]
   pub fn prove_step<C>(&mut self, pp: &PublicParams<E>, step_circuit: &C) -> Result<(), NovaError>
   where
     C: StepCircuit<E::Scalar>,
@@ -275,7 +275,7 @@ where
   }
 
   /// Verify the correctness of the `RecursiveSNARK`
-  #[tracing::instrument(skip_all, name = "nebula::RecursiveSNARK::verify")]
+  #[tracing::instrument(skip_all, name = "HyperNova::RecursiveSNARK::verify")]
   pub fn verify(
     &self,
     pp: &PublicParams<E>,
