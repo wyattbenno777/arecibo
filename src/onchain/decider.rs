@@ -346,17 +346,25 @@ use super::*;
     let (kzg_pk, _) = EvaluationEngine::<Bn256, Bn256EngineKZG>::setup(Arc::new(ck.clone()));
     let (relaxed_instance, relaxed_witness) = r1cs_shape.sample_random_instance_witness(&ck).unwrap();
 
-    let (challenge_w, _) =
+    let (challenge_w, challenge_e) =
     KZGChallengesGadget::get_challenges_native(relaxed_instance.clone());
 
-    let eval = EvalGadget::evaluate_native(relaxed_witness.clone().W, challenge_w);
+    let eval_w = EvalGadget::evaluate_native(relaxed_witness.clone().W, challenge_w);
+    let eval_e = EvalGadget::evaluate_native(relaxed_witness.clone().E, challenge_e);
     
-    let proof = KZGProof::prove_with_challenge(
+    let proof_w = KZGProof::prove_with_challenge(
       &kzg_pk,
       challenge_w,
       &relaxed_witness.W,
     ).unwrap();
 
-    assert_eq!(eval, proof.eval);
+    let proof_e = KZGProof::prove_with_challenge( 
+      &kzg_pk,
+      challenge_e,
+      &relaxed_witness.E,
+    ).unwrap();
+
+    assert_eq!(eval_w, proof_w.eval);
+    assert_eq!(eval_e, proof_e.eval);
   }
 }
