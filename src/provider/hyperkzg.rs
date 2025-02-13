@@ -29,10 +29,12 @@ use ff::{Field, PrimeFieldBits};
 use group::{prime::PrimeCurveAffine as _, Curve, Group as _};
 use itertools::Itertools as _;
 use pairing::{Engine, MillerLoopResult, MultiMillerLoop};
-use rayon::iter::{
-  IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+use rayon::{
+  iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+  },
+  prelude::*,
 };
-use rayon::prelude::*;
 use ref_cast::RefCast as _;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::sync::Arc;
@@ -361,12 +363,15 @@ where
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::provider::util::iterators::DoubleEndedIteratorExt as _;
-  use crate::provider::util::test_utils::prove_verify_from_num_vars;
-  use crate::spartan::powers;
-  use crate::traits::TranscriptEngineTrait;
-  use crate::zip_with;
-  use crate::{provider::keccak::Keccak256Transcript, CommitmentEngineTrait, CommitmentKey};
+  use crate::{
+    provider::{
+      keccak::Keccak256Transcript,
+      util::{iterators::DoubleEndedIteratorExt as _, test_utils::prove_verify_from_num_vars},
+    },
+    spartan::powers,
+    traits::TranscriptEngineTrait,
+    zip_with, CommitmentEngineTrait, CommitmentKey,
+  };
   use bincode::Options;
   use expect_test::expect;
   use halo2curves::bn256::G1;

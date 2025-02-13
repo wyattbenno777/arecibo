@@ -1,19 +1,13 @@
 //! A CycleFold influenced NIFS for folding IVC proofs.
 
-use crate::constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS};
-use crate::cyclefold::circuit::CycleFoldCircuit;
-use crate::cyclefold::util::absorb_cyclefold_r1cs;
-use crate::frontend::r1cs::NovaWitness;
-use crate::frontend::solver::SatisfyingAssignment;
-use crate::frontend::ConstraintSystem;
-use crate::nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryRelaxedNIFS};
-use crate::r1cs::R1CSWitness;
-use crate::traits::AbsorbInROTrait;
-use crate::traits::{CurveCycleEquipped, ROTrait};
 use crate::{
+  constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS},
+  cyclefold::{circuit::CycleFoldCircuit, util::absorb_cyclefold_r1cs},
   errors::NovaError,
-  r1cs::{R1CSInstance, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
-  traits::{Dual, Engine, ROConstants},
+  frontend::{r1cs::NovaWitness, solver::SatisfyingAssignment, ConstraintSystem},
+  nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryRelaxedNIFS},
+  r1cs::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
+  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstants, ROTrait},
   Commitment, CommitmentKey,
 };
 use ff::Field;

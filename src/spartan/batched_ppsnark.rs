@@ -12,18 +12,19 @@ use crate::{
       eq::EqPolynomial,
       identity::IdentityPolynomial,
       masked_eq::MaskedEqPolynomial,
-      multilinear::MultilinearPolynomial,
-      multilinear::SparsePolynomial,
+      multilinear::{MultilinearPolynomial, SparsePolynomial},
       power::PowPolynomial,
       univariate::{CompressedUniPoly, UniPoly},
     },
     powers,
     ppsnark::{R1CSShapeSparkCommitment, R1CSShapeSparkRepr},
-    sumcheck::engine::{
-      InnerSumcheckInstance, MemorySumcheckInstance, OuterSumcheckInstance, SumcheckEngine,
-      WitnessBoundSumcheck,
+    sumcheck::{
+      engine::{
+        InnerSumcheckInstance, MemorySumcheckInstance, OuterSumcheckInstance, SumcheckEngine,
+        WitnessBoundSumcheck,
+      },
+      SumcheckProof,
     },
-    sumcheck::SumcheckProof,
     PolyEvalInstance, PolyEvalWitness,
   },
   traits::{

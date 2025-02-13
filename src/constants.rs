@@ -9,3 +9,35 @@ pub(crate) const DEFAULT_ABSORBS: usize = 0;
 
 /// Bit size of Nova field element hashes
 pub const NUM_HASH_BITS: usize = 250;
+
+/*
+ * *** HyperNova constants ***
+*/
+
+/// Number of Matrices for HyperNova
+pub(crate) const NUM_MATRICES: usize = 3;
+
+/// Base number of constraints for the augmented circuit.
+///
+/// The total constraint count depends on the number of sumcheck rounds:
+///
+/// - **0 rounds:** The circuit would have 4628 constraints.
+/// - **Edge Case (0 → 1 round):** Transitioning from 0 rounds to 1 round increases the constraint count by 2295.
+/// - **Subsequent rounds:** Each additional round after the first increases the constraints by 1518.
+///
+/// Since the circuit always uses at least one round (the 0-round case never happens), we
+/// incorporate the extra cost of the 0-to-1 round transition by adding the difference between
+/// the first round increase and a regular round increase: (2295 - 1518) = 777.
+///
+/// Therefore, the base constraint count is:
+///     BASE_CONSTRAINTS = 4628 (for 0 rounds) + 777 (extra for the edge case to 1 round)
+pub(crate) const BASE_CONSTRAINTS: usize = 19769 + 777;
+
+/// Maximum number of constraints per step circuit input
+pub(crate) const MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT: usize = 1;
+
+/// Maximum number of constraints per sumcheck round
+pub(crate) const MAX_CONSTRAINTS_PER_SUMCHECK_ROUND: usize = 1518;
+
+/// Number of univariate coefficients in a HyperNova sumcheck proof
+pub(crate) const NUM_UNIVARIATE_COEFFS: usize = 4;

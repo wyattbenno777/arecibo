@@ -1,16 +1,16 @@
 //! Defines behavior of Layer 1 Nebula proofs
 
-use crate::errors::NovaError;
-use crate::r1cs::{R1CSInstance, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness};
-use crate::traits::commitment::CommitmentEngineTrait;
-use crate::traits::commitment::Len;
-use crate::traits::{Dual, Engine, ROConstants};
 use crate::{
+  errors::NovaError,
   nebula::{
     audit_rs::{AuditPublicParams, AuditRecursiveSNARK},
     rs::{PublicParams, RecursiveSNARK},
   },
-  traits::CurveCycleEquipped,
+  r1cs::{R1CSInstance, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
+  traits::{
+    commitment::{CommitmentEngineTrait, Len},
+    CurveCycleEquipped, Dual, Engine, ROConstants,
+  },
   CommitmentKey,
 };
 use std::sync::Arc;

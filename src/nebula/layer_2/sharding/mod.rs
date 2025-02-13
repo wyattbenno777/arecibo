@@ -1,24 +1,25 @@
 //! Module containing components to enable sharding of IVC proofs.
-use super::nifs::NIFS;
-use super::utils::{random_fold_and_derandom, Layer2FoldingData};
-use crate::constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT};
-use crate::errors::NovaError;
-use crate::gadgets::scalar_as_base;
-use crate::nebula::augmented_circuit::AugmentedCircuitParams;
-use crate::nebula::layer_2::utils::absorb_U;
-use crate::nebula::layer_2::utils::absorb_U_bn;
-use crate::nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryNIFS, PrimaryRelaxedNIFS};
-use crate::nebula::traits::{Layer1PPTrait, Layer1RSTrait, MemoryCommitmentsTraits};
-use crate::r1cs::{CommitmentKeyHint, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness};
-use crate::traits::commitment::CommitmentEngineTrait;
-use crate::traits::commitment::Len;
-use crate::traits::ROTrait;
-use crate::traits::{Dual, Engine};
-use crate::CommitmentKey;
+use super::{
+  nifs::NIFS,
+  utils::{random_fold_and_derandom, Layer2FoldingData},
+};
 use crate::{
-  nebula::rs::{PublicParams, RecursiveSNARK},
-  traits::CurveCycleEquipped,
-  R1CSWithArity,
+  constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT},
+  errors::NovaError,
+  gadgets::scalar_as_base,
+  nebula::{
+    augmented_circuit::AugmentedCircuitParams,
+    layer_2::utils::{absorb_U, absorb_U_bn},
+    nifs::{CycleFoldRelaxedNIFS, PrimaryNIFS, PrimaryRelaxedNIFS},
+    rs::{PublicParams, RecursiveSNARK},
+    traits::{Layer1PPTrait, Layer1RSTrait, MemoryCommitmentsTraits},
+  },
+  r1cs::{CommitmentKeyHint, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness},
+  traits::{
+    commitment::{CommitmentEngineTrait, Len},
+    CurveCycleEquipped, Dual, Engine, ROTrait,
+  },
+  CommitmentKey, R1CSWithArity,
 };
 use ff::Field;
 use serde::{Deserialize, Serialize};
@@ -665,18 +666,21 @@ where
 
 #[cfg(test)]
 mod test {
-  use super::compression::CompressedSNARK;
-  use super::{Layer1PPTrait, Layer1RSTrait, ShardingPublicParams, ShardingRecursiveSNARK};
-  use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
-  use crate::nebula::audit_rs::{AuditPublicParams, AuditRecursiveSNARK, AuditStepCircuit};
-  use crate::nebula::rs::{PublicParams, RecursiveSNARK};
-  use crate::provider::ipa_pc;
-  use crate::spartan;
-  use crate::traits::snark::default_ck_hint;
-  use crate::traits::Dual;
-  use crate::{nebula::rs::StepCircuit, provider::Bn256EngineIPA, traits::Engine};
-  use ff::Field;
-  use ff::PrimeField;
+  use super::{
+    compression::CompressedSNARK, Layer1PPTrait, Layer1RSTrait, ShardingPublicParams,
+    ShardingRecursiveSNARK,
+  };
+  use crate::{
+    frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
+    nebula::{
+      audit_rs::{AuditPublicParams, AuditRecursiveSNARK, AuditStepCircuit},
+      rs::{PublicParams, RecursiveSNARK, StepCircuit},
+    },
+    provider::{ipa_pc, Bn256EngineIPA},
+    spartan,
+    traits::{snark::default_ck_hint, Dual, Engine},
+  };
+  use ff::{Field, PrimeField};
 
   type E1 = Bn256EngineIPA;
   type F = <E1 as Engine>::Scalar;

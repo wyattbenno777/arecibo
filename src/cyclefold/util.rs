@@ -74,7 +74,7 @@ where
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub(crate) struct FoldingData<E: Engine> {
   pub U: RelaxedR1CSInstance<E>,
