@@ -31,7 +31,7 @@ pub(crate) const NUM_MATRICES: usize = 3;
 ///
 /// Therefore, the base constraint count is:
 ///     BASE_CONSTRAINTS = 4628 (for 0 rounds) + 777 (extra for the edge case to 1 round)
-pub(crate) const BASE_CONSTRAINTS: usize = 4628 + 777;
+pub(crate) const BASE_CONSTRAINTS: usize = 19769 + 777;
 
 /// Maximum number of constraints per step circuit input
 pub(crate) const MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT: usize = 1;

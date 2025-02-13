@@ -345,6 +345,7 @@ where
     // 2. Compute H(pp, i, r_U_cyclefold)
     let mut ro = <Dual<E> as Engine>::RO::new(pp.ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(pp.digest());
+    ro.absorb(E::Scalar::from(num_steps as u64));
     self.r_U_cyclefold.absorb_in_ro(&mut ro);
     let hash_cyclefold = ro.squeeze(NUM_HASH_BITS);
     // ////////////////////////////////////////////
@@ -432,6 +433,38 @@ mod test {
 
   use super::RecursiveSNARK;
 
+  fn test_rs_with<E: CurveCycleEquipped>() -> Result<(), NovaError> {
+    let circuit = SquareCircuit::<E::Scalar> { _p: PhantomData };
+    run_circuit::<E>(&circuit)
+  }
+
+  #[test]
+  fn test_rs() -> Result<(), NovaError> {
+    test_rs_with::<Bn256EngineIPA>()
+  }
+
+  fn test_rs_pow_with<E: CurveCycleEquipped>() -> Result<(), NovaError> {
+    let circuit = PowCircuit::<E::Scalar> {
+      _field: PhantomData,
+    };
+    run_circuit::<E>(&circuit)
+  }
+  #[test]
+  fn test_rs_pow() -> Result<(), NovaError> {
+    test_rs_pow_with::<Bn256EngineIPA>()
+  }
+
+  fn run_circuit<E: CurveCycleEquipped>(c: &impl StepCircuit<E::Scalar>) -> Result<(), NovaError> {
+    let pp = super::PublicParams::<E>::setup(c, &*default_ck_hint(), &*default_ck_hint());
+    let z0 = vec![E::Scalar::from(2u64)];
+    let mut recursive_snark = RecursiveSNARK::new(&pp, c, &z0).unwrap();
+    for i in 0..100 {
+      recursive_snark.prove_step(&pp, c)?;
+      recursive_snark.verify(&pp, i + 1, &z0).unwrap();
+    }
+    Ok(())
+  }
+
   #[derive(Clone)]
   struct SquareCircuit<F> {
     _p: PhantomData<F>,
@@ -453,20 +486,34 @@ mod test {
     }
   }
 
-  fn test_rs_with<E: CurveCycleEquipped>() -> Result<(), NovaError> {
-    let circuit = SquareCircuit::<E::Scalar> { _p: PhantomData };
-    let pp = super::PublicParams::<E>::setup(&circuit, &*default_ck_hint(), &*default_ck_hint());
-    let z0 = vec![E::Scalar::from(2u64)];
-    let mut recursive_snark = RecursiveSNARK::new(&pp, &circuit, &z0).unwrap();
-    for i in 0..10 {
-      recursive_snark.prove_step(&pp, &circuit)?;
-      recursive_snark.verify(&pp, i + 1, &z0).unwrap();
-    }
-    Ok(())
+  #[derive(Clone, Default)]
+  pub struct PowCircuit<F>
+  where
+    F: PrimeField,
+  {
+    _field: PhantomData<F>,
   }
 
-  #[test]
-  fn test_rs() -> Result<(), NovaError> {
-    test_rs_with::<Bn256EngineIPA>()
+  impl<F> StepCircuit<F> for PowCircuit<F>
+  where
+    F: PrimeField,
+  {
+    fn arity(&self) -> usize {
+      1
+    }
+
+    fn synthesize<CS: ConstraintSystem<F>>(
+      &self,
+      cs: &mut CS,
+      z: &[AllocatedNum<F>],
+    ) -> Result<Vec<AllocatedNum<F>>, SynthesisError> {
+      let mut x = z[0].clone();
+      let mut y = x.clone();
+      for i in 0..10_000 {
+        y = x.square(cs.namespace(|| format!("x_sq_{i}")))?;
+        x = y.clone();
+      }
+      Ok(vec![y])
+    }
   }
 }

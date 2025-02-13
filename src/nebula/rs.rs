@@ -665,6 +665,40 @@ mod test {
   };
   use std::marker::PhantomData;
 
+  #[test]
+  fn test_rs() -> Result<(), NovaError> {
+    test_rs_with::<Bn256EngineIPA>()
+  }
+
+  #[test]
+  fn test_rs_pow() -> Result<(), NovaError> {
+    test_rs_pow_with::<Bn256EngineIPA>()
+  }
+
+  fn test_rs_with<E: CurveCycleEquipped>() -> Result<(), NovaError> {
+    let primary_circuit = SquareCircuit::<E::Scalar> { _p: PhantomData };
+    run_circuit::<E>(&primary_circuit)
+  }
+  fn test_rs_pow_with<E: CurveCycleEquipped>() -> Result<(), NovaError> {
+    let primary_circuit = PowCircuit::<E> {
+      _engine: PhantomData,
+    };
+    run_circuit::<E>(&primary_circuit)
+  }
+
+  fn run_circuit<E: CurveCycleEquipped>(c: &impl StepCircuit<E::Scalar>) -> Result<(), NovaError> {
+    let pp = PublicParams::<E>::setup(c, &*default_ck_hint(), &*default_ck_hint());
+    let z0 = vec![E::Scalar::from(2u64)];
+    let mut recursive_snark = RecursiveSNARK::new(&pp, c, &z0).unwrap();
+    let mut IC_i = E::Scalar::ZERO;
+    for i in 0..100 {
+      recursive_snark.prove_step(&pp, c, IC_i)?;
+      IC_i = recursive_snark.increment_commitment(&pp, c);
+      recursive_snark.verify(&pp, i + 1, &z0, IC_i).unwrap();
+    }
+    Ok(())
+  }
+
   #[derive(Clone)]
   struct SquareCircuit<F> {
     _p: PhantomData<F>,
@@ -691,30 +725,38 @@ mod test {
     }
   }
 
-  fn test_trivial_cyclefold_prove_verify_with<E: CurveCycleEquipped>() -> Result<(), NovaError> {
-    let primary_circuit = SquareCircuit::<E::Scalar> { _p: PhantomData };
-
-    let pp = PublicParams::<E>::setup(&primary_circuit, &*default_ck_hint(), &*default_ck_hint());
-
-    let z0 = vec![E::Scalar::from(2u64)];
-
-    let mut recursive_snark = RecursiveSNARK::new(&pp, &primary_circuit, &z0).unwrap();
-    let mut IC_i = E::Scalar::ZERO;
-
-    for i in 0..10 {
-      recursive_snark.prove_step(&pp, &primary_circuit, IC_i)?;
-
-      // TODO: figure out if i should put this in the rs API?
-      IC_i = recursive_snark.increment_commitment(&pp, &primary_circuit);
-
-      recursive_snark.verify(&pp, i + 1, &z0, IC_i).unwrap();
-    }
-
-    Ok(())
+  #[derive(Clone, Default)]
+  pub struct PowCircuit<E>
+  where
+    E: Engine,
+  {
+    _engine: PhantomData<E>,
   }
 
-  #[test]
-  fn test_cyclefold_prove_verify() -> Result<(), NovaError> {
-    test_trivial_cyclefold_prove_verify_with::<Bn256EngineIPA>()
+  impl<E> StepCircuit<E::Scalar> for PowCircuit<E>
+  where
+    E: Engine,
+  {
+    fn arity(&self) -> usize {
+      1
+    }
+
+    fn synthesize<CS: ConstraintSystem<E::Scalar>>(
+      &self,
+      cs: &mut CS,
+      z: &[AllocatedNum<E::Scalar>],
+    ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
+      let mut x = z[0].clone();
+      let mut y = x.clone();
+      for i in 0..10_000 {
+        y = x.square(cs.namespace(|| format!("x_sq_{i}")))?;
+        x = y.clone();
+      }
+      Ok(vec![y])
+    }
+
+    fn non_deterministic_advice(&self) -> Vec<E::Scalar> {
+      vec![]
+    }
   }
 }
