@@ -102,7 +102,7 @@ impl Decider {
 
     let kzg_proofs = (
       KZGProof::prove_with_challenge(&pk.kzg_pk, kzg_challenges.0, &circuit.W_i1.W[..])?,
-      KZGProof::prove_with_challenge(&pk.kzg_pk, kzg_challenges.1, &circuit.W_i1.W[..])?,
+      KZGProof::prove_with_challenge(&pk.kzg_pk, kzg_challenges.1, &circuit.W_i1.E[..])?,
     );
     let groth16_proof = create_random_proof(circuit, &pk.groth16_pk, rng)?;
     Ok(Self {
@@ -148,7 +148,7 @@ impl Decider {
       &z_i[..],
       // &U_final_commitments.inputize_nonnative(),
       &[self.kzg_challenges.0, self.kzg_challenges.1],
-      &[self.kzg_proofs.0.eval],// , self.kzg_proofs.1.eval],
+      &[self.kzg_proofs.0.eval, self.kzg_proofs.1.eval],
       // &proof.cmT.inputize_nonnative(),
     ]
     .concat();

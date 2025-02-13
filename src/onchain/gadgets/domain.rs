@@ -35,11 +35,19 @@ impl<F: PrimeField> AllocatedRadix2Domain<F> {
     )?;
 
     // Enforce that offset * inv = 1, which is only possible if offset ≠ 0
+    // println!("offset * inv = 1: {:?}", 
+    //   offset.get_value().and_then(|a| inv.().map(|b| a * b)) == Some(F::ONE));
+    // cs.enforce(
+    //   || "inverse exists",
+    //   |lc| lc + offset.get_variable(),
+    //   |lc| lc + inv,
+    //   |lc| lc + CS::one(),
+    // );
     cs.enforce(
-      || "inverse exists",
-      |lc| lc + offset.get_variable(),
-      |lc| lc + inv,
-      |lc| lc + CS::one(),
+      || "offset * inv = 1",
+      |lc| lc + offset.get_variable() - inv,
+      |lc| lc,
+      |lc| lc,
     );
 
     Ok(Self {
@@ -206,11 +214,21 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
       })?;
 
       // Now enforce: a_element * lag_coeff = vp_t
+      if a_element.get_value().and_then(|a| lag_coeff.get_value().map(|b| a * b)) != vp_t.get_value() {
+      println!("a_element * lag_coeff = vp_t: {:?}", 
+        a_element.get_value().and_then(|a| lag_coeff.get_value().map(|b| a * b)) == vp_t.get_value());
+      }
+      // cs.enforce(
+      //   || format!("a_element_{i} * lag_coeff_{i} = vp_t"),
+      //   |lc| lc + a_element.get_variable(),
+      //   |lc| lc + lag_coeff.get_variable(),
+      //   |lc| lc + vp_t.get_variable(),
+      // );
       cs.enforce(
         || format!("a_element_{i} * lag_coeff_{i} = vp_t"),
-        |lc| lc + a_element.get_variable(),
-        |lc| lc + lag_coeff.get_variable(),
-        |lc| lc + vp_t.get_variable(),
+        |lc| lc + a_element.get_variable() - lag_coeff.get_variable() + vp_t.get_variable(),
+        |lc| lc,
+        |lc| lc,
       );
 
       lagrange_coeffs.push(lag_coeff);
@@ -230,8 +248,10 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
   ) -> Result<AllocatedNum<F>, SynthesisError> {
     // If offset is known at synthesis time, use optimized approach.
     if self.domain.offset.get_value().is_some() {
+      println!("offset is known at synthesis time");
       self.lagrange_interpolate_with_constant_offset(cs, interpolation_point)
     } else {
+      println!("offset is not known at synthesis time");
       self.lagrange_interpolate_with_non_constant_offset(cs, interpolation_point)
     }
   }
@@ -315,11 +335,19 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
       lhs_numerator_val.ok_or(SynthesisError::AssignmentMissing)
     })?;
     // Enforce alpha_to_size - offset_to_size = lhs_numerator
+    println!("alpha_to_size - offset_to_size = lhs_numerator: {:?}", 
+      alpha_to_size.get_value().and_then(|a| offset_to_size.get_value().map(|b| a - b)) == lhs_numerator.get_value());
+    // cs.enforce(
+    //   || "lhs_numerator = alpha^size - offset^size",
+    //   |lc| lc + alpha_to_size.get_variable() - offset_to_size.get_variable(),
+    //   |lc| lc + CS::one(),
+    //   |lc| lc + lhs_numerator.get_variable(),
+    // );
     cs.enforce(
       || "lhs_numerator = alpha^size - offset^size",
-      |lc| lc + alpha_to_size.get_variable() - offset_to_size.get_variable(),
-      |lc| lc + CS::one(),
-      |lc| lc + lhs_numerator.get_variable(),
+      |lc| lc + alpha_to_size.get_variable() - offset_to_size.get_variable() + lhs_numerator.get_variable(),
+      |lc| lc,
+      |lc| lc,
     );
 
     // Make sure lhs_numerator != 0, so alpha isn't in the multiplicative coset.
@@ -331,11 +359,19 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
       // so we assume it's invertible.
       Ok(val.invert().expect("lhs_numerator must be invertible"))
     })?;
+    println!("lhs_numerator * inv != 0: {:?}", 
+      lhs_numerator.get_value().and_then(|a| inverse_numerator.get_value().map(|b| a * b)) == Some(F::ONE));
+    // cs.enforce(
+    //   || "lhs_numerator * inv != 0",
+    //   |lc| lc + lhs_numerator.get_variable(),
+    //   |lc| lc + inverse_numerator.get_variable(),
+    //   |lc| lc + CS::one(),
+    // );
     cs.enforce(
       || "lhs_numerator * inv != 0",
-      |lc| lc + lhs_numerator.get_variable(),
-      |lc| lc + inverse_numerator.get_variable(),
-      |lc| lc + CS::one(),
+      |lc| lc + lhs_numerator.get_variable() - inverse_numerator.get_variable(),
+      |lc| lc,
+      |lc| lc,
     );
 
     // Now compute lhs_denominator = offset^size * domain_size
@@ -363,11 +399,19 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
       Ok(val.invert().expect("lhs_denominator must be invertible"))
     })?;
     // Enforce that lhs_denominator * inv_lhs_denom = 1
+    println!("lhs_denominator * inv_lhs_denom = 1: {:?}", 
+      lhs_denominator.get_value().and_then(|a| inv_lhs_denom.get_value().map(|b| a * b)) == Some(F::ONE));
+    // cs.enforce(
+    //   || "check inv_lhs_denom",
+    //   |lc| lc + lhs_denominator.get_variable(),
+    //   |lc| lc + inv_lhs_denom.get_variable(),
+    //   |lc| lc + CS::one(),
+    // );
     cs.enforce(
       || "check inv_lhs_denom",
-      |lc| lc + lhs_denominator.get_variable(),
-      |lc| lc + inv_lhs_denom.get_variable(),
-      |lc| lc + CS::one(),
+      |lc| lc + lhs_denominator.get_variable() - inv_lhs_denom.get_variable(),
+      |lc| lc,
+      |lc| lc,
     );
 
     // so lhs = lhs_numerator * inv_lhs_denom
@@ -385,11 +429,19 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
       Ok(off_val.invert().expect("offset must be invertible"))
     })?;
     // offset * offset_inv = 1
+    println!("offset * offset_inv = 1: {:?}", 
+      self.domain.offset.get_value().and_then(|a| offset_inv.get_value().map(|b| a * b)) == Some(F::ONE));
+    // cs.enforce(
+    //   || "offset * offset_inv = 1",
+    //   |lc| lc + self.domain.offset.get_variable(),
+    //   |lc| lc + offset_inv.get_variable(),
+    //   |lc| lc + CS::one(),
+    // );
     cs.enforce(
-      || "offset * offset_inv = 1",
-      |lc| lc + self.domain.offset.get_variable(),
-      |lc| lc + offset_inv.get_variable(),
-      |lc| lc + CS::one(),
+      || "check inv_lhs_denom",
+      |lc| lc + self.domain.offset.get_variable() - offset_inv.get_variable(),
+      |lc| lc,
+      |lc| lc,
     );
     let alpha_coset_offset_inv = interpolation_point.mul(
       cs.namespace(|| "alpha_coset_offset_inv_unnorm"),
@@ -420,11 +472,19 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
       let sp_const = AllocatedNum::alloc(cs.namespace(|| format!("sp_const_{i}")), || {
         Ok(subgroup_element)
       })?;
+      // println!("subgroup_points[i] * sp_inv = 1: {:?}", 
+      //   subgroup_element.get_value().and_then(|a| sp_inv.get_value().map(|b| a * b)) == Some(F::ONE));
+      // cs.enforce(
+      //   || format!("check sp_inv_{i}"),
+      //   |lc| lc + sp_const.get_variable(),
+      //   |lc| lc + sp_inv.get_variable(),
+      //   |lc| lc + CS::one(),
+      // );
       cs.enforce(
         || format!("check sp_inv_{i}"),
-        |lc| lc + sp_const.get_variable(),
-        |lc| lc + sp_inv.get_variable(),
-        |lc| lc + CS::one(),
+        |lc| lc + sp_const.get_variable() - sp_inv.get_variable(),
+        |lc| lc,
+        |lc| lc,
       );
 
       // Now compute lag_denom = (alpha_coset_offset_inv * sp_inv) - 1
@@ -438,11 +498,19 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
       let lag_denom = AllocatedNum::alloc(cs.namespace(|| format!("lag_denom_{i}")), || {
         lag_denom_val.ok_or(SynthesisError::AssignmentMissing)
       })?;
+      // println!("alpha_sp_inv - 1 = lag_denom: {:?}", 
+      //   alpha_sp_inv.get_value().and_then(|a| lag_denom.get_value().map(|b| a - b - F::ONE)) == Some(F::ZERO));
+      // cs.enforce(
+      //   || format!("lag_denom_{i} = alpha_sp_inv_{i} - 1"),
+      //   |lc| lc + alpha_sp_inv.get_variable() - CS::one(),
+      //   |lc| lc + CS::one(),
+      //   |lc| lc + lag_denom.get_variable(),
+      // );
       cs.enforce(
         || format!("lag_denom_{i} = alpha_sp_inv_{i} - 1"),
-        |lc| lc + alpha_sp_inv.get_variable() - CS::one(),
-        |lc| lc + CS::one(),
-        |lc| lc + lag_denom.get_variable(),
+        |lc| lc + alpha_sp_inv.get_variable() - lag_denom.get_variable(),
+        |lc| lc,
+        |lc| lc,
       );
 
       // inverse of lag_denom
@@ -451,12 +519,21 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
           let val = lag_denom_val.ok_or(SynthesisError::AssignmentMissing)?;
           Ok(val.invert().expect("lag_denom must be invertible"))
         })?;
+      // println!("lag_denom * inv_lag_denom = 1: {:?}", 
+      //   lag_denom.get_value().and_then(|a| inv_lag_denom.get_value().map(|b| a * b)) == Some(F::ONE));
+      // cs.enforce(
+      //   || format!("lag_denom * inv = 1_{i}"),
+      //   |lc| lc + lag_denom.get_variable(),
+      //   |lc| lc + inv_lag_denom.get_variable(),
+      //   |lc| lc + CS::one(),
+      // );
       cs.enforce(
-        || format!("lag_denom * inv = 1_{i}"),
-        |lc| lc + lag_denom.get_variable(),
-        |lc| lc + inv_lag_denom.get_variable(),
-        |lc| lc + CS::one(),
+        || format!("lag_denom_{i} = alpha_sp_inv_{i} - 1"),
+        |lc| lc + lag_denom.get_variable() - inv_lag_denom.get_variable(),
+        |lc| lc,
+        |lc| lc,
       );
+
 
       // L_i(alpha) = lhs * inv_lag_denom
       let lag_coeff = lhs.mul(cs.namespace(|| format!("lag_coeff_{i}")), &inv_lag_denom)?;
@@ -543,11 +620,19 @@ impl<F: PrimeField> VanishingPolynomial<F> {
       let res = AllocatedNum::alloc(cs.namespace(|| format!("trivial case")), || Ok(val))?;
 
       // Enforce: a - b = res
+      println!("x - x = res: {:?}", 
+        x.get_value().and_then(|a| x.get_value().map(|b| a - b)) == res.get_value());
+      // cs.enforce(
+      //   || "trivial case",
+      //   |lc| lc + x.get_variable() - x.get_variable(),
+      //   |lc| lc + CS::one(),
+      //   |lc| lc + res.get_variable(),
+      // );
       cs.enforce(
         || "trivial case",
-        |lc| lc + x.get_variable() - x.get_variable(),
-        |lc| lc + CS::one(),
-        |lc| lc + res.get_variable(),
+        |lc| lc + x.get_variable() - x.get_variable() + res.get_variable(),
+        |lc| lc,
+        |lc| lc,
       );
       return Ok(res);
     }
@@ -573,11 +658,19 @@ impl<F: PrimeField> VanishingPolynomial<F> {
     let res = AllocatedNum::alloc(cs.namespace(|| "subtract constant_term"), || Ok(val))?;
 
     // Enforce: a - b = res
+    println!("x^(2^dim_h) - offset^(2^dim_h) = res: {:?}", 
+      cur.get_value().and_then(|a| offset_term.get_value().map(|b| a - b)) == res.get_value());
+    // cs.enforce(
+    //   || "subtract constant_term",
+    //   |lc| lc + cur.get_variable() - offset_term.get_variable(),
+    //   |lc| lc + CS::one(),
+    //   |lc| lc + res.get_variable(),
+    // );
     cs.enforce(
       || "subtract constant_term",
-      |lc| lc + cur.get_variable() - offset_term.get_variable(),
-      |lc| lc + CS::one(),
-      |lc| lc + res.get_variable(),
+      |lc| lc + cur.get_variable() - offset_term.get_variable() + res.get_variable(),
+      |lc| lc,
+      |lc| lc,
     );
 
     Ok(res)

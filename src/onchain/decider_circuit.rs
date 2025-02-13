@@ -379,9 +379,6 @@ where
     println!("alloc_rw_eval: {:?}", alloc_rw_eval.get_value());
     println!("kzg_alloc_rw_eval: {:?}", kzg_alloc_rw_eval.get_value());
     println!("equal vals: {:?}", kzg_alloc_rw_eval.get_value() == alloc_rw_eval.get_value());
-    println!("alloc_rw_eval_var: {:?}", alloc_rw_eval.get_variable());
-    println!("kzg_alloc_rw_eval_var: {:?}", kzg_alloc_rw_eval.get_variable());
-    println!("equal vars: {:?}", kzg_alloc_rw_eval.get_variable() == alloc_rw_eval.get_variable());
     cs.enforce(
       || "evalW == pW(cW)",
       |lc| lc,
@@ -393,9 +390,6 @@ where
     println!("alloc_re_eval: {:?}", alloc_re_eval.get_value());
     println!("kzg_alloc_re_eval: {:?}", kzg_alloc_re_eval.get_value());
     println!("equal vals: {:?}", kzg_alloc_re_eval.get_value() == alloc_re_eval.get_value());
-    println!("alloc_re_eval_var: {:?}", alloc_re_eval.get_variable());
-    println!("kzg_alloc_re_eval_var: {:?}", kzg_alloc_re_eval.get_variable());
-    println!("equal vars: {:?}", kzg_alloc_re_eval.get_variable() == alloc_re_eval.get_variable());
     cs.enforce(
       || "evalE == pE(cE)",
       |lc| lc,

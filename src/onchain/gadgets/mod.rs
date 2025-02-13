@@ -112,6 +112,8 @@ impl EvalGadget {
     CS: ConstraintSystem<E::Scalar>,
     E::Scalar: GpuName,
   {
+    let alloc_one = AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(1)))?;
+
     let native_v = v.iter().map(|x| x.get_value().unwrap_or(E::Scalar::from(0))).collect::<Vec<_>>();
     let mut domain = EvaluationDomain::from_coeffs(native_v).expect("Failed to create evaluation domain");
     let omega = domain.omega;
@@ -119,7 +121,8 @@ impl EvalGadget {
     // TODO: Check if nth_root_of_unity is faster than EvaluationDomain::from_coeffs
     // let omega_1 = nth_root_of_unity::<E::Scalar>(n).ok_or(SynthesisError::PolynomialDegreeTooLarge)?;
     v.resize(n, AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(0)))?);
-    let alloc_one = AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(1)))?;
+    println!("Allocated one: {:?}", alloc_one.get_value());
+
     let log2_v = usize::BITS - v.len().leading_zeros() - 1;
     let alloc_domain = AllocatedRadix2Domain::new(&mut cs, omega, log2_v as u64, alloc_one)?;
 
