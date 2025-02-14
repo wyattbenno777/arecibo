@@ -456,10 +456,10 @@ mod test {
   fn run_circuit<E: CurveCycleEquipped>(c: &impl StepCircuit<E::Scalar>) -> Result<(), NovaError> {
     let pp = super::PublicParams::<E>::setup(c, &*default_ck_hint(), &*default_ck_hint());
     let z0 = vec![E::Scalar::from(2u64)];
-    let mut recursive_snark = RecursiveSNARK::new(&pp, c, &z0).unwrap();
+    let mut recursive_snark = RecursiveSNARK::new(&pp, c, &z0)?;
     for i in 0..100 {
       recursive_snark.prove_step(&pp, c)?;
-      recursive_snark.verify(&pp, i + 1, &z0).unwrap();
+      recursive_snark.verify(&pp, i + 1, &z0)?;
     }
     Ok(())
   }
