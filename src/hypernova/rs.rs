@@ -421,37 +421,36 @@ where
 
 #[cfg(test)]
 mod test {
+  use super::RecursiveSNARK;
   use crate::{
     frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
     hypernova::rs::StepCircuit,
     provider::Bn256EngineIPA,
-    traits::{snark::default_ck_hint, CurveCycleEquipped},
+    traits::{snark::default_ck_hint, CurveCycleEquipped, Engine},
     NovaError,
   };
   use ff::PrimeField;
   use std::marker::PhantomData;
 
-  use super::RecursiveSNARK;
-
-  fn test_rs_with<E: CurveCycleEquipped>() -> Result<(), NovaError> {
-    let circuit = SquareCircuit::<E::Scalar> { _p: PhantomData };
-    run_circuit::<E>(&circuit)
-  }
+  type E = Bn256EngineIPA;
+  type F = <E as Engine>::Scalar;
 
   #[test]
   fn test_rs() -> Result<(), NovaError> {
-    test_rs_with::<Bn256EngineIPA>()
+    let circuit = SquareCircuit::<F>::default();
+    test_rs_with::<E>(&circuit)
   }
 
-  fn test_rs_pow_with<E: CurveCycleEquipped>() -> Result<(), NovaError> {
-    let circuit = PowCircuit::<E::Scalar> {
-      _field: PhantomData,
-    };
-    run_circuit::<E>(&circuit)
-  }
   #[test]
-  fn test_rs_pow() -> Result<(), NovaError> {
-    test_rs_pow_with::<Bn256EngineIPA>()
+  fn test_pow_rs() -> Result<(), NovaError> {
+    let circuit = PowCircuit::<F>::default();
+    test_rs_with::<E>(&circuit)
+  }
+
+  fn test_rs_with<E: CurveCycleEquipped>(
+    circuit: &impl StepCircuit<E::Scalar>,
+  ) -> Result<(), NovaError> {
+    run_circuit::<E>(circuit)
   }
 
   fn run_circuit<E: CurveCycleEquipped>(c: &impl StepCircuit<E::Scalar>) -> Result<(), NovaError> {
@@ -465,7 +464,7 @@ mod test {
     Ok(())
   }
 
-  #[derive(Clone)]
+  #[derive(Clone, Default)]
   struct SquareCircuit<F> {
     _p: PhantomData<F>,
   }
