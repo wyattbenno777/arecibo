@@ -138,8 +138,7 @@ where
 
 impl<E> SimpleDigestible for PublicParams<E> where E: CurveCycleEquipped {}
 
-/// A SNARK that proves the correct execution of an incremental computation in the CycleFold folding
-/// scheme.
+/// A SNARK that proves the correct execution of an incremental computation. HyperNova IVC scheme (with CycleFold).
 ///
 /// (U, W, u, w) -> IVC Proof
 /// (i, z0, zi) -> Statement being proven
@@ -310,7 +309,7 @@ where
     z0: &[E::Scalar],
   ) -> Result<Vec<E::Scalar>, NovaError> {
     // Basic checks for IVC proof
-    // //////
+    // //////////////////////////
     // number of steps cannot be zero
     let is_num_steps_zero = num_steps == 0;
     // check if the provided proof has executed num_steps
@@ -328,7 +327,7 @@ where
     }
 
     // Hash check
-    // ////////////////////////////////
+    // //////////
     // 1. Compute H(pp, i, z0, zi, r_U)
     let mut ro = <Dual<E> as Engine>::RO::new(pp.ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(pp.digest());
