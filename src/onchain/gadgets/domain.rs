@@ -7,47 +7,19 @@ use ff::PrimeField;
 pub struct AllocatedRadix2Domain<F: PrimeField> {
   /// generator of subgroup g
   pub gen: F,
-  /// index of the quotient group (i.e. the `offset`)
-  offset: AllocatedNum<F>,
   /// dimension of evaluation domain, which is log2(size of coset)
   pub dim: u64,
 }
 impl<F: PrimeField> AllocatedRadix2Domain<F> {
   /// Construct an evaluation domain with the given offset.
-  pub fn new<CS>(
-    mut cs: CS,
+  pub fn new(
     gen: F,
     dimension: u64,
-    offset: AllocatedNum<F>,
-  ) -> Result<Self, SynthesisError>
-  where
-    CS: ConstraintSystem<F>,
-  {
-    // Enforce that the offset is not zero
-
-    // Allocate 1/(offset - 0) to prove offset ≠ 0
-    let inv = cs.alloc(
-      || "inverse",
-      || {
-        let offset_val = offset.get_value().unwrap();
-        Ok(offset_val.invert().unwrap())
-      },
-    )?;
-
-    // Enforce that offset * inv = 1, which is only possible if offset ≠ 0
-    cs.enforce(
-      || "inverse exists",
-      |lc| lc + offset.get_variable(),
-      |lc| lc + inv,
-      |lc| lc + CS::one(),
-    );
-
-
-    Ok(Self {
+  ) -> Self {
+    Self {
       gen,
-      offset,
       dim: dimension,
-    })
+    }
   }
 }
 
@@ -59,12 +31,6 @@ pub struct AllocatedEvaluations<F: PrimeField> {
   /// Optional Lagrange Interpolator. Useful for lagrange interpolation.
   pub lagrange_interpolator: Option<LagrangeInterpolator<F>>,
   domain: AllocatedRadix2Domain<F>,
-  /// Contains all domain elements of `domain.base_domain`.
-  ///
-  /// This is a cache for lagrange interpolation when offset is non-constant.
-  /// Will be `None` if offset is constant or `interpolate` is set to
-  /// `false`.
-  subgroup_points: Option<Vec<F>>,
 }
 
 impl<F: PrimeField> AllocatedEvaluations<F> {
@@ -86,7 +52,6 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
       evals: evaluations.clone(),
       lagrange_interpolator: None,
       domain,
-      subgroup_points: None,
     };
     if interpolate {
       ev.generate_interpolation_cache();
@@ -104,7 +69,6 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
     // known offset and the evaluation values.
     // Otherwise, we'll precompute the subgroup elements so that they
     // can be used later for a dynamic offset.
-    if let Some(offset_val) = self.domain.offset.get_value() {
       // Gather the known values of the evaluations
       let poly_evaluations_val: Vec<_> = self
         .evals
@@ -115,33 +79,13 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
       // Build the LagrangeInterpolator using the known offset, generator, dimension,
       // and evaluation values.
       let lagrange_interpolator = LagrangeInterpolator::new(
-        offset_val,
+        F::ONE,
         self.domain.gen,
         self.domain.dim,
         poly_evaluations_val,
       );
 
       self.lagrange_interpolator = Some(lagrange_interpolator);
-    } else {
-      // The offset is not a known constant. We will compute and store
-      // all subgroup elements h*g^k for k in [0..(1 << dim)], so that
-      // interpolation can be performed once the offset is determined.
-      let size = 1 << self.domain.dim;
-      let mut subgroup_points = Vec::with_capacity(size);
-
-      // The underlying code treats the offset as h, but since we
-      // can't finalize interpolation now, we at least store the generator powers.
-      // Typically, we would want to multiply each by the unknown offset,
-      // but that can't be done if offset is not known yet.
-      let mut cur_elem = F::ONE;
-      subgroup_points.push(cur_elem);
-      for _ in 1..size {
-        cur_elem *= self.domain.gen;
-        subgroup_points.push(cur_elem);
-      }
-
-      self.subgroup_points = Some(subgroup_points);
-    }
   }
   /// Compute Lagrange coefficients for each evaluation, given `interpolation_point`.
   /// Only valid if the domain offset is constant (i.e., offset has a known value).
@@ -206,10 +150,6 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
       })?;
 
       // Now enforce: a_element * lag_coeff = vp_t
-      if a_element.get_value().and_then(|a| lag_coeff.get_value().map(|b| a * b)) != vp_t.get_value() {
-      println!("a_element * lag_coeff = vp_t: {:?}", 
-        a_element.get_value().and_then(|a| lag_coeff.get_value().map(|b| a * b)) == vp_t.get_value());
-      }
       cs.enforce(
         || format!("a_element_{i} * lag_coeff_{i} = vp_t"),
         |lc| lc + a_element.get_variable(),
@@ -232,13 +172,7 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
     mut cs: CS,
     interpolation_point: &AllocatedNum<F>,
   ) -> Result<AllocatedNum<F>, SynthesisError> {
-
-    // If offset is known at synthesis time, use optimized approach.
-    if self.domain.offset.get_value().is_some() {
-      self.lagrange_interpolate_with_constant_offset(cs, interpolation_point)
-    } else {
-      self.lagrange_interpolate_with_non_constant_offset(cs, interpolation_point)
-    }
+      self.lagrange_interpolate_with_constant_offset(&mut cs, interpolation_point)
   }
 
   /// Interpolate with constant offset. Uses fewer constraints by creating
@@ -246,7 +180,7 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
   /// summing up the product of that coefficient and the stored evaluation.
   fn lagrange_interpolate_with_constant_offset<CS: ConstraintSystem<F>>(
     &self,
-    mut cs: CS,
+    cs: &mut CS,
     interpolation_point: &AllocatedNum<F>,
   ) -> Result<AllocatedNum<F>, SynthesisError> {
     let lagrange_interpolator = self
@@ -275,242 +209,6 @@ impl<F: PrimeField> AllocatedEvaluations<F> {
     }
 
     Ok(accum)
-  }
-
-  /// Interpolate with non-constant offset. We do not know the offset value
-  /// at synthesis time, so we rely on subgroup_points for the base coset powers.
-  /// The idea is similar to the snippet provided, but adapted to bellpepper's
-  /// AllocatedNum/ConstraintSystem interface.
-  fn lagrange_interpolate_with_non_constant_offset<CS: ConstraintSystem<F>>(
-    &self,
-    mut cs: CS,
-    interpolation_point: &AllocatedNum<F>,
-  ) -> Result<AllocatedNum<F>, SynthesisError> {
-    // We need the subgroup_points precomputed, which store the generator powers.
-    // (None indicates this was never cached.)
-    let subgroup_points = self
-      .subgroup_points
-      .as_ref()
-      .expect("Interpolation cache missing: call generate_interpolation_cache() first");
-
-    // The domain dimension (log2), so the size is 2^dim.
-    let domain_size = 1_usize << self.domain.dim;
-
-    // We now compute offset^domain_size and alpha^domain_size.
-    // We'll do repeated squaring for both. This mirrors the snippet's code:
-    //   alpha^size - offset^size
-    // Then we'll enforce that they're not equal (vanishing polynomial != 0).
-    let offset_to_size = self.exp_power_of_two(
-      cs.namespace(|| "offset^size"),
-      &self.domain.offset,
-      domain_size,
-    )?;
-    let alpha_to_size = self.exp_power_of_two(
-      cs.namespace(|| "alpha^size"),
-      interpolation_point,
-      domain_size,
-    )?;
-
-    // lhs_numerator = alpha^size - offset^size
-    let lhs_numerator_val = match (alpha_to_size.get_value(), offset_to_size.get_value()) {
-      (Some(a), Some(b)) => Some(a - b),
-      _ => None,
-    };
-    let lhs_numerator = AllocatedNum::alloc(cs.namespace(|| "lhs_numerator"), || {
-      lhs_numerator_val.ok_or(SynthesisError::AssignmentMissing)
-    })?;
-    // Enforce alpha_to_size - offset_to_size = lhs_numerator
-    println!("alpha_to_size - offset_to_size = lhs_numerator: {:?}", 
-      alpha_to_size.get_value().and_then(|a| offset_to_size.get_value().map(|b| a - b)) == lhs_numerator.get_value());
-    cs.enforce(
-      || "lhs_numerator = alpha^size - offset^size",
-      |lc| lc + alpha_to_size.get_variable() - offset_to_size.get_variable(),
-      |lc| lc + CS::one(),
-      |lc| lc + lhs_numerator.get_variable(),
-    );
-
-    // Make sure lhs_numerator != 0, so alpha isn't in the multiplicative coset.
-    // We'll do a standard "inverse exists" trick: allocate an inverse, multiply,
-    // and enforce result  = 1.
-    let inverse_numerator = AllocatedNum::alloc(cs.namespace(|| "inverse lhs_numerator"), || {
-      let val = lhs_numerator_val.ok_or(SynthesisError::AssignmentMissing)?;
-      // If val = 0 in the real assignment, it would fail the proof,
-      // so we assume it's invertible.
-      Ok(val.invert().expect("lhs_numerator must be invertible"))
-    })?;
-    println!("lhs_numerator * inv != 0: {:?}", 
-      lhs_numerator.get_value().and_then(|a| inverse_numerator.get_value().map(|b| a * b)) == Some(F::ONE));
-    cs.enforce(
-      || "lhs_numerator * inv != 0",
-      |lc| lc + lhs_numerator.get_variable(),
-      |lc| lc + inverse_numerator.get_variable(),
-      |lc| lc + CS::one(),
-    );
-    // Now compute lhs_denominator = offset^size * domain_size
-    // (The snippet uses: size * offset^size.)
-    let domain_size_as_fe = F::from(domain_size as u64);
-    let domain_size_alloc = AllocatedNum::alloc(cs.namespace(|| "domain_size_alloc"), || {
-      Ok(domain_size_as_fe)
-    })?;
-    // No constraints needed if it's a known constant, but for clarity we do:
-    // Enforce domain_size_alloc is indeed domain_size_as_fe if you like, but often left as a constant.
-
-    let lhs_denominator = offset_to_size.mul(
-      cs.namespace(|| "lhs_denominator = offset^size * domain_size"),
-      &domain_size_alloc,
-    )?;
-
-    // Now invert lhs_denominator to define lhs = lhs_numerator / lhs_denominator
-    // We'll do the standard trick again.
-    let lhs_denominator_val = match (offset_to_size.get_value(), domain_size_alloc.get_value()) {
-      (Some(o), Some(ds)) => Some(o * ds),
-      _ => None,
-    };
-    let inv_lhs_denom = AllocatedNum::alloc(cs.namespace(|| "inverse lhs_denominator"), || {
-      let val = lhs_denominator_val.ok_or(SynthesisError::AssignmentMissing)?;
-      Ok(val.invert().expect("lhs_denominator must be invertible"))
-    })?;
-    // Enforce that lhs_denominator * inv_lhs_denom = 1
-    println!("lhs_denominator * inv_lhs_denom = 1: {:?}", 
-      lhs_denominator.get_value().and_then(|a| inv_lhs_denom.get_value().map(|b| a * b)) == Some(F::ONE));
-    cs.enforce(
-      || "check inv_lhs_denom",
-      |lc| lc + lhs_denominator.get_variable(),
-      |lc| lc + inv_lhs_denom.get_variable(),
-      |lc| lc + CS::one(),
-    );
-
-    // so lhs = lhs_numerator * inv_lhs_denom
-    let lhs = lhs_numerator.mul(cs.namespace(|| "lhs"), &inv_lhs_denom)?;
-
-    // Next we define alpha_coset_offset_inv = alpha / offset.
-    // We'll do the same approach: offset is known nonzero, so we can enforce alpha * offset_inv.
-    // We already enforced offset != 0 in AllocatedRadix2Domain::new.
-    let offset_inv = AllocatedNum::alloc(cs.namespace(|| "offset_inv"), || {
-      let off_val = self
-        .domain
-        .offset
-        .get_value()
-        .ok_or(SynthesisError::AssignmentMissing)?;
-      Ok(off_val.invert().expect("offset must be invertible"))
-    })?;
-    // offset * offset_inv = 1
-    println!("offset * offset_inv = 1: {:?}, {:?}, {:?}", 
-      self.domain.offset.get_value().and_then(|a| offset_inv.get_value().map(|b| a * b))  == Some(F::ONE), self.domain.offset.get_value(), offset_inv.get_value());
-    cs.enforce(
-      || "offset * offset_inv = 1",
-      |lc| lc + self.domain.offset.get_variable(),
-
-      |lc| lc + offset_inv.get_variable(),
-      |lc| lc + CS::one(),
-    );
-    let alpha_coset_offset_inv = interpolation_point.mul(
-      cs.namespace(|| "alpha_coset_offset_inv_unnorm"),
-      &offset_inv,
-    )?;
-
-    // We'll accumulate the final interpolation result in accum.
-    // accum = sum_{i=0..domain_size-1} (self.evals[i] * L_i(alpha)),
-    // where L_i(alpha) = lhs / (alpha_coset_offset_inv * subgroup_points[i]^-1 - 1).
-    let mut accum = AllocatedNum::alloc(cs.namespace(|| "accum_init"), || Ok(F::ZERO))?;
-
-    for (i, eval) in self.evals.iter().enumerate() {
-      // In the snippet, "subgroup_point_inv" is (1 / subgroup_points[i]) out-of-circuit.
-      // Here we only store the direct powers, not the inverses. If the code that built
-      // subgroup_points also built inverses (like the snippet implies),
-      // you can fetch them. Otherwise, you'd need to invert them here similarly.
-      let subgroup_element = subgroup_points[i];
-
-      // We'll allocate the subgroup_point_inv for clarity.
-      let sp_inv = AllocatedNum::alloc(cs.namespace(|| format!("sp_inv_{i}")), || {
-        Ok(
-          subgroup_element
-            .invert()
-            .expect("subgroup_element must be invertible"),
-        )
-      })?;
-      // Enforce subgroup_points[i] * sp_inv = 1
-      let sp_const = AllocatedNum::alloc(cs.namespace(|| format!("sp_const_{i}")), || {
-        Ok(subgroup_element)
-      })?;
-      // println!("subgroup_points[i] * sp_inv = 1: {:?}", 
-      //   subgroup_element.get_value().and_then(|a| sp_inv.get_value().map(|b| a * b)) == Some(F::ONE));
-      cs.enforce(
-        || format!("check sp_inv_{i}"),
-        |lc| lc + sp_const.get_variable(),
-        |lc| lc + sp_inv.get_variable(),
-        |lc| lc + CS::one(),
-      );
-
-
-      // Now compute lag_denom = (alpha_coset_offset_inv * sp_inv) - 1
-      // We'll allocate alpha_coset_offset_inv * sp_inv first:
-      let alpha_sp_inv =
-        alpha_coset_offset_inv.mul(cs.namespace(|| format!("alpha_sp_inv_{i}")), &sp_inv)?;
-      let lag_denom_val = match alpha_sp_inv.get_value() {
-        Some(val) => Some(val - F::ONE),
-        None => None,
-      };
-      let lag_denom = AllocatedNum::alloc(cs.namespace(|| format!("lag_denom_{i}")), || {
-        lag_denom_val.ok_or(SynthesisError::AssignmentMissing)
-      })?;
-      // println!("alpha_sp_inv - 1 = lag_denom: {:?}", 
-      //   alpha_sp_inv.get_value().and_then(|a| lag_denom.get_value().map(|b| a - b - F::ONE)) == Some(F::ZERO));
-      cs.enforce(
-        || format!("lag_denom_{i} = alpha_sp_inv_{i} - 1"),
-        |lc| lc + alpha_sp_inv.get_variable() - CS::one(),
-        |lc| lc + CS::one(),
-        |lc| lc + lag_denom.get_variable(),
-      );
-
-
-
-
-      // inverse of lag_denom
-      let inv_lag_denom =
-        AllocatedNum::alloc(cs.namespace(|| format!("inv_lag_denom_{i}")), || {
-          let val = lag_denom_val.ok_or(SynthesisError::AssignmentMissing)?;
-          Ok(val.invert().expect("lag_denom must be invertible"))
-        })?;
-      // println!("lag_denom * inv_lag_denom = 1: {:?}", 
-      //   lag_denom.get_value().and_then(|a| inv_lag_denom.get_value().map(|b| a * b)) == Some(F::ONE));
-      cs.enforce(
-        || format!("lag_denom * inv = 1_{i}"),
-        |lc| lc + lag_denom.get_variable(),
-        |lc| lc + inv_lag_denom.get_variable(),
-        |lc| lc + CS::one(),
-      );
-
-      // L_i(alpha) = lhs * inv_lag_denom
-      let lag_coeff = lhs.mul(cs.namespace(|| format!("lag_coeff_{i}")), &inv_lag_denom)?;
-
-      // Multiply the evaluation by the lagrange coefficient
-      let product = eval.mul(cs.namespace(|| format!("eval * lag_coeff_{i}")), &lag_coeff)?;
-      // Add to accum
-      accum = accum.add(cs.namespace(|| format!("accum_add_{i}")), &product)?;
-    }
-
-    Ok(accum)
-  }
-
-  /// A helper for exponentiating an AllocatedNum<F> by 2^power in-circuit via repeated squaring.
-  fn exp_power_of_two<CS: ConstraintSystem<F>>(
-    &self,
-    mut cs: CS,
-    base: &AllocatedNum<F>,
-    power: usize,
-  ) -> Result<AllocatedNum<F>, SynthesisError> {
-    if power == 0 {
-      // x^0 = 1
-      let one = AllocatedNum::alloc(cs.namespace(|| "constant one"), || Ok(F::ONE))?;
-      // Usually you'd skip constraints for a known constant, but you can store it as a variable if needed.
-      return Ok(one);
-    }
-    let mut result = base.clone();
-    for i in 1..power {
-      result = result.square(cs.namespace(|| format!("square iteration {i}")))?;
-    }
-    Ok(result)
   }
 }
 
@@ -554,25 +252,10 @@ impl<F: PrimeField> VanishingPolynomial<F> {
     x: &AllocatedNum<F>,
   ) -> Result<AllocatedNum<F>, SynthesisError> {
     if self.dim_h == 1 {
-      // TODO: This looks like an overkill.
-      // In the trivial domain size case, this polynomial simplifies out
-      // (x - x = 0)
-      let val = match x.get_value() {
-        Some(x_v) => Ok(x_v - x_v),
-        _ => Err(SynthesisError::AssignmentMissing),
-      }?;
-
       // Allocate the result
-      let res = AllocatedNum::alloc(cs.namespace(|| format!("trivial case")), || Ok(val))?;
-
-      // Enforce: a - b = res
-      cs.enforce(
-        || "trivial case",
-        |lc| lc + x.get_variable() - x.get_variable(),
-        |lc| lc + CS::one(),
-        |lc| lc + res.get_variable(),
-      );
-
+      let res = AllocatedNum::alloc(cs.namespace(|| format!("trivial case")), || {
+        Ok(F::ZERO)
+      })?;
       return Ok(res);
     }
 
@@ -589,16 +272,11 @@ impl<F: PrimeField> VanishingPolynomial<F> {
     })?;
 
     // Subtract the constant term from the result
-    let val = match (cur.get_value(), offset_term.get_value()) {
-      (Some(cur_v), Some(offset_term_v)) => Ok(cur_v - offset_term_v),
-      _ => Err(SynthesisError::AssignmentMissing),
-    }?;
-
-    let res = AllocatedNum::alloc(cs.namespace(|| "subtract constant_term"), || Ok(val))?;
+    let res = AllocatedNum::alloc(cs.namespace(|| "subtract constant_term"), || {
+      cur.get_value().and_then(|a| offset_term.get_value().map(|b| a - b)).ok_or(SynthesisError::AssignmentMissing)
+    })?;
 
     // Enforce: a - b = res
-    println!("x^(2^dim_h) - offset^(2^dim_h) = res: {:?}", 
-      cur.get_value().and_then(|a| offset_term.get_value().map(|b| a - b)) == res.get_value());
     cs.enforce(
       || "subtract constant_term",
       |lc| lc + cur.get_variable() - offset_term.get_variable(),

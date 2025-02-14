@@ -320,7 +320,6 @@ where
 
     // Step 7.1: Check correct computation of the KZG challenges.
     //           - cE ≡ H(E.{x, y}), cW ≡ H(W.{x, y}).
-
     let kzg_alloc_rw = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges rw"), || Ok(self.kzg_challenges.0))?;
     kzg_alloc_rw.inputize(cs.namespace(|| "kzg_alloc_rw"))?;
     let kzg_alloc_re = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges re"), || Ok(self.kzg_challenges.1))?;
@@ -390,7 +389,6 @@ where
     }
 
     let alloc_rw_eval = EvalGadget::evaluate_gadget::<&mut CS, E>(cs,W_i1_W, &kzg_alloc_rw)?;
-    println!("Equal rw eval vals: {:?}", kzg_alloc_rw_eval.get_value() == alloc_rw_eval.get_value());
     cs.enforce(
       || "evalW == pW(cW)",
       |lc| lc,
@@ -399,7 +397,6 @@ where
     );
 
     let alloc_re_eval = EvalGadget::evaluate_gadget::<&mut CS, E>(cs, W_i1_E, &kzg_alloc_re)?;
-    println!("Equal re eval vals: {:?}", kzg_alloc_re_eval.get_value() == alloc_re_eval.get_value());
     cs.enforce(
       || "evalE == pE(cE)",
       |lc| lc,

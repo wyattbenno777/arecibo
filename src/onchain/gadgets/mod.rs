@@ -110,22 +110,6 @@ impl EvalGadget {
     CS: ConstraintSystem<E::Scalar>,
     E::Scalar: GpuName,
   {
-    // // Convert AllocatedNum to native field elements
-    // let native_v = v.iter().map(|x| x.get_value().unwrap_or(E::Scalar::from(0))).collect::<Vec<_>>();
-    // let mut domain = EvaluationDomain::from_coeffs(native_v).expect("Failed to create evaluation domain");
-
-    // // Perform FFT to transform the polynomial into evaluation form
-    // let worker = Worker::new();
-    // domain.ifft(&worker, &mut None).expect("FFT failed");
-
-    // // Evaluate the polynomial at the given point
-    // let point_value = point.get_value().unwrap_or(E::Scalar::from(0));
-    // let eval = domain.evaluate_at(point_value);
-
-    // // Convert the result back to AllocatedNum
-    // let alloc_eval = AllocatedNum::alloc(&mut cs, || Ok(eval))?;
-    let alloc_one = AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(1)))?;
-
     let native_v = v.iter().map(|x| x.get_value().unwrap_or(E::Scalar::from(0))).collect::<Vec<_>>();
     let mut domain = EvaluationDomain::from_coeffs(native_v).expect("Failed to create evaluation domain");
     let omega = domain.omega;
@@ -135,7 +119,7 @@ impl EvalGadget {
     v.resize(n, AllocatedNum::alloc(&mut cs, || Ok(E::Scalar::from(0)))?);
 
     let log2_v = usize::BITS - v.len().leading_zeros() - 1;
-    let alloc_domain = AllocatedRadix2Domain::new(&mut cs, omega, log2_v as u64, alloc_one)?;
+    let alloc_domain = AllocatedRadix2Domain::new(omega, log2_v as u64);
 
     let alloc_evaluations = AllocatedEvaluations::from_vec_and_domain(v, alloc_domain, true);
     let eval = alloc_evaluations.interpolate_and_evaluate(&mut cs, point)?;
