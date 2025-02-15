@@ -61,7 +61,6 @@ where
     proof.parsing_check()?;
     for pub_input in public_inputs {
         if (pub_input.len() + 1) != pvk.ic.len() {
-            println!("3. (public_inputs.len() + 1) != pvk.ic.len(): {:?}, {:?}", public_inputs.len() , pvk.ic.len());
             return Err(SynthesisError::MalformedVerifyingKey);
         }
     }
@@ -231,7 +230,6 @@ where
     let proof = &aggregate_proof_and_instance.pi_agg;
 
     if (public_inputs.len() + public_outputs.len() + 1) != pvk.ic.len() {
-        println!("4. (public_inputs.len() + 1) != pvk.ic.len(): {:?}, {:?}", public_inputs.len() , pvk.ic.len());
         return Err(SynthesisError::MalformedVerifyingKey);
     }
 

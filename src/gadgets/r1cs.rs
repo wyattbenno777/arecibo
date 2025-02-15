@@ -1,18 +1,90 @@
 //! This module implements various gadgets necessary for folding R1CS types.
 use super::{
-  alloc_scalar_as_base, conditionally_select_bignat,
-  nonnative::{bignat::BigNat, util::f_to_nat},
-  utils::conditionally_select,
+  alloc_scalar_as_base, conditionally_select_bignat, nonnative::{bignat::BigNat, util::f_to_nat}, scalar_as_base, utils::conditionally_select
 };
-use crate::frontend::gadgets::{boolean::Boolean, num::AllocatedNum};
-use crate::frontend::{ConstraintSystem, SynthesisError};
 use crate::{
+  frontend::{
+    gadgets::{boolean::Boolean, num::AllocatedNum},
+    ConstraintSystem, SynthesisError,
+  },
   gadgets::ecc::AllocatedPoint,
-  r1cs::RelaxedR1CSInstance,
+  r1cs::{RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{commitment::CommitmentTrait, Engine, Group, ROCircuitTrait},
 };
 use ff::Field;
 use itertools::Itertools as _;
+
+#[derive(Clone)]
+pub struct AllocatedRelaxedR1CSWitness<E: Engine, const N: usize> {
+  W: Vec<AllocatedNum<E::Base>>,
+  r_W: AllocatedNum<E::Base>,
+  E: Vec<AllocatedNum<E::Base>>,
+  r_E: AllocatedNum<E::Base>,
+}
+
+impl<E: Engine, const N: usize> AllocatedRelaxedR1CSWitness<E, N> {
+  /// Allocates the given [`RelaxedR1CSInstance`] as a witness of the circuit
+  pub fn alloc<CS: ConstraintSystem<<E as Engine>::Base>>(
+    mut cs: CS,
+    witness: Option<&RelaxedR1CSWitness<E>>,
+    limb_width: usize,
+    n_limbs: usize,
+  ) -> Result<Self, SynthesisError> {
+    if let Some(witness) = witness {
+      let alloc_W = witness
+        .W
+        .iter()
+        .map(|w| AllocatedNum::alloc(cs.namespace(|| "allocate W"), || {
+          let val = scalar_as_base::<E>(*w);
+          Ok(val)
+        }))
+        .collect::<Result<Vec<_>, _>>()?;
+
+      let r_W = AllocatedNum::alloc(cs.namespace(|| "allocate r_W"), || {
+        let val = scalar_as_base::<E>(witness.r_W);
+        Ok(val)
+      })?;
+
+      let alloc_E = witness
+        .E
+        .iter()
+        .map(|e| AllocatedNum::alloc(cs.namespace(|| "allocate E"), || {
+          let val = scalar_as_base::<E>(*e);
+          Ok(val)
+        }))
+        .collect::<Result<Vec<_>, _>>()?;
+
+      let r_E = AllocatedNum::alloc(cs.namespace(|| "allocate r_E"), || {
+        let val = scalar_as_base::<E>(witness.r_E);
+        Ok(val)
+      })?;
+
+      Ok(Self {
+        W: alloc_W,
+        r_W,
+        E: alloc_E,
+        r_E,
+      })
+    } else {
+      Self::default(cs, limb_width, n_limbs)
+    }
+  }
+
+  /// Allocates the hardcoded default `RelaxedR1CSWitness` in the circuit.
+  /// W = E = vec![], r_W = 0, r_E = 0
+  pub fn default<CS: ConstraintSystem<<E as Engine>::Base>>(
+    mut cs: CS,
+    _limb_width: usize,
+    _n_limbs: usize,
+  ) -> Result<Self, SynthesisError> {
+    let W = vec![];
+    let E = vec![];
+    let r_W = AllocatedNum::alloc(cs.namespace(|| "allocate r_W"), || Ok(E::Base::ZERO))?;
+    let r_E = AllocatedNum::alloc(cs.namespace(|| "allocate r_E"), || Ok(E::Base::ZERO))?;
+
+    Ok(Self { W, r_W, E, r_E })
+  }
+}
 
 /// An Allocated Relaxed R1CS Instance
 #[derive(Clone)]

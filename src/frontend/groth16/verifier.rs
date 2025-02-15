@@ -47,7 +47,6 @@ where
     use multiscalar::MultiscalarPrecomp;
 
     if (public_inputs.len() + 1) != pvk.ic.len() {
-        println!("1. (public_inputs.len() + 1) != pvk.ic.len(): {:?}, {:?}", public_inputs.len() , pvk.ic.len());
         return Err(SynthesisError::MalformedVerifyingKey);
     }
 
@@ -122,7 +121,6 @@ where
 
     for pub_input in public_inputs {
         if (pub_input.len() + 1) != pvk.ic.len() {
-            println!("2. (public_inputs.len() + 1) != pvk.ic.len(): {:?}, {:?}", public_inputs.len() , pvk.ic.len());
             return Err(SynthesisError::MalformedVerifyingKey);
         }
     }

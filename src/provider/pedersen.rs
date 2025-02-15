@@ -1,6 +1,8 @@
 //! This module provides an implementation of a commitment engine
 use crate::{
   errors::NovaError,
+  frontend::{num::AllocatedNum, AllocatedBit, ConstraintSystem, SynthesisError},
+  gadgets::{scalar_as_base, AllocatedPoint},
   provider::traits::DlogGroup,
   traits::{
     commitment::{CommitmentEngineTrait, CommitmentTrait, Len},
@@ -13,13 +15,14 @@ use core::{
   marker::PhantomData,
   ops::{Add, Mul, MulAssign},
 };
-use ff::Field;
+use ff::{Field, PrimeFieldBits};
 use group::{
   prime::{PrimeCurve, PrimeCurveAffine},
   Curve, Group, GroupEncoding,
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::iter::zip;
 
 /// A type that holds commitment generators
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -262,6 +265,37 @@ where
         comm: E::GE::vartime_multiscalar_mul(v, &ck.ck[..v.len()]),
       }
     }
+  }
+
+  fn commit_gadget<CS: ConstraintSystem<E::Base>>(
+    cs: &mut CS,
+    ck: &Self::CommitmentKey,
+    v: &[E::Scalar],
+    r: &E::Scalar,
+  ) -> Result<AllocatedPoint<E::GE>, SynthesisError> {
+    let mut scalars = v.to_vec();
+    scalars.push(*r);
+
+    let mut bases = ck.ck[..v.len()].to_vec();
+    bases.push(*ck.h.as_ref().unwrap());
+
+    let mut acc = AllocatedPoint::<E::GE>::default(cs.namespace(|| "allocate zero"));
+    for (i, (s, b)) in zip(scalars, bases).enumerate() {
+      let mut s_bits = Vec::new();
+      for (j, bit) in s.to_le_bits().iter().enumerate() {
+        let allocated_bit = AllocatedBit::alloc(
+          cs.namespace(|| format!("allocate bit {}-{}", i, j)),
+          Some(*bit),
+        )?;
+        s_bits.push(allocated_bit);
+      }
+      let coordinates = b.to_curve().to_coordinates();
+      let alloc_b =
+        AllocatedPoint::<E::GE>::alloc(cs.namespace(|| "allocate bases"), Some(coordinates))?;
+      let res = alloc_b.scalar_mul(cs.namespace(|| "scalar mul"), &s_bits)?;
+      acc = acc.add(cs.namespace(|| format!("add {}", i)), &res)?;
+    }
+    Ok(acc)
   }
 
   fn derandomize(

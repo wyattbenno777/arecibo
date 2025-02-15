@@ -301,21 +301,11 @@ mod tests {
         alloc_relaxed_instance,
       )?;
 
-      println!(
-        "Equal test challenges rw: {:?}",
-        kzg_alloc_rw.get_value() == alloc_rw.get_value()
-      );
-
       cs.enforce(
         || "cW ≡ H(W.{x, y})",
         |lc| lc,
         |lc| lc,
         |lc| lc + kzg_alloc_rw.get_variable() - alloc_rw.get_variable(),
-      );
-
-      println!(
-        "Equal test challenges re: {:?}",
-        kzg_alloc_re.get_value() == alloc_re.get_value()
       );
 
       cs.enforce(

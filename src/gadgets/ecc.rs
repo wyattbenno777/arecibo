@@ -1,11 +1,9 @@
 //! This module implements various elliptic curve gadgets
 #![allow(non_snake_case)]
-use crate::frontend::gadgets::Assignment;
-use crate::frontend::{
-  num::AllocatedNum,
-  ConstraintSystem, SynthesisError, {AllocatedBit, Boolean},
-};
 use crate::{
+  frontend::{
+    gadgets::Assignment, num::AllocatedNum, AllocatedBit, Boolean, ConstraintSystem, SynthesisError,
+  },
   gadgets::utils::{
     alloc_num_equals, alloc_one, alloc_zero, conditionally_select2, select_num_or_one,
     select_num_or_zero, select_num_or_zero2, select_one_or_diff2, select_one_or_num2,
@@ -587,6 +585,35 @@ impl<G: Group> AllocatedPoint<G> {
 
     Ok(Self { x, y, is_infinity })
   }
+
+  /// Check that two points are equal
+  pub fn check_equal<CS: ConstraintSystem<G::Base>>(
+    &self,
+    mut cs: CS,
+    other: &Self,
+  ) -> Result<(), SynthesisError> {
+    let (self_x, self_y, self_is_infinity) = self.get_coordinates();
+    let (other_x, other_y, other_is_infinity) = other.get_coordinates();
+    cs.enforce(
+      || "check that x are equal",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + self_x.get_variable() - other_x.get_variable(),
+    );
+    cs.enforce(
+      || "check that y are equal",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + self_y.get_variable() - other_y.get_variable(),
+    );
+    cs.enforce(
+      || "check that is_infinity are equal",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + self_is_infinity.get_variable() - other_is_infinity.get_variable(),
+    );
+    Ok(())
+  }
 }
 
 #[derive(Clone, Debug)]
@@ -778,9 +805,12 @@ impl<G: Group> AllocatedPointNonInfinity<G> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::frontend::r1cs::NovaShape;
   use crate::{
-    frontend::{r1cs::NovaWitness, solver::SatisfyingAssignment, test_shape_cs::TestShapeCS},
+    frontend::{
+      r1cs::{NovaShape, NovaWitness},
+      solver::SatisfyingAssignment,
+      test_shape_cs::TestShapeCS,
+    },
     provider::{
       bn256_grumpkin::{bn256, grumpkin},
       secp_secq::{secp256k1, secq256k1},

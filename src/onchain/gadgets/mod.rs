@@ -7,12 +7,10 @@ pub mod eval;
 pub mod hash;
 pub mod kzg;
 
-
 pub use domain::*;
 pub use eval::*;
 pub use hash::*;
 pub use kzg::*;
-
 pub struct DeciderNovaGadget {}
 
 impl DeciderNovaGadget {

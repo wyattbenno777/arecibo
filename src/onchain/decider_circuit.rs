@@ -1,22 +1,25 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 #![allow(unused_mut)]
-use ff::PrimeField;
 
+use ff::PrimeField;
+use std::sync::Arc;
 use super::gadgets::{EvalGadget, KZGChallengesGadget};
+use crate::gadgets::AllocatedPoint;
 use crate::onchain::gadgets::hash::{hash_cf_U_i, hash_U_i};
+use crate::traits::commitment::CommitmentEngineTrait;
 use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_HASH_BITS},
   cyclefold::gadgets::emulated::{
     AllocatedEmulPoint, AllocatedEmulR1CSInstance, AllocatedEmulRelaxedR1CSInstance,
-    AllocatedEmulRelaxedR1CSWitness,
+    AllocatedEmulRelaxedR1CSWitness
   },
   errors::NovaError,
   frontend::{
     gpu::GpuName, num::AllocatedNum, AllocatedBit, Circuit, ConstraintSystem, Index,
     SynthesisError, Variable,
   },
-  gadgets::{alloc_num_equals, le_bits_to_num, AllocatedRelaxedR1CSInstance},
+  gadgets::{alloc_num_equals, le_bits_to_num, AllocatedRelaxedR1CSInstance, AllocatedRelaxedR1CSWitness},
   nebula::{
     nifs::NIFS,
     rs::{PublicParams, RecursiveSNARK},
@@ -38,10 +41,11 @@ where
   pub arith: R1CSShape<E>,
   /// R1CS of the CycleFold circuit
   pub cf_arith: R1CSShape<Dual<E>>,
+  /// RO constants
   pub ro_consts: ROConstants<E>,
-  // /// public params hash
+  /// public params hash
   pub pp_hash: E::Scalar,
-  pub i: usize, // TODO: Maybe pass E::Scalar as sonobe
+  pub i: usize, 
   pub prev_IC: E::Scalar,
   pub r_i: E::Scalar,
   /// initial state
@@ -63,7 +67,7 @@ where
   /// CycleFold running instance
   pub cf_U_i: RelaxedR1CSInstance<Dual<E>>,
   pub cf_W_i: RelaxedR1CSWitness<Dual<E>>,
-
+  pub cf_ck: Arc<CommitmentKey<Dual<E>>>,
   /// KZG challenges
   pub kzg_challenges: (E::Scalar, E::Scalar),
   /// KZG evaluations
@@ -105,6 +109,7 @@ where
       randomness: E::Scalar::from(0),
       cf_U_i: RelaxedR1CSInstance::default(ck_secondary, cf_arith),
       cf_W_i: RelaxedR1CSWitness::default(cf_arith),
+      cf_ck: ck_secondary.clone().into(),
       kzg_challenges: (E::Scalar::from(0), E::Scalar::from(0)),
       kzg_evaluations: (E::Scalar::from(0), E::Scalar::from(0)),
     }
@@ -127,7 +132,7 @@ where
         (&rs.r_U_primary, &rs.r_W_primary),
         (&rs.l_u_primary, &rs.l_w_primary),
         (&rs.r_U_cyclefold, &rs.r_W_cyclefold),
-      )?;
+      )?; 
 
     let (rw, re) =
       KZGChallengesGadget::get_challenges_native(r_U_primary.clone());
@@ -150,6 +155,7 @@ where
       w_i: rs.l_w_primary,
       U_i1: r_U_primary,
       W_i1: r_W_primary,
+      cf_ck: pp.ck_cyclefold.clone(), 
       cf_U_i: rs.r_U_cyclefold,
       cf_W_i: rs.r_W_cyclefold,
       kzg_challenges: (rw, re),
@@ -259,8 +265,16 @@ where
     );
 
     // Step 4: Commitments verification for U_{EC,n}.{E, W} with respect to W_{EC,n}.{E, W}.
-    //         - Pedersen commitments are used for this.
-    //         - This check is native in Fr because U_{EC,n}.{E, W} ∈ E2.
+    // let cf_W_i = AllocatedRelaxedR1CSWitness::<Dual<E>, BN_N_LIMBS>::alloc(
+    //   cs.namespace(|| "cf_W_i"), 
+    //   Some(&self.cf_W_i), 
+    //   BN_LIMB_WIDTH, 
+    //   BN_N_LIMBS)?;
+
+    let cf_W_i_commit = <Dual<E> as Engine>::CE::commit_gadget(cs, &*self.cf_ck, &self.cf_W_i.W[..], &self.cf_W_i.r_W)?;
+
+    // Check that Commit(cf_W_i.W) == cf_U_i.cmW
+    cf_W_i_commit.check_equal(cs.namespace(|| "check that cf_W_i.W == cf_U_i.cmW"), &cf_U_i.W)?;
 
     // Step 5: Enforce U_{EC,n} and W_{EC,n} satisfy r1cs_{EC},
     //         the Relaxed R1CS relation of the CycleFoldCircuit.
