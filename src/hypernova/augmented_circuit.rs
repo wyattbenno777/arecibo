@@ -134,7 +134,7 @@ where
 
     // Check that u references U in the output of the prior iteration
     //
-    // Hash check: u.X[0] = H(pp, i, z0, zi, U) && u.X[1] = H(pp, i, U_cyclefold)
+    // Hash check: u.X[0] = H(pp, i, z_0, z_i, U) && u.X[1] = H(pp, i, U_cyclefold)
     let should_be_false = AllocatedBit::nor(
       cs.namespace(|| "check_non_base_pass nor base_case"),
       &check_non_base_pass,
@@ -189,7 +189,7 @@ where
 
     // Output hash
     // ///////////
-    // u.X[0] = H(pp, i, z0, zi, U)
+    // u.X[0] = H(pp, i, z_0, z_i, U)
     let hash = self.calculate_hash(
       cs.namespace(|| "calculate_hash"),
       &pp_digest,
@@ -235,7 +235,7 @@ where
     ),
     SynthesisError,
   > {
-    // Hash check: u.X[0] = H(pp, i, z0, zi, U)
+    // Hash check: u.X[0] = H(pp, i, z_0, z_i, U)
     //             u.X[1] = H(pp, i, U_cyclefold)
     let io_check = self.io_check(
       cs.namespace(|| "io_check"),
@@ -280,7 +280,7 @@ where
     u: &AllocatedR1CSInstance<E>,
     U_cyclefold: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
   ) -> Result<AllocatedBit, SynthesisError> {
-    // Hash check: u.X[0] = H(pp, i, z0, zi, U)
+    // Hash check: u.X[0] = H(pp, i, z_0, z_i, U)
     let hash_check =
       self.hash_check(cs.namespace(|| "hash_check"), pp_digest, i, z_0, z_i, U, u)?;
 
@@ -314,7 +314,7 @@ where
   ) -> Result<AllocatedBit, SynthesisError> {
     let hash = self.calculate_hash(cs.namespace(|| "calculate_hash"), pp_digest, i, z_0, z_i, U)?;
     let hash_check = alloc_num_equals(
-      cs.namespace(|| "u.X[0] = H(params, i, z0, zi, U)"),
+      cs.namespace(|| "u.X[0] = H(params, i, z_0, z_i, U)"),
       &u.x0,
       &hash,
     )?;
@@ -386,8 +386,8 @@ where
     (
       AllocatedNum<E::Scalar>,                     // pp_digest
       AllocatedNum<E::Scalar>,                     // i
-      Vec<AllocatedNum<E::Scalar>>,                // z0
-      Vec<AllocatedNum<E::Scalar>>,                // zi
+      Vec<AllocatedNum<E::Scalar>>,                // z_0
+      Vec<AllocatedNum<E::Scalar>>,                // z_i
       AllocatedNIFS<E>,                            // nifs
       AllocatedLR1CSInstance<E>,                   // U
       AllocatedR1CSInstance<E>,                    // u
@@ -407,7 +407,7 @@ where
       arity,
     )?;
 
-    // Allocate zi. If inputs.zi is not provided (base case) allocate default value 0
+    // Allocate z_i. If inputs.z_i is not provided (base case) allocate default value 0
     let z_i = alloc_sized_vec(
       cs.namespace(|| "z_i"),
       and_then_field!(self.inputs, z_i),
@@ -527,10 +527,10 @@ where
 {
   let mut cs: ShapeCS<E> = ShapeCS::new();
   let zero: AllocatedNum<E::Scalar> = alloc_zero(cs.namespace(|| "zero"));
-  let z0 = (0..step_circuit.arity())
+  let z_0 = (0..step_circuit.arity())
     .map(|_| zero.clone())
     .collect_vec();
-  let _ = step_circuit.synthesize(&mut cs, &z0);
+  let _ = step_circuit.synthesize(&mut cs, &z_0);
   let step_circuit_cons = cs.num_constraints();
   let mut max_cons =
     base_cons + step_circuit_cons + (step_circuit.arity()).saturating_sub(1) * cons_per_input;
