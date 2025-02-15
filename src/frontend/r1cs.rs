@@ -10,19 +10,12 @@ use crate::{
   traits::Engine,
   CommitmentKey,
 };
-use ff::{Field, PrimeField};
+use ff::PrimeField;
 
 /// `NovaWitness` provide a method for acquiring an `R1CSInstance` and `R1CSWitness` from implementers.
 pub trait NovaWitness<E: Engine> {
   /// Return an instance and witness, given a shape and ck.
   fn r1cs_instance_and_witness(
-    &self,
-    shape: &R1CSShape<E>,
-    ck: &CommitmentKey<E>,
-  ) -> Result<(R1CSInstance<E>, R1CSWitness<E>), NovaError>;
-
-  /// Return an instance and witness, given a shape and ck, with the shape padded to a power of 2.
-  fn padded_r1cs_instance_and_witness(
     &self,
     shape: &R1CSShape<E>,
     ck: &CommitmentKey<E>,
@@ -35,13 +28,6 @@ pub trait NovaShape<E: Engine> {
   /// A `CommitmentKeyHint` should be provided to help guide the construction of the `CommitmentKey`.
   /// This parameter is documented in `r1cs::R1CS::commitment_key`.
   fn r1cs_shape(&self, ck_hint: &CommitmentKeyHint<E>) -> (R1CSShape<E>, CommitmentKey<E>);
-
-  /// Return an appropriate `R1CSShape` and `CommitmentKey` structs, with the shape padded to a power of 2.
-  fn padded_r1cs_shape(&self, ck_hint: &CommitmentKeyHint<E>) -> (R1CSShape<E>, CommitmentKey<E>) {
-    let (shape, ck) = self.r1cs_shape(ck_hint);
-    let shape = shape.pad();
-    (shape, ck)
-  }
 }
 
 impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
@@ -51,23 +37,6 @@ impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
     ck: &CommitmentKey<E>,
   ) -> Result<(R1CSInstance<E>, R1CSWitness<E>), NovaError> {
     let W = R1CSWitness::<E>::new(shape, self.aux_assignment().to_vec())?;
-    let X = &self.input_assignment()[1..];
-
-    let comm_W = W.commit(ck);
-
-    let instance = R1CSInstance::<E>::new(shape, comm_W, X.to_vec())?;
-
-    Ok((instance, W))
-  }
-
-  fn padded_r1cs_instance_and_witness(
-    &self,
-    shape: &R1CSShape<E>,
-    ck: &CommitmentKey<E>,
-  ) -> Result<(R1CSInstance<E>, R1CSWitness<E>), NovaError> {
-    let mut W = self.aux_assignment().to_vec();
-    W.extend(vec![E::Scalar::ZERO; shape.num_vars - W.len()]);
-    let W = R1CSWitness::<E>::new(shape, W)?;
     let X = &self.input_assignment()[1..];
 
     let comm_W = W.commit(ck);
@@ -95,14 +64,14 @@ macro_rules! impl_nova_shape {
         let num_constraints = self.num_constraints();
         let num_vars = self.num_aux();
         let num_precommitted = self.num_precommitted();
-        let num_precommitted2 = self.num_precommitted2();
+        let num_precommitted1 = self.num_precommitted1();
 
         for constraint in self.constraints.iter() {
           add_constraint(
             &mut X,
             num_vars,
             num_precommitted,
-            num_precommitted2,
+            num_precommitted1,
             &constraint.0,
             &constraint.1,
             &constraint.2,
@@ -136,7 +105,7 @@ fn add_constraint<S: PrimeField>(
   ),
   num_vars: usize,
   num_precommitted: usize,
-  num_precommitted2: usize,
+  num_precommitted1: usize,
   a_lc: &LinearCombination<S>,
   b_lc: &LinearCombination<S>,
   c_lc: &LinearCombination<S>,
@@ -154,7 +123,7 @@ fn add_constraint<S: PrimeField>(
         Index::Input(idx) => {
           // Inputs come last, with input 0, representing 'one',
           // at position num_vars within the witness vector.
-          let idx = idx + num_vars + num_precommitted + num_precommitted2;
+          let idx = idx + num_vars + num_precommitted + num_precommitted1;
           M.data.push(*coeff);
           M.indices.push(idx);
         }
@@ -167,7 +136,7 @@ fn add_constraint<S: PrimeField>(
           M.data.push(*coeff);
           M.indices.push(idx);
         }
-        Index::Precommitted2(idx) => {
+        Index::Precommitted1(idx) => {
           let idx = idx + num_vars + num_precommitted;
           M.data.push(*coeff);
           M.indices.push(idx);

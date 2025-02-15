@@ -67,7 +67,7 @@ pub struct TestShapeCS<E: Engine> {
   inputs: Vec<String>,
   aux: Vec<String>,
   precommitted: Vec<String>,
-  precommitted2: Vec<String>,
+  precommitted1: Vec<String>,
 }
 
 fn proc_lc<Scalar: PrimeField>(
@@ -126,9 +126,9 @@ where
     self.precommitted.len()
   }
 
-  /// Returns the number of precommitted2 inputs defined for this `ShapeCS`.
-  pub fn num_precommitted2(&self) -> usize {
-    self.precommitted2.len()
+  /// Returns the number of precommitted1 inputs defined for this `ShapeCS`.
+  pub fn num_precommitted1(&self) -> usize {
+    self.precommitted1.len()
   }
 
   /// Print all public inputs, aux inputs, and constraint names.
@@ -197,7 +197,7 @@ where
           Index::Precommitted(_) => {
             unimplemented!();
           }
-          Index::Precommitted2(_) => {
+          Index::Precommitted1(_) => {
             unimplemented!();
           }
         }
@@ -248,7 +248,7 @@ impl<E: Engine> Default for TestShapeCS<E> {
       inputs: vec![String::from("ONE")],
       aux: vec![],
       precommitted: vec![],
-      precommitted2: vec![],
+      precommitted1: vec![],
     }
   }
 }
@@ -280,7 +280,7 @@ where
     unimplemented!()
   }
 
-  fn alloc_precommitted2<F, A, AR>(&mut self, _: A, _: F) -> Result<Variable, SynthesisError>
+  fn alloc_precommitted1<F, A, AR>(&mut self, _: A, _: F) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<E::Scalar, SynthesisError>,
     A: FnOnce() -> AR,

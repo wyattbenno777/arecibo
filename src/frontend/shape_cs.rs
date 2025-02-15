@@ -20,7 +20,7 @@ where
   inputs: usize,
   aux: usize,
   precommitted: usize,
-  precommitted2: usize,
+  precommitted1: usize,
 }
 
 impl<E: Engine> ShapeCS<E> {
@@ -49,9 +49,9 @@ impl<E: Engine> ShapeCS<E> {
     self.precommitted
   }
 
-  /// Returns the number of precommitted2 inputs defined for this `ShapeCS`.
-  pub fn num_precommitted2(&self) -> usize {
-    self.precommitted2
+  /// Returns the number of precommitted1 inputs defined for this `ShapeCS`.
+  pub fn num_precommitted1(&self) -> usize {
+    self.precommitted1
   }
 }
 
@@ -62,7 +62,7 @@ impl<E: Engine> Default for ShapeCS<E> {
       inputs: 1,
       aux: 0,
       precommitted: 0,
-      precommitted2: 0,
+      precommitted1: 0,
     }
   }
 }
@@ -98,7 +98,7 @@ impl<E: Engine> ConstraintSystem<E::Scalar> for ShapeCS<E> {
     )))
   }
 
-  fn alloc_precommitted2<F, A, AR>(
+  fn alloc_precommitted1<F, A, AR>(
     &mut self,
     _annotation: A,
     _f: F,
@@ -108,10 +108,10 @@ impl<E: Engine> ConstraintSystem<E::Scalar> for ShapeCS<E> {
     A: FnOnce() -> AR,
     AR: Into<String>,
   {
-    self.precommitted2 += 1;
+    self.precommitted1 += 1;
 
-    Ok(Variable::new_unchecked(Index::Precommitted2(
-      self.precommitted2 - 1,
+    Ok(Variable::new_unchecked(Index::Precommitted1(
+      self.precommitted1 - 1,
     )))
   }
 

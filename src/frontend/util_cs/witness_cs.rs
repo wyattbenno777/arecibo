@@ -42,7 +42,7 @@ where
   pub(crate) input_assignment: Vec<Scalar>,
   pub(crate) aux_assignment: Vec<Scalar>,
   pub(crate) precommitted_assignment: Vec<Scalar>,
-  pub(crate) precommitted2_assignment: Vec<Scalar>,
+  pub(crate) precommitted1_assignment: Vec<Scalar>,
 }
 
 impl<Scalar> WitnessCS<Scalar>
@@ -73,7 +73,7 @@ where
       input_assignment,
       aux_assignment: vec![],
       precommitted_assignment: vec![],
-      precommitted2_assignment: vec![],
+      precommitted1_assignment: vec![],
     }
   }
 
@@ -99,16 +99,16 @@ where
     Ok(Variable(Index::Aux(self.precommitted_assignment.len() - 1)))
   }
 
-  fn alloc_precommitted2<F, A, AR>(&mut self, _: A, f: F) -> Result<Variable, SynthesisError>
+  fn alloc_precommitted1<F, A, AR>(&mut self, _: A, f: F) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<Scalar, SynthesisError>,
     A: FnOnce() -> AR,
     AR: Into<String>,
   {
-    self.precommitted2_assignment.push(f()?);
+    self.precommitted1_assignment.push(f()?);
 
     Ok(Variable(Index::Aux(
-      self.precommitted2_assignment.len() - 1,
+      self.precommitted1_assignment.len() - 1,
     )))
   }
 

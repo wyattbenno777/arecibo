@@ -97,7 +97,7 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
     self.cs.alloc_precommitted(annotation, f)
   }
 
-  fn alloc_precommitted2<F, A, AR>(
+  fn alloc_precommitted1<F, A, AR>(
     &mut self,
     annotation: A,
     f: F,
@@ -107,7 +107,7 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
     A: FnOnce() -> AR,
     AR: Into<String>,
   {
-    self.cs.alloc_precommitted2(annotation, f)
+    self.cs.alloc_precommitted1(annotation, f)
   }
 
   fn alloc_input<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>

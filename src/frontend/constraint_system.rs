@@ -100,7 +100,7 @@ pub trait ConstraintSystem<Scalar: PrimeField>: Sized + Send {
   /// determine the assignment of the variable. The given `annotation` function is invoked
   /// in testing contexts in order to derive a unique name for this variable in the current
   /// namespace.
-  fn alloc_precommitted2<F, A, AR>(
+  fn alloc_precommitted1<F, A, AR>(
     &mut self,
     annotation: A,
     f: F,
@@ -297,7 +297,7 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
     self.0.alloc_precommitted(annotation, f)
   }
 
-  fn alloc_precommitted2<F, A, AR>(
+  fn alloc_precommitted1<F, A, AR>(
     &mut self,
     annotation: A,
     f: F,
@@ -307,7 +307,7 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
     A: FnOnce() -> AR,
     AR: Into<String>,
   {
-    self.0.alloc_precommitted2(annotation, f)
+    self.0.alloc_precommitted1(annotation, f)
   }
 
   fn alloc_input<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>
@@ -411,7 +411,7 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar> 
     (**self).alloc_precommitted(annotation, f)
   }
 
-  fn alloc_precommitted2<F, A, AR>(
+  fn alloc_precommitted1<F, A, AR>(
     &mut self,
     annotation: A,
     f: F,
@@ -421,7 +421,7 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar> 
     A: FnOnce() -> AR,
     AR: Into<String>,
   {
-    (**self).alloc_precommitted2(annotation, f)
+    (**self).alloc_precommitted1(annotation, f)
   }
 
   fn alloc_input<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>
