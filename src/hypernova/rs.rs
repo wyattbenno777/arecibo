@@ -35,6 +35,7 @@ use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+/// A type that represents the carried commitments for this commitment-carrying HyperNova IVC scheme.
 type IC<E> = (<E as Engine>::Scalar, <E as Engine>::Scalar);
 
 /// The public parameters used in the HyperNova recursiveSNARK proving and verification
