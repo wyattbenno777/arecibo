@@ -6,7 +6,11 @@ use super::{shape_cs::ShapeCS, solver::SatisfyingAssignment, test_shape_cs::Test
 use crate::{
   errors::NovaError,
   frontend::{Index, LinearCombination},
-  r1cs::{commitment_key, CommitmentKeyHint, R1CSInstance, R1CSShape, R1CSWitness, SparseMatrix},
+  r1cs::{
+    commitment_key,
+    split::{SplitR1CSInstance, SplitR1CSWitness},
+    CommitmentKeyHint, R1CSInstance, R1CSShape, R1CSWitness, SparseMatrix,
+  },
   traits::Engine,
   CommitmentKey,
 };
@@ -20,6 +24,13 @@ pub trait NovaWitness<E: Engine> {
     shape: &R1CSShape<E>,
     ck: &CommitmentKey<E>,
   ) -> Result<(R1CSInstance<E>, R1CSWitness<E>), NovaError>;
+
+  /// Return an instance and witness, given a shape and ck.
+  fn split_r1cs_instance_and_witness(
+    &self,
+    shape: &R1CSShape<E>,
+    ck: &CommitmentKey<E>,
+  ) -> Result<(SplitR1CSInstance<E>, SplitR1CSWitness<E>), NovaError>;
 }
 
 /// `NovaShape` provides methods for acquiring `R1CSShape` and `CommitmentKey` from implementers.
@@ -41,6 +52,21 @@ impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
     let comm_W = W.commit(ck);
     let instance = R1CSInstance::<E>::new(shape, comm_W, X.to_vec())?;
     Ok((instance, W))
+  }
+
+  fn split_r1cs_instance_and_witness(
+    &self,
+    shape: &R1CSShape<E>,
+    ck: &CommitmentKey<E>,
+  ) -> Result<(SplitR1CSInstance<E>, SplitR1CSWitness<E>), NovaError> {
+    let (aux_U, aux_W) = self.r1cs_instance_and_witness(shape, ck)?;
+    let pre_committed_witness = (
+      self.precommitted_assignment().to_vec(),
+      self.precommitted1_assignment().to_vec(),
+    );
+    let W = SplitR1CSWitness::new(aux_W, pre_committed_witness);
+
+    todo!()
   }
 }
 
