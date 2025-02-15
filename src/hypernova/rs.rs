@@ -161,7 +161,7 @@ where
   z_0: Vec<E::Scalar>,
   i: usize,
   z_i: Vec<E::Scalar>,
-  prev_IC: IC<E>,
+  prev_ic: IC<E>,
 }
 
 impl<E> RecursiveSNARK<E>
@@ -233,14 +233,19 @@ where
       z_0: z_0.to_vec(),
       i: 0,
       z_i,
-      prev_IC: (E::Scalar::ZERO, E::Scalar::ZERO),
+      prev_ic: (E::Scalar::ZERO, E::Scalar::ZERO),
     })
   }
 
   /// Create a new [`RecursiveSNARK`] (or updates the provided [`RecursiveSNARK`])
   /// by executing a step of the incremental computation
   #[tracing::instrument(skip_all, name = "HyperNova::RecursiveSNARK::prove_step")]
-  pub fn prove_step<C>(&mut self, pp: &PublicParams<E>, step_circuit: &C) -> Result<(), NovaError>
+  pub fn prove_step<C>(
+    &mut self,
+    pp: &PublicParams<E>,
+    step_circuit: &C,
+    ic: IC<E>,
+  ) -> Result<(), NovaError>
   where
     C: StepCircuit<E::Scalar>,
   {
@@ -307,6 +312,7 @@ where
       .map(|v| v.get_value().ok_or(SynthesisError::AssignmentMissing))
       .collect::<Result<Vec<_>, _>>()?;
     self.i += 1;
+    self.prev_ic = ic;
     Ok(())
   }
 
@@ -430,7 +436,7 @@ where
 
 #[cfg(test)]
 mod test {
-  use super::RecursiveSNARK;
+  use super::{RecursiveSNARK, IC};
   use crate::{
     frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
     hypernova::rs::StepCircuit,
@@ -465,9 +471,10 @@ mod test {
   fn run_circuit<E: CurveCycleEquipped>(c: &impl StepCircuit<E::Scalar>) -> Result<(), NovaError> {
     let pp = super::PublicParams::<E>::setup(c, &*default_ck_hint(), &*default_ck_hint());
     let z_0 = vec![E::Scalar::from(2u64)];
+    let ic = IC::<E>::default();
     let mut recursive_snark = RecursiveSNARK::new(&pp, c, &z_0)?;
     for i in 0..100 {
-      recursive_snark.prove_step(&pp, c)?;
+      recursive_snark.prove_step(&pp, c, ic)?;
       recursive_snark.verify(&pp, i + 1, &z_0)?;
     }
     Ok(())
