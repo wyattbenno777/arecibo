@@ -4,21 +4,17 @@ pub(crate) mod util;
 
 use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
-  cyclefold::util::absorb_primary_commitment,
   digest::{DigestComputer, SimpleDigestible},
   errors::NovaError,
   gadgets::{f_to_nat, nat_to_limbs, scalar_as_base},
-  hypernova::error::HyperNovaError,
-  spartan::{math::Math, polys::multilinear::MultilinearPolynomial},
+  spartan::polys::multilinear::MultilinearPolynomial,
   traits::{
-    commitment::CommitmentEngineTrait, AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROTrait,
-    TranscriptReprTrait,
+    commitment::CommitmentEngineTrait, AbsorbInROTrait, Engine, ROTrait, TranscriptReprTrait,
   },
   zip_with, Commitment, CommitmentKey, DerandKey, CE,
 };
 use core::cmp::max;
 use ff::Field;
-use itertools::Itertools;
 use once_cell::sync::OnceCell;
 use rand_core::{CryptoRng, OsRng, RngCore};
 use rayon::prelude::*;
