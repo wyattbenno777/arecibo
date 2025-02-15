@@ -38,11 +38,8 @@ impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
   ) -> Result<(R1CSInstance<E>, R1CSWitness<E>), NovaError> {
     let W = R1CSWitness::<E>::new(shape, self.aux_assignment().to_vec())?;
     let X = &self.input_assignment()[1..];
-
     let comm_W = W.commit(ck);
-
     let instance = R1CSInstance::<E>::new(shape, comm_W, X.to_vec())?;
-
     Ok((instance, W))
   }
 }
