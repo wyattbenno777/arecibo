@@ -255,18 +255,18 @@ where
     );
 
     // Step 4: Commitments verification for U_{EC,n}.{E, W} with respect to W_{EC,n}.{E, W}.
-    // let cf_W_i_commit = <Dual<E> as Engine>::CE::commit_gadget(
-    //   cs,
-    //   &*self.cf_ck,
-    //   &self.cf_W_i.W[..],
-    //   &self.cf_W_i.r_W,
-    // )?;
+    let cf_W_i_commit = <Dual<E> as Engine>::CE::commit_gadget(
+      cs,
+      &*self.cf_ck,
+      &self.cf_W_i.W[..],
+      &self.cf_W_i.r_W,
+    )?;
 
-    // // Check that Commit(cf_W_i.W) == cf_U_i.cmW
-    // cf_W_i_commit.check_equal(
-    //   cs.namespace(|| "check that cf_W_i.W == cf_U_i.cmW"),
-    //   &cf_U_i.W,
-    // )?;
+    // Check that Commit(cf_W_i.W) == cf_U_i.cmW
+    cf_W_i_commit.check_equal(
+      cs.namespace(|| "check that cf_W_i.W == cf_U_i.cmW"),
+      &cf_U_i.W,
+    )?;
 
     // Step 5: Enforce U_{EC,n} and W_{EC,n} satisfy r1cs_{EC},
     //         the Relaxed R1CS relation of the CycleFoldCircuit.
