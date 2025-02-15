@@ -16,7 +16,7 @@ use crate::{
     le_bits_to_num, AllocatedRelaxedR1CSInstance,
   },
   map_field,
-  r1cs::{LR1CSInstance, R1CSInstance},
+  r1cs::{split::LR1CSInstance, R1CSInstance},
   spartan::math::Math,
   traits::{
     commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,

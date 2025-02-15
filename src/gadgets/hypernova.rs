@@ -5,7 +5,7 @@ use crate::{
   gadgets::le_bits_to_num,
   hypernova::{nifs::NIFS, ro_sumcheck::ROSumcheckProof},
   map_field,
-  r1cs::{LR1CSInstance, R1CSInstance},
+  r1cs::{split::LR1CSInstance, R1CSInstance},
   spartan::polys::univariate::UniPoly,
   traits::{
     commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,

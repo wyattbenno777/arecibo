@@ -25,6 +25,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 pub(crate) use sparse::SparseMatrix;
+use split::LR1CSInstance;
 pub mod split;
 /// A type that holds the shape of the R1CS matrices
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1022,92 +1023,6 @@ impl<E: Engine> AbsorbInROTrait<E> for RelaxedR1CSInstance<E> {
       }
     }
   }
-}
-
-/// A type that holds a linearized R1CS instance
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(bound = "")]
-pub struct LR1CSInstance<E: Engine> {
-  pub(crate) comm_W: Commitment<E>,
-  pub(crate) X: Vec<E::Scalar>,
-  /// (Random) evaluation point
-  pub(crate) rx: Vec<E::Scalar>,
-  /// Evaluation targets
-  pub(crate) vs: Vec<E::Scalar>,
-  pub(crate) u: E::Scalar,
-}
-
-impl<E> LR1CSInstance<E>
-where
-  E: Engine,
-{
-  /// Produces a default [`LR1CSInstance]` given `R1CSShape`
-  pub fn default(S: &R1CSShape<E>) -> Self {
-    let comm_W = Commitment::<E>::default();
-    Self {
-      comm_W,
-      u: E::Scalar::ZERO,
-      X: vec![E::Scalar::ZERO; S.num_io],
-      rx: vec![E::Scalar::ZERO; S.num_cons.next_power_of_two().log_2()],
-      vs: vec![E::Scalar::ZERO; 3],
-    }
-  }
-
-  /// Fold and [`LR1CSInstance`] with an [`R1CSInstance`]
-  pub fn fold(
-    &self,
-    U2: &R1CSInstance<E>,
-    rho: E::Scalar,
-    rx: &[E::Scalar],
-    sigmas: &[E::Scalar],
-    thetas: &[E::Scalar],
-  ) -> Result<Self, NovaError> {
-    let (X1, u1, comm_W_1) = (&self.X, self.u, &self.comm_W);
-    let (X2, comm_W_2) = (&U2.X, &U2.comm_W);
-    if self.rx.len() != rx.len() {
-      return Err(HyperNovaError::InvalidEvaluationPoint.into());
-    }
-    if sigmas.len() != thetas.len() {
-      return Err(HyperNovaError::InvalidTargets.into());
-    }
-    let comm_W = *comm_W_1 + *comm_W_2 * rho;
-    let u = u1 + rho;
-    let X = zip_with!((X1.par_iter(), X2), |a, b| *a + rho * *b).collect::<Vec<E::Scalar>>();
-    let vs: Vec<E::Scalar> = sigmas
-      .iter()
-      .zip_eq(thetas.iter())
-      .map(|(sigma, theta)| *sigma + *theta * rho)
-      .collect();
-    Ok(Self {
-      comm_W,
-      X,
-      rx: rx.to_vec(),
-      vs,
-      u,
-    })
-  }
-
-  pub(crate) fn absorb_in_ro(&self, ro: &mut <Dual<E> as Engine>::RO)
-  where
-    E: CurveCycleEquipped,
-  {
-    absorb_primary_commitment::<E, Dual<E>>(&self.comm_W, ro);
-    ro.absorb(self.u);
-    for x in &self.X {
-      ro.absorb(*x);
-    }
-    for x in &self.rx {
-      ro.absorb(*x);
-    }
-    for x in &self.vs {
-      ro.absorb(*x);
-    }
-  }
-}
-
-/// Empty buffer for `commit_T_into`
-pub fn default_T<E: Engine>(num_cons: usize) -> Vec<E::Scalar> {
-  Vec::with_capacity(num_cons)
 }
 
 #[cfg(test)]

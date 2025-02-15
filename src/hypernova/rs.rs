@@ -24,7 +24,7 @@ use crate::{
     nifs::NIFS,
   },
   r1cs::{
-    CommitmentKeyHint, LR1CSInstance, R1CSInstance, R1CSWitness, RelaxedR1CSInstance,
+    split::LR1CSInstance, CommitmentKeyHint, R1CSInstance, R1CSWitness, RelaxedR1CSInstance,
     RelaxedR1CSWitness,
   },
   traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},

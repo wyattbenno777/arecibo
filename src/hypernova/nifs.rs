@@ -9,7 +9,8 @@ use crate::{
   frontend::{r1cs::NovaWitness, solver::SatisfyingAssignment, ConstraintSystem},
   gadgets::scalar_as_base,
   r1cs::{
-    LR1CSInstance, R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness,
+    split::LR1CSInstance, R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance,
+    RelaxedR1CSWitness,
   },
   spartan::{
     math::Math,
@@ -346,7 +347,8 @@ mod tests {
     hypernova::nifs::NIFS,
     provider::{Bn256EngineKZG, PallasEngine, Secp256k1Engine},
     r1cs::{
-      LR1CSInstance, R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness,
+      split::LR1CSInstance, R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance,
+      RelaxedR1CSWitness,
     },
     spartan::math::Math,
     traits::{snark::default_ck_hint, CurveCycleEquipped, Dual, Engine, ROConstants},
