@@ -1,14 +1,12 @@
 //! This module implements the HyperNova folding scheme.
 use super::ro_sumcheck::ROSumcheckProof;
-use crate::cyclefold::util::absorb_cyclefold_r1cs;
-use crate::frontend::r1cs::NovaWitness;
-use crate::frontend::ConstraintSystem;
-use crate::traits::AbsorbInROTrait;
-use crate::Commitment;
 use crate::{
   constants::{DEFAULT_ABSORBS, NUM_CHALLENGE_BITS},
-  cyclefold::{circuit::CycleFoldCircuit, util::absorb_primary_r1cs},
-  frontend::solver::SatisfyingAssignment,
+  cyclefold::{
+    circuit::CycleFoldCircuit,
+    util::{absorb_cyclefold_r1cs, absorb_primary_r1cs},
+  },
+  frontend::{r1cs::NovaWitness, solver::SatisfyingAssignment, ConstraintSystem},
   gadgets::scalar_as_base,
   r1cs::{
     LR1CSInstance, R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness,
@@ -17,11 +15,10 @@ use crate::{
     math::Math,
     polys::{eq::EqPolynomial, multilinear::MultilinearPolynomial},
   },
-  traits::{CurveCycleEquipped, Dual, Engine, ROConstants, ROTrait},
-  CommitmentKey, NovaError,
+  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstants, ROTrait},
+  Commitment, CommitmentKey, NovaError,
 };
-use ff::Field;
-use ff::PrimeFieldBits;
+use ff::{Field, PrimeFieldBits};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

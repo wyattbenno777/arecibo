@@ -1,15 +1,11 @@
 use super::{nifs::NIFS, rs::StepCircuit};
-use crate::cyclefold::gadgets::AllocatedCycleFoldData;
-use crate::cyclefold::util::FoldingData;
-use crate::frontend::AllocatedBit;
-use crate::gadgets::AllocatedRelaxedR1CSInstance;
-use crate::traits::ROCircuitTrait;
 use crate::{
   and_then_field,
   constants::{DEFAULT_ABSORBS, NIO_CYCLE_FOLD, NUM_HASH_BITS},
+  cyclefold::{gadgets::AllocatedCycleFoldData, util::FoldingData},
   frontend::{
-    gadgets::Assignment, num::AllocatedNum, shape_cs::ShapeCS, Boolean, ConstraintSystem,
-    SynthesisError,
+    gadgets::Assignment, num::AllocatedNum, shape_cs::ShapeCS, AllocatedBit, Boolean,
+    ConstraintSystem, SynthesisError,
   },
   gadgets::{
     alloc_num_equals, alloc_zero, conditionally_select_vec,
@@ -17,12 +13,15 @@ use crate::{
     hypernova::{
       alloc_sized_vec, increment, AllocatedLR1CSInstance, AllocatedNIFS, AllocatedR1CSInstance,
     },
-    le_bits_to_num,
+    le_bits_to_num, AllocatedRelaxedR1CSInstance,
   },
   map_field,
   r1cs::{LR1CSInstance, R1CSInstance},
   spartan::math::Math,
-  traits::{commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
+  traits::{
+    commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
+    ROConstantsCircuit,
+  },
   AugmentedCircuitParams, Commitment,
 };
 use itertools::Itertools;

@@ -2,8 +2,10 @@
 //! the Nebula paper. Used to help facilitate randomized circuits.
 
 use super::{R1CSInstance, R1CSWitness};
-use crate::traits::commitment::CommitmentEngineTrait;
-use crate::{traits::Engine, Commitment, CommitmentKey, CE};
+use crate::{
+  traits::{commitment::CommitmentEngineTrait, Engine},
+  Commitment, CommitmentKey, CE,
+};
 use ff::Field;
 
 /// A split R1CS instance.

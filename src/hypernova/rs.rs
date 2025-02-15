@@ -2,7 +2,6 @@
 //!
 //! This module implements a SNARK that proves the correct execution of an incremental computation.
 
-use crate::traits::AbsorbInROTrait;
 use crate::{
   constants::{
     BASE_CONSTRAINTS, BN_LIMB_WIDTH, BN_N_LIMBS, DEFAULT_ABSORBS,
@@ -28,7 +27,7 @@ use crate::{
     CommitmentKeyHint, LR1CSInstance, R1CSInstance, R1CSWitness, RelaxedR1CSInstance,
     RelaxedR1CSWitness,
   },
-  traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},
+  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},
   AugmentedCircuitParams, CommitmentKey, DigestComputer, R1CSWithArity, ROConstants,
 };
 use ff::{Field, PrimeField};

@@ -1,18 +1,16 @@
-use super::emulated::AllocatedEmulPoint;
-use super::utils::alloc_one;
-use super::{alloc_zero, conditionally_select};
-use crate::constants::NUM_CHALLENGE_BITS;
-use crate::frontend::Boolean;
-use crate::gadgets::le_bits_to_num;
-use crate::traits::ROCircuitTrait;
+use super::{alloc_zero, conditionally_select, emulated::AllocatedEmulPoint, utils::alloc_one};
 use crate::{
-  constants::{DEFAULT_ABSORBS, NUM_MATRICES, NUM_UNIVARIATE_COEFFS},
-  frontend::{gadgets::Assignment, num::AllocatedNum, ConstraintSystem, SynthesisError},
+  constants::{DEFAULT_ABSORBS, NUM_CHALLENGE_BITS, NUM_MATRICES, NUM_UNIVARIATE_COEFFS},
+  frontend::{gadgets::Assignment, num::AllocatedNum, Boolean, ConstraintSystem, SynthesisError},
+  gadgets::le_bits_to_num,
   hypernova::{nifs::NIFS, ro_sumcheck::ROSumcheckProof},
   map_field,
   r1cs::{LR1CSInstance, R1CSInstance},
   spartan::polys::univariate::UniPoly,
-  traits::{commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
+  traits::{
+    commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
+    ROConstantsCircuit,
+  },
   Commitment,
 };
 use ff::PrimeField;
