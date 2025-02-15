@@ -62,14 +62,6 @@ impl KZGChallengesGadget {
     let re = ro.squeeze(cs.namespace(|| "squeeze_E"), NUM_HASH_BITS)?;
     let alloc_re = le_bits_to_num(cs.namespace(|| "bits_to_num re"), &re)?;
 
-    // TODO: Remove
-    // Trivial constraint to ensure that the variables are used
-    cs.enforce(
-      || "Trivial constraint",
-      |lc| lc + U_i.x0.get_variable() + U_i.x1.get_variable() + U_i.u.get_variable(),
-      |lc| lc,
-      |lc| lc,
-    );
     Ok((alloc_rw, alloc_re))
   }
 }
