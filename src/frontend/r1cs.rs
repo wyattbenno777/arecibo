@@ -65,8 +65,9 @@ impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
       self.precommitted1_assignment().to_vec(),
     );
     let W = SplitR1CSWitness::new(aux_W, pre_committed_witness);
-
-    todo!()
+    let pre_commits = W.commit(ck);
+    let instance = SplitR1CSInstance::new(aux_U, pre_commits);
+    Ok((instance, W))
   }
 }
 
