@@ -494,6 +494,23 @@ pub mod emulated {
 
       Ok(Self { comm_W, x0, x1 })
     }
+
+    pub fn absorb_in_ro<CS>(
+      &self,
+      mut cs: CS,
+      ro: &mut impl ROCircuitTrait<E::Base>,
+    ) -> Result<(), SynthesisError>
+    where
+      CS: ConstraintSystem<<E as Engine>::Base>,
+    {
+      self
+        .comm_W
+        .absorb_in_ro(cs.namespace(|| "absorb comm_W"), ro)?;
+      ro.absorb(&self.x0);
+      ro.absorb(&self.x1);
+
+      Ok(())
+    }
   }
 
   #[derive(Clone, Debug)]

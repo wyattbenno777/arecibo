@@ -2,36 +2,36 @@
 #![allow(unused_variables)]
 #![allow(unused_mut)]
 
-use ff::PrimeField;
-use std::sync::Arc;
-use super::gadgets::{EvalGadget, KZGChallengesGadget};
-use crate::gadgets::AllocatedPoint;
-use crate::onchain::gadgets::hash::{hash_cf_U_i, hash_U_i};
-use crate::traits::commitment::CommitmentEngineTrait;
+use super::gadgets::{EvalGadget, FoldGadget, KZGChallengesGadget};
 use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_HASH_BITS},
   cyclefold::gadgets::emulated::{
     AllocatedEmulPoint, AllocatedEmulR1CSInstance, AllocatedEmulRelaxedR1CSInstance,
-    AllocatedEmulRelaxedR1CSWitness
+    AllocatedEmulRelaxedR1CSWitness,
   },
   errors::NovaError,
   frontend::{
     gpu::GpuName, num::AllocatedNum, AllocatedBit, Circuit, ConstraintSystem, Index,
     SynthesisError, Variable,
   },
-  gadgets::{alloc_num_equals, le_bits_to_num, AllocatedRelaxedR1CSInstance, AllocatedRelaxedR1CSWitness},
+  gadgets::{
+    alloc_num_equals, le_bits_to_num, AllocatedPoint, AllocatedRelaxedR1CSInstance,
+    AllocatedRelaxedR1CSWitness,
+  },
   nebula::{
     nifs::NIFS,
     rs::{PublicParams, RecursiveSNARK},
   },
+  onchain::gadgets::hash::{hash_U_i, hash_cf_U_i},
   provider::traits::DlogGroup,
   r1cs::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{
-    commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait, ROConstants,
-    ROConstantsCircuit, ROTrait,
+    commitment::{CommitmentEngineTrait, CommitmentTrait}, CurveCycleEquipped, Dual, Engine, Group, ROCircuitTrait, ROConstants, ROConstantsCircuit, ROTrait
   },
   CommitmentKey,
 };
+use ff::PrimeField;
+use std::sync::Arc;
 
 pub struct DeciderCircuit<E>
 where
@@ -45,7 +45,7 @@ where
   pub ro_consts: ROConstants<E>,
   /// public params hash
   pub pp_hash: E::Scalar,
-  pub i: usize, 
+  pub i: usize,
   pub prev_IC: E::Scalar,
   pub r_i: E::Scalar,
   /// initial state
@@ -74,18 +74,16 @@ where
   pub kzg_evaluations: (E::Scalar, E::Scalar),
 }
 
-
-
 impl<E> DeciderCircuit<E>
 where
   E: CurveCycleEquipped,
-  E::Scalar: GpuName,
+  <E as Engine>::Scalar: GpuName,
 {
   pub fn default(
     arith: &R1CSShape<E>,
     cf_arith: &R1CSShape<Dual<E>>,
     ro_consts: ROConstants<E>,
-    pp_hash: E::Scalar,
+    pp_hash: <E as Engine>::Scalar,
     state_len: usize,
     (ck, ck_secondary): (&CommitmentKey<E>, &CommitmentKey<Dual<E>>),
   ) -> Self {
@@ -95,10 +93,10 @@ where
       ro_consts,
       pp_hash,
       i: 0,
-      prev_IC: E::Scalar::from(0),
-      r_i: E::Scalar::from(0),
-      z_0: vec![E::Scalar::from(0); state_len],
-      z_i: vec![E::Scalar::from(0); state_len],
+      prev_IC: <E as Engine>::Scalar::from(0),
+      r_i: <E as Engine>::Scalar::from(0),
+      z_0: vec![<E as Engine>::Scalar::from(0); state_len],
+      z_i: vec![<E as Engine>::Scalar::from(0); state_len],
       U_i: RelaxedR1CSInstance::default(ck, arith),
       W_i: RelaxedR1CSWitness::default(arith),
       u_i: R1CSInstance::<E>::default(arith),
@@ -106,12 +104,12 @@ where
       U_i1: RelaxedR1CSInstance::default(ck, arith),
       W_i1: RelaxedR1CSWitness::default(arith),
       nifs_proof: NIFS::default(cf_arith),
-      randomness: E::Scalar::from(0),
+      randomness: <E as Engine>::Scalar::from(0),
       cf_U_i: RelaxedR1CSInstance::default(ck_secondary, cf_arith),
       cf_W_i: RelaxedR1CSWitness::default(cf_arith),
       cf_ck: ck_secondary.clone().into(),
-      kzg_challenges: (E::Scalar::from(0), E::Scalar::from(0)),
-      kzg_evaluations: (E::Scalar::from(0), E::Scalar::from(0)),
+      kzg_challenges: (<E as Engine>::Scalar::from(0), <E as Engine>::Scalar::from(0)),
+      kzg_evaluations: (<E as Engine>::Scalar::from(0), <E as Engine>::Scalar::from(0)),
     }
   }
 
@@ -132,10 +130,9 @@ where
         (&rs.r_U_primary, &rs.r_W_primary),
         (&rs.l_u_primary, &rs.l_w_primary),
         (&rs.r_U_cyclefold, &rs.r_W_cyclefold),
-      )?; 
+      )?;
 
-    let (rw, re) =
-      KZGChallengesGadget::get_challenges_native(r_U_primary.clone());
+    let (rw, re) = KZGChallengesGadget::get_challenges_native(r_U_primary.clone());
     let rw_eval = EvalGadget::evaluate_native(r_W_primary.clone().W, rw);
     let re_eval = EvalGadget::evaluate_native(r_W_primary.clone().E, re);
 
@@ -155,7 +152,7 @@ where
       w_i: rs.l_w_primary,
       U_i1: r_U_primary,
       W_i1: r_W_primary,
-      cf_ck: pp.ck_cyclefold.clone(), 
+      cf_ck: pp.ck_cyclefold.clone(),
       cf_U_i: rs.r_U_cyclefold,
       cf_W_i: rs.r_W_cyclefold,
       kzg_challenges: (rw, re),
@@ -238,7 +235,6 @@ where
       |lc| lc + u_i_x0.get_variable() - U_i_hash.get_variable(),
     );
 
-
     // TODO: Maybe use cs.alloc instead
     let u_i_x1 = AllocatedNum::alloc(cs.namespace(|| "allocate x1"), || Ok(self.u_i.X[1]))?;
     let cf_U_i: AllocatedRelaxedR1CSInstance<Dual<E>, BN_N_LIMBS> =
@@ -249,13 +245,7 @@ where
         BN_N_LIMBS,
       )?;
 
-    let cf_U_i_hash = hash_cf_U_i::<E, CS>(
-      cs,
-      &cf_U_i,
-      &pp_hash,
-      &i,
-      &r_i,
-    )?;
+    let cf_U_i_hash = hash_cf_U_i::<E, CS>(cs, &cf_U_i, &pp_hash, &i, &r_i)?;
 
     cs.enforce(
       || "u_i.x[1] == H(U_EC, i)",
@@ -265,16 +255,18 @@ where
     );
 
     // Step 4: Commitments verification for U_{EC,n}.{E, W} with respect to W_{EC,n}.{E, W}.
-    // let cf_W_i = AllocatedRelaxedR1CSWitness::<Dual<E>, BN_N_LIMBS>::alloc(
-    //   cs.namespace(|| "cf_W_i"), 
-    //   Some(&self.cf_W_i), 
-    //   BN_LIMB_WIDTH, 
-    //   BN_N_LIMBS)?;
+    // let cf_W_i_commit = <Dual<E> as Engine>::CE::commit_gadget(
+    //   cs,
+    //   &*self.cf_ck,
+    //   &self.cf_W_i.W[..],
+    //   &self.cf_W_i.r_W,
+    // )?;
 
-    let cf_W_i_commit = <Dual<E> as Engine>::CE::commit_gadget(cs, &*self.cf_ck, &self.cf_W_i.W[..], &self.cf_W_i.r_W)?;
-
-    // Check that Commit(cf_W_i.W) == cf_U_i.cmW
-    cf_W_i_commit.check_equal(cs.namespace(|| "check that cf_W_i.W == cf_U_i.cmW"), &cf_U_i.W)?;
+    // // Check that Commit(cf_W_i.W) == cf_U_i.cmW
+    // cf_W_i_commit.check_equal(
+    //   cs.namespace(|| "check that cf_W_i.W == cf_U_i.cmW"),
+    //   &cf_U_i.W,
+    // )?;
 
     // Step 5: Enforce U_{EC,n} and W_{EC,n} satisfy r1cs_{EC},
     //         the Relaxed R1CS relation of the CycleFoldCircuit.
@@ -284,14 +276,22 @@ where
     // Step 6.1: Partially enforce that U_{n+1} is the correct folding of U_n and un.
     //           - Only field elements in U_{n+1} are checked, while group elements (commitments) are not.
     //           - Group elements are in E1 and are expensive non-native operations.
-    // TODO: Check how this is done in Nebula. We may not need any cross term
+    let u_i = AllocatedEmulR1CSInstance::alloc(
+      cs.namespace(|| "u_i"),
+      Some(&self.u_i),
+      BN_LIMB_WIDTH,
+      BN_N_LIMBS,
+    )?;
 
-    // Step 7.1: Check correct computation of the KZG challenges.
-    //           - cE ≡ H(E.{x, y}), cW ≡ H(W.{x, y}).
-    let kzg_alloc_rw = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges rw"), || Ok(self.kzg_challenges.0))?;
-    kzg_alloc_rw.inputize(cs.namespace(|| "kzg_alloc_rw"))?;
-    let kzg_alloc_re = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges re"), || Ok(self.kzg_challenges.1))?;
-    kzg_alloc_re.inputize(cs.namespace(|| "kzg_alloc_re"))?;
+    let r = AllocatedNum::alloc(cs.namespace(|| "get r"), || Ok(self.randomness))?;
+    let alloc_fold_U_i1 = FoldGadget::fold_field_elements_gadget::<_, E>(
+      cs, 
+      pp_hash,
+      U_i,
+      u_i,
+      self.nifs_proof,
+      r,
+    )?;
 
     let U_i1: AllocatedEmulRelaxedR1CSInstance<Dual<E>> = AllocatedEmulRelaxedR1CSInstance::alloc(
       cs.namespace(|| "U_i1"),
@@ -300,8 +300,41 @@ where
       BN_N_LIMBS,
     )?;
 
-    let (alloc_rw, alloc_re) =
-      KZGChallengesGadget::get_challenges_gadget::<CS, E>(cs, U_i1)?;
+    cs.enforce(
+      || "U_i1.u == U_i.u",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + U_i1.u.get_variable() - alloc_fold_U_i1.u.get_variable(),
+    );
+
+    cs.enforce(
+      || "U_i1.x0 == U_i.x0",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + U_i1.x0.get_variable() - alloc_fold_U_i1.x0.get_variable(),
+    );
+
+    cs.enforce(
+      || "U_i1.x1 == U_i.x1",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + U_i1.x1.get_variable() - alloc_fold_U_i1.x1.get_variable(),
+    );
+
+    // Step 7.1: Check correct computation of the KZG challenges.
+    //           - cE ≡ H(E.{x, y}), cW ≡ H(W.{x, y}).
+    let kzg_alloc_rw = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges rw"), || {
+      Ok(self.kzg_challenges.0)
+    })?;
+    kzg_alloc_rw.inputize(cs.namespace(|| "kzg_alloc_rw"))?;
+    let kzg_alloc_re = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges re"), || {
+      Ok(self.kzg_challenges.1)
+    })?;
+    kzg_alloc_re.inputize(cs.namespace(|| "kzg_alloc_re"))?;
+
+
+
+    let (alloc_rw, alloc_re) = KZGChallengesGadget::get_challenges_gadget::<CS, E>(cs, U_i1)?;
 
     cs.enforce(
       || "cW ≡ H(W.{x, y})",
@@ -317,46 +350,39 @@ where
       |lc| lc + kzg_alloc_re.get_variable() - alloc_re.get_variable(),
     );
 
-
     // Step 7.2: Verify that the KZG evaluations are correct
-    let kzg_alloc_rw_eval = AllocatedNum::alloc(cs.namespace(|| "get kzg_evaluations"), || Ok(self.kzg_evaluations.0))?;
+    let kzg_alloc_rw_eval = AllocatedNum::alloc(cs.namespace(|| "get kzg_evaluations"), || {
+      Ok(self.kzg_evaluations.0)
+    })?;
     kzg_alloc_rw_eval.inputize(cs.namespace(|| "kzg_alloc_rw_eval"))?;
-    let kzg_alloc_re_eval = AllocatedNum::alloc(cs.namespace(|| "get kzg_evaluations"), || Ok(self.kzg_evaluations.1))?;
+    let kzg_alloc_re_eval = AllocatedNum::alloc(cs.namespace(|| "get kzg_evaluations"), || {
+      Ok(self.kzg_evaluations.1)
+    })?;
     kzg_alloc_re_eval.inputize(cs.namespace(|| "kzg_alloc_re_eval"))?;
 
-    let W_i1_W = self.W_i1.W.iter().map(|x| {
-      AllocatedNum::alloc(
-        cs.namespace(|| "allocate W_i1.W"),
-        || Ok(*x)
-      )
-    }).collect::<Result<Vec<_>, _>>()?;
-    
+    let W_i1_W = self
+      .W_i1
+      .W
+      .iter()
+      .map(|x| AllocatedNum::alloc(cs.namespace(|| "allocate W_i1.W"), || Ok(*x)))
+      .collect::<Result<Vec<_>, _>>()?;
+
     for x in &W_i1_W {
-      cs.enforce(
-        || "W_i1.W",
-        |lc| lc + x.get_variable(),
-        |lc| lc,
-        |lc| lc,
-      );
+      cs.enforce(|| "W_i1.W", |lc| lc + x.get_variable(), |lc| lc, |lc| lc);
     }
 
-    let W_i1_E = self.W_i1.E.iter().map(|x| {
-      AllocatedNum::alloc(
-        cs.namespace(|| "allocate W_i1.E"),
-        || Ok(*x)
-      )
-    }).collect::<Result<Vec<_>, _>>()?;
+    let W_i1_E = self
+      .W_i1
+      .E
+      .iter()
+      .map(|x| AllocatedNum::alloc(cs.namespace(|| "allocate W_i1.E"), || Ok(*x)))
+      .collect::<Result<Vec<_>, _>>()?;
 
     for x in &W_i1_E {
-      cs.enforce(
-        || "W_i1.E",
-        |lc| lc + x.get_variable(),
-        |lc| lc,
-        |lc| lc,
-      );
+      cs.enforce(|| "W_i1.E", |lc| lc + x.get_variable(), |lc| lc, |lc| lc);
     }
 
-    let alloc_rw_eval = EvalGadget::evaluate_gadget::<&mut CS, E>(cs,W_i1_W, &kzg_alloc_rw)?;
+    let alloc_rw_eval = EvalGadget::evaluate_gadget::<&mut CS, E>(cs, W_i1_W, &kzg_alloc_rw)?;
     cs.enforce(
       || "evalW == pW(cW)",
       |lc| lc,
@@ -368,11 +394,10 @@ where
     cs.enforce(
       || "evalE == pE(cE)",
       |lc| lc,
-      |lc| lc,  
+      |lc| lc,
       |lc| lc + kzg_alloc_re_eval.get_variable() - alloc_re_eval.get_variable(),
     );
 
     Ok(())
   }
 }
-

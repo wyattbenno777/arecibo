@@ -2,7 +2,7 @@
 
 use super::{
   decider_circuit::DeciderCircuit,
-  gadgets::{DeciderNovaGadget, KZGProof},
+  gadgets::{FoldGadget, KZGProof},
 };
 use crate::{
   errors::NovaError,
@@ -49,6 +49,7 @@ pub struct Decider {
   rho: Fr,
   kzg_challenges: (Fr, Fr),
   kzg_proofs: (KZGProof<Bn256>, KZGProof<Bn256>),
+  nifs_proof: NIFS<Bn256EngineKZG>,
 }
 
 impl Decider {
@@ -99,8 +100,8 @@ impl Decider {
     R: RngCore,
   {
     let circuit = DeciderCircuit::<Bn256EngineKZG>::new(pp, rs.clone())?;
-    // TODO: Do we need D::Proof?
     let rho = circuit.randomness;
+    let nifs_proof = circuit.nifs_proof.clone();
     let kzg_challenges = circuit.kzg_challenges.clone();
 
     let kzg_proofs = (
@@ -113,6 +114,7 @@ impl Decider {
       rho,
       kzg_challenges,
       kzg_proofs,
+      nifs_proof,
     })
   }
 
@@ -137,7 +139,7 @@ impl Decider {
 
     //   // 6.2. Fold the commitments
     //   // TODO
-    let U_final_commitments = DeciderNovaGadget::fold_group_elements_native::<Bn256EngineKZG>(
+    let U_final_commitments = FoldGadget::fold_group_elements_native::<Bn256EngineKZG>(
       U_commitments,
       u_commitments,
       // nifs_proof.comm_T,

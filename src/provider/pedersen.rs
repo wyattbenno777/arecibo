@@ -282,6 +282,7 @@ where
     let mut acc = AllocatedPoint::<E::GE>::default(cs.namespace(|| "allocate zero"));
     for (i, (s, b)) in zip(scalars, bases).enumerate() {
       let mut s_bits = Vec::new();
+      // TODO: This looks very inefficient
       for (j, bit) in s.to_le_bits().iter().enumerate() {
         let allocated_bit = AllocatedBit::alloc(
           cs.namespace(|| format!("allocate bit {}-{}", i, j)),

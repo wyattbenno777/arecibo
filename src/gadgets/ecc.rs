@@ -9,7 +9,7 @@ use crate::{
     select_num_or_zero, select_num_or_zero2, select_one_or_diff2, select_one_or_num2,
     select_zero_or_num2,
   },
-  traits::Group,
+  traits::{Group, ROCircuitTrait},
 };
 use ff::{Field, PrimeField};
 
@@ -109,6 +109,16 @@ impl<G: Group> AllocatedPoint<G> {
       y: zero,
       is_infinity: one,
     }
+  }
+
+  pub fn absorb_in_ro(
+    &self,
+    ro: &mut impl ROCircuitTrait<G::Base>,
+  ) -> Result<(), SynthesisError> {
+    ro.absorb(&self.x);
+    ro.absorb(&self.y);
+    ro.absorb(&self.is_infinity);
+    Ok(())
   }
 
   /// Returns coordinates associated with the point.

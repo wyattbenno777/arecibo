@@ -32,15 +32,15 @@ where
   E: CurveCycleEquipped,
 {
   // proof from primary fold
-  pub(super) nifs_primary: PrimaryNIFS<E>,
+  pub(crate) nifs_primary: PrimaryNIFS<E>,
 
   // proof from first cyclefold fold
-  pub(super) comm_T1: Commitment<Dual<E>>,
-  pub(super) l_u_cyclefold_E: R1CSInstance<Dual<E>>,
+  pub(crate) comm_T1: Commitment<Dual<E>>,
+  pub(crate) l_u_cyclefold_E: R1CSInstance<Dual<E>>,
 
   // proof from second cyclefold fold
-  pub(super) comm_T2: Commitment<Dual<E>>,
-  pub(super) l_u_cyclefold_W: R1CSInstance<Dual<E>>,
+  pub(crate) comm_T2: Commitment<Dual<E>>,
+  pub(crate) l_u_cyclefold_W: R1CSInstance<Dual<E>>,
 }
 
 impl<E> NIFS<E>
@@ -279,7 +279,7 @@ where
     Ok((Self { comm_T }, (U, W), r))
   }
 
-  /// Verifier implementatin for NIFS
+  /// Verifier implementation for NIFS
   pub fn verify(
     &self,
     ro_consts: &ROConstants<Dual<E>>,
