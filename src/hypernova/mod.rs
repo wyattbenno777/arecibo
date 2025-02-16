@@ -4,8 +4,10 @@
 //! bringing in MCC to (folding) IVC schemes.
 
 mod augmented_circuit;
+mod utils;
+
 pub mod error;
+pub mod nebula;
 pub mod nifs;
 pub mod ro_sumcheck;
 pub mod rs;
-mod utils;

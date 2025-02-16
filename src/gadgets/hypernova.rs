@@ -1,4 +1,7 @@
-use super::{alloc_zero, conditionally_select, emulated::AllocatedEmulPoint, utils::alloc_one};
+use super::{
+  alloc_zero, conditionally_select, emulated::AllocatedEmulPoint, int::enforce_equal,
+  utils::alloc_one,
+};
 use crate::{
   constants::{DEFAULT_ABSORBS, NUM_CHALLENGE_BITS, NUM_MATRICES, NUM_UNIVARIATE_COEFFS},
   frontend::{gadgets::Assignment, num::AllocatedNum, Boolean, ConstraintSystem, SynthesisError},
@@ -762,28 +765,6 @@ where
     |lc| lc + i_new.get_variable() - CS::one() - i.get_variable(),
   );
   Ok(i_new)
-}
-
-/// Adds a constraint to CS, enforcing an equality relationship between the allocated numbers a and b.
-///
-/// a == b
-pub fn enforce_equal<F: PrimeField, A, AR, CS: ConstraintSystem<F>>(
-  cs: &mut CS,
-  annotation: A,
-  a: &AllocatedNum<F>,
-  b: &AllocatedNum<F>,
-) where
-  A: FnOnce() -> AR,
-  AR: Into<String>,
-{
-  // debug_assert_eq!(a.get_value(), b.get_value());
-  // a * 1 = b
-  cs.enforce(
-    annotation,
-    |lc| lc + a.get_variable(),
-    |lc| lc + CS::one(),
-    |lc| lc + b.get_variable(),
-  );
 }
 
 /// Adds a constraint to CS, enforcing a difference relationship between the allocated numbers a, b, and difference.
