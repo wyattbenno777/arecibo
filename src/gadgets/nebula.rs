@@ -1,7 +1,7 @@
 use super::int::{add, mul, sub};
-use crate::frontend::gadgets::Assignment;
-use crate::frontend::PCIndex;
-use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
+use crate::frontend::{
+  gadgets::Assignment, num::AllocatedNum, ConstraintSystem, PCIndex, SynthesisError,
+};
 use ff::PrimeField;
 
 /// Does a read-solomon fingerprint on the (a,v,t) tuple and then subtracts's it

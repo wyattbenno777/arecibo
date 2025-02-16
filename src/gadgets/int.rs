@@ -1,5 +1,4 @@
-use crate::frontend::gadgets::Assignment;
-use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
+use crate::frontend::{gadgets::Assignment, num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::PrimeField;
 
 use super::Num;

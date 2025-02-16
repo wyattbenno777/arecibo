@@ -1,9 +1,6 @@
 //! This module implements circuits that incrementally compute the grand products
 //! derived from the RoK from memory checks to grand product checks
 
-use ff::PrimeField;
-use itertools::Itertools;
-
 use crate::{
   frontend::{num::AllocatedNum, ConstraintSystem, PCIndex, SynthesisError},
   gadgets::{
@@ -13,6 +10,8 @@ use crate::{
   },
   hypernova::rs::StepCircuit,
 };
+use ff::PrimeField;
+use itertools::Itertools;
 
 /// Maximum number of memory ops allowed per step of the zkVM
 pub const MEMORY_OPS_PER_STEP: usize = 8;
