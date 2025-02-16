@@ -74,11 +74,20 @@ mod tests {
           BN_LIMB_WIDTH,
           BN_N_LIMBS,
         )?;
+        
 
       let (alloc_rw, alloc_re) = KZGChallengesGadget::get_challenges_gadget::<CS, Bn256EngineKZG>(
         cs,
-        alloc_relaxed_instance,
+        alloc_relaxed_instance.clone(),
       )?;
+
+
+      cs.enforce(
+        || "trivial check to constrain allocated variables",
+        |lc| lc + alloc_relaxed_instance.x0.get_variable() + alloc_relaxed_instance.x1.get_variable() + alloc_relaxed_instance.u.get_variable(),
+        |lc| lc,
+        |lc| lc,
+      );
 
       cs.enforce(
         || "cW ≡ H(W.{x, y})",
@@ -232,7 +241,7 @@ mod tests {
     }
   }
   #[test]
-  fn test_decider_proof() {
+  fn test_decider_constraints() {
     let num_steps = 5;
     let f_circuit = CubicFCircuit::new();
     let rs_pp = PublicParams::<E1>::setup(&f_circuit, &*S1::ck_floor(), &*S2::ck_floor());

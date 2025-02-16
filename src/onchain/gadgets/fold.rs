@@ -5,35 +5,30 @@ use crate::{
   },
   frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
   nebula::nifs::NIFS,
-  provider::kzg_commitment::UVKZGCommitment,
+  Commitment,
   traits::{
     commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
     ROConstantsCircuit,
   },
 };
-use group::Curve;
-use pairing::Engine as PairingEngine;
 pub struct FoldGadget {}
 
 impl FoldGadget {
-  pub fn fold_group_elements_native<E: PairingEngine>(
-    U_commitments: (UVKZGCommitment<E>, UVKZGCommitment<E>),
-    u_commitments: UVKZGCommitment<E>,
-    cmT: E::G1,
-    r: E::Fr,
-  ) -> Result<(UVKZGCommitment<E>, UVKZGCommitment<E>), SynthesisError> {
+  pub fn fold_group_elements_native<E: CurveCycleEquipped>(
+    U_commitments: (Commitment<E>, Commitment<E>),
+    u_cmW: Commitment<E>,
+    cmT: Commitment<E>,
+    r: E::Scalar,
+  ) -> Result<(Commitment<E>, Commitment<E>), SynthesisError> {
     let U_cmW = U_commitments.0;
     let U_cmE = U_commitments.1;
-    let u_cmW = u_commitments;
 
-    let cmW = E::G1::from(U_cmW.0) + E::G1::from(u_cmW.0) * r;
-    let cmE = E::G1::from(U_cmE.0) + cmT * r;
-
-    Ok((
-      UVKZGCommitment::<E>::new(cmW.to_affine()),
-      UVKZGCommitment::<E>::new(cmE.to_affine()),
-    ))
+    let cmW = U_cmW + u_cmW * r;
+    let cmE = U_cmE + cmT * r;
+    Ok((cmW, cmE))
   }
+
+
 
   pub fn fold_field_elements_gadget<CS, E: CurveCycleEquipped>(
     cs: &mut CS,

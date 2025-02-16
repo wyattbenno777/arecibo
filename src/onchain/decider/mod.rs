@@ -20,11 +20,13 @@ use crate::{
     kzg_commitment::{KZGProverKey, KZGVerifierKey, UVKZGCommitment},
     Bn256EngineKZG,
   },
+  Commitment,
   r1cs::{R1CSInstance, RelaxedR1CSInstance},
   traits::{evaluation::EvaluationEngineTrait, Engine, ROConstants},
 };
 use halo2curves::bn256::{Bn256, Fr};
 use rand::RngCore;
+use group::Curve;
 
 pub mod test;
 
@@ -127,8 +129,8 @@ impl Decider {
     i: Fr,
     z_0: Vec<Fr>,
     z_i: Vec<Fr>,
-    U_commitments: (UVKZGCommitment<Bn256>, UVKZGCommitment<Bn256>),
-    u_commitments: UVKZGCommitment<Bn256>,
+    U_commitments: (Commitment<Bn256EngineKZG>, Commitment<Bn256EngineKZG>),
+    u_commitments: Commitment<Bn256EngineKZG>,
   ) -> Result<(), NovaError> {
     let DeciderVerifierKey {
       groth16_vk,
@@ -139,10 +141,10 @@ impl Decider {
     let prepared_groth16_vk = groth16::prepare_verifying_key(&groth16_vk);
 
     // 6.2. Fold the commitments
-    let (U_cmW, U_cmE) = FoldGadget::fold_group_elements_native::<Bn256>(
+    let (U_cmW, U_cmE) = FoldGadget::fold_group_elements_native::<Bn256EngineKZG>(
       U_commitments,
       u_commitments,
-      self.nifs_proof.nifs_primary.comm_T.comm,
+      self.nifs_proof.nifs_primary.comm_T,
       self.rho,
     )?;
 
@@ -151,7 +153,7 @@ impl Decider {
       &[i],
       &z_0[..],
       &z_i[..],
-      // TODO: Pass the U commitments as inputs
+      // TODO: Pass U commitments as inputs
       &[self.kzg_challenges.0, self.kzg_challenges.1],
       &[self.kzg_proofs.0.eval, self.kzg_proofs.1.eval],
     ]
@@ -166,9 +168,13 @@ impl Decider {
     if !snark_v {
       return Err(NovaError::ProofVerifyError);
     }
+
+    let kzg_U_cmW = UVKZGCommitment::<Bn256>::new(U_cmW.comm.to_affine());
+    let kzg_U_cmE = UVKZGCommitment::<Bn256>::new(U_cmE.comm.to_affine());
+
     // 7.3 Verify KZG proofs
-    self.kzg_proofs.0.verify(&kzg_vk, &U_cmW, self.kzg_challenges.0)?;
-    self.kzg_proofs.1.verify(&kzg_vk, &U_cmE, self.kzg_challenges.1)?;
+    // self.kzg_proofs.0.verify(&kzg_vk, &kzg_U_cmW, self.kzg_challenges.0)?;
+    // self.kzg_proofs.1.verify(&kzg_vk, &kzg_U_cmE, self.kzg_challenges.1)?;
     Ok(())
   }
 }

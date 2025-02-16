@@ -123,9 +123,9 @@ fn main() {
   let start = Instant::now();
   let proof = Decider::prove(&rs_pp, &decider_pk, &recursive_snark, &mut rng);
   match &proof {
-    Ok(_) => println!("CompressedSNARK::prove: Ok, took {:?}", start.elapsed()),
+    Ok(_) => println!("Decider::prove: Ok, took {:?}", start.elapsed()),
     Err(e) => println!(
-      "CompressedSNARK::prove: Error: {:?}, took {:?}",
+      "Decider::prove: Error: {:?}, took {:?}",
       e,
       start.elapsed()
     ),

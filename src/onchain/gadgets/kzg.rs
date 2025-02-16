@@ -13,7 +13,7 @@ use crate::{
   r1cs::RelaxedR1CSInstance,
   traits::{
     CurveCycleEquipped, Dual, Engine, ROCircuitTrait, ROConstants, ROConstantsCircuit, ROTrait,
-  }, Commitment,
+  }, 
 };
 use ec_gpu_gen::threadpool::Worker;
 use group::Curve;
