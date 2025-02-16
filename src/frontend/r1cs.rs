@@ -102,13 +102,22 @@ macro_rules! impl_nova_shape {
           );
         }
         assert_eq!(num_cons_added, num_constraints);
-
-        A.cols = num_vars + num_inputs;
-        B.cols = num_vars + num_inputs;
-        C.cols = num_vars + num_inputs;
+        let num_cols = num_vars + num_inputs + num_precommitted + num_precommitted1;
+        A.cols = num_cols;
+        B.cols = num_cols;
+        C.cols = num_cols;
 
         // Don't count One as an input for shape's purposes.
-        let S = R1CSShape::new(num_constraints, num_vars, num_inputs - 1, A, B, C).unwrap();
+        let S = R1CSShape::new(
+          num_constraints,
+          num_vars,
+          num_inputs - 1,
+          (num_precommitted, num_precommitted1),
+          A,
+          B,
+          C,
+        )
+        .unwrap();
         let ck = commitment_key(&S, ck_hint);
 
         (S, ck)

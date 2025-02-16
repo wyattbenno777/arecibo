@@ -24,8 +24,8 @@ use crate::{
     nifs::NIFS,
   },
   r1cs::{
-    split::LR1CSInstance, CommitmentKeyHint, R1CSInstance, R1CSWitness, RelaxedR1CSInstance,
-    RelaxedR1CSWitness,
+    split::{LR1CSInstance, SplitR1CSInstance, SplitR1CSWitness},
+    CommitmentKeyHint, RelaxedR1CSInstance, RelaxedR1CSWitness,
   },
   traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},
   AugmentedCircuitParams, CommitmentKey, DigestComputer, R1CSWithArity, ROConstants,
@@ -153,9 +153,9 @@ where
   E: CurveCycleEquipped,
 {
   r_U: LR1CSInstance<E>,
-  r_W: R1CSWitness<E>,
-  l_u: R1CSInstance<E>,
-  l_w: R1CSWitness<E>,
+  r_W: SplitR1CSWitness<E>,
+  l_u: SplitR1CSInstance<E>,
+  l_w: SplitR1CSWitness<E>,
   r_U_cyclefold: RelaxedR1CSInstance<Dual<E>>,
   r_W_cyclefold: RelaxedR1CSWitness<Dual<E>>,
   z_0: Vec<E::Scalar>,
@@ -185,7 +185,7 @@ where
     // Get default running primary instance and witness pair
     let r1cs = &pp.circuit_shape.r1cs_shape;
     let r_U = LR1CSInstance::default(r1cs);
-    let r_W = R1CSWitness::default(r1cs);
+    let r_W = SplitR1CSWitness::default(r1cs);
 
     // Base case for F'
     //
@@ -201,6 +201,8 @@ where
       None,
       None,
       None,
+      None,
+      None,
     );
     let circuit = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
@@ -210,7 +212,7 @@ where
       pp.num_rounds,
     );
     let z_i = circuit.synthesize(&mut cs)?;
-    let (l_u, l_w) = cs.r1cs_instance_and_witness(r1cs, &pp.ck)?;
+    let (l_u, l_w) = cs.split_r1cs_instance_and_witness(r1cs, &pp.ck)?;
 
     // Get z_i values out of the constraint system
     let z_i = z_i
@@ -287,6 +289,8 @@ where
       Some(self.l_u.clone()),
       Some(r_U.comm_W),
       Some(cyclefold_data),
+      Some(r_U.pre_committed.0),
+      Some(r_U.pre_committed.1),
     );
     let circuit = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
@@ -296,7 +300,7 @@ where
       pp.num_rounds,
     );
     let z_i = circuit.synthesize(&mut cs)?;
-    let (l_u, l_w) = cs.r1cs_instance_and_witness(&pp.circuit_shape.r1cs_shape, &pp.ck)?;
+    let (l_u, l_w) = cs.split_r1cs_instance_and_witness(&pp.circuit_shape.r1cs_shape, &pp.ck)?;
 
     // 3. output Πi+1 ← ((Ui+1, Wi+1), (ui+1, wi+1)).
     self.r_U = r_U;
@@ -365,8 +369,8 @@ where
     let hash_cyclefold = ro.squeeze(NUM_HASH_BITS);
     // ////////////////////////////////////////////
     // 3. Check if H(pp, i, z_0, z_i, r_U) = l_u.X[0] && H(pp, i, r_U_cyclefold) = l_u.X[1]
-    if scalar_as_base::<Dual<E>>(hash) != self.l_u.X[0]
-      || scalar_as_base::<Dual<E>>(hash_cyclefold) != self.l_u.X[1]
+    if scalar_as_base::<Dual<E>>(hash) != self.l_u.aux.X[0]
+      || scalar_as_base::<Dual<E>>(hash_cyclefold) != self.l_u.aux.X[1]
     {
       return Err(NovaError::ProofVerifyError);
     }
@@ -383,7 +387,7 @@ where
           || {
             pp.circuit_shape
               .r1cs_shape
-              .is_sat(&pp.ck, &self.l_u, &self.l_w)
+              .is_sat_split(&pp.ck, &self.l_u, &self.l_w)
           },
           || {
             pp.circuit_shape_cyclefold.r1cs_shape.is_sat_relaxed(

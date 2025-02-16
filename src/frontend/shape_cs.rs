@@ -6,6 +6,8 @@ use crate::{
 };
 use ff::PrimeField;
 
+use super::PCIndex;
+
 /// `ShapeCS` is a `ConstraintSystem` for creating `R1CSShape`s for a circuit.
 pub struct ShapeCS<E: Engine>
 where
@@ -85,34 +87,17 @@ impl<E: Engine> ConstraintSystem<E::Scalar> for ShapeCS<E> {
     &mut self,
     _annotation: A,
     _f: F,
+    idx: PCIndex,
   ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<E::Scalar, SynthesisError>,
     A: FnOnce() -> AR,
     AR: Into<String>,
   {
-    self.precommitted += 1;
-
-    Ok(Variable::new_unchecked(Index::Precommitted(
-      self.precommitted - 1,
-    )))
-  }
-
-  fn alloc_precommitted1<F, A, AR>(
-    &mut self,
-    _annotation: A,
-    _f: F,
-  ) -> Result<Variable, SynthesisError>
-  where
-    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
-    A: FnOnce() -> AR,
-    AR: Into<String>,
-  {
-    self.precommitted1 += 1;
-
-    Ok(Variable::new_unchecked(Index::Precommitted1(
-      self.precommitted1 - 1,
-    )))
+    match idx {
+      PCIndex::ZERO => alloc_precommitted_generic(&mut self.precommitted, Index::Precommitted),
+      PCIndex::ONE => alloc_precommitted_generic(&mut self.precommitted1, Index::Precommitted1),
+    }
   }
 
   fn alloc_input<F, A, AR>(&mut self, _annotation: A, _f: F) -> Result<Variable, SynthesisError>
@@ -153,4 +138,12 @@ impl<E: Engine> ConstraintSystem<E::Scalar> for ShapeCS<E> {
   fn get_root(&mut self) -> &mut Self::Root {
     self
   }
+}
+
+fn alloc_precommitted_generic(
+  num: &mut usize,
+  index_fn: impl FnOnce(usize) -> Index,
+) -> Result<Variable, SynthesisError> {
+  *num += 1;
+  Ok(Variable::new_unchecked(index_fn(*num - 1)))
 }

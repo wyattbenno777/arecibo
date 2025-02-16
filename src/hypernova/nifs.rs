@@ -1,16 +1,13 @@
 //! This module implements the HyperNova folding scheme.
-use super::ro_sumcheck::ROSumcheckProof;
+use super::{ro_sumcheck::ROSumcheckProof, utils::absorb_split_instance};
 use crate::{
   constants::{DEFAULT_ABSORBS, NUM_CHALLENGE_BITS},
-  cyclefold::{
-    circuit::CycleFoldCircuit,
-    util::{absorb_cyclefold_r1cs, absorb_primary_r1cs},
-  },
+  cyclefold::{circuit::CycleFoldCircuit, util::absorb_cyclefold_r1cs},
   frontend::{r1cs::NovaWitness, solver::SatisfyingAssignment, ConstraintSystem},
   gadgets::scalar_as_base,
   r1cs::{
-    split::LR1CSInstance, R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance,
-    RelaxedR1CSWitness,
+    split::{LR1CSInstance, SplitR1CSInstance, SplitR1CSWitness},
+    R1CSInstance, R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness,
   },
   spartan::{
     math::Math,
@@ -42,13 +39,13 @@ where
     ck_cyclefold: &CommitmentKey<Dual<E>>,
     ro_consts: &ROConstants<Dual<E>>,
     pp_digest: &E::Scalar,
-    (U1, W1): (&LR1CSInstance<E>, &R1CSWitness<E>),
-    (U2, W2): (&R1CSInstance<E>, &R1CSWitness<E>),
+    (U1, W1): (&LR1CSInstance<E>, &SplitR1CSWitness<E>),
+    (U2, W2): (&SplitR1CSInstance<E>, &SplitR1CSWitness<E>),
     (U1_cyclefold, W1_cyclefold): (&RelaxedR1CSInstance<Dual<E>>, &RelaxedR1CSWitness<Dual<E>>),
   ) -> Result<
     (
       Self,
-      (LR1CSInstance<E>, R1CSWitness<E>),
+      (LR1CSInstance<E>, SplitR1CSWitness<E>),
       (RelaxedR1CSInstance<Dual<E>>, RelaxedR1CSWitness<Dual<E>>),
     ),
     NovaError,
@@ -56,7 +53,7 @@ where
     // squeeze rho, gamma, beta
     let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(*pp_digest);
-    absorb_primary_r1cs::<E, Dual<E>>(U2, &mut ro);
+    absorb_split_instance::<E>(U2, &mut ro);
     let rho = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
     let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(rho);
@@ -84,7 +81,7 @@ where
     // Compute L_j's
     //
     // where L_j = eq(rx, y) • H_j(y)
-    let z1 = [W1.W.as_slice(), [U1.u].as_slice(), U1.X.as_slice()].concat();
+    let z1 = [W1.W().as_slice(), [U1.u].as_slice(), U1.X.as_slice()].concat();
     let mut poly_ABC = {
       let (evals_A, evals_B, evals_C) = S.multiply_vec(&z1)?;
       let evals_ABC = pad_poly(evals_A)
@@ -101,9 +98,9 @@ where
 
     // Q = eq(beta, x) • G(x)
     let z2 = [
-      W2.W.as_slice(),
+      W2.W().as_slice(),
       [E::Scalar::ONE].as_slice(),
-      U2.X.as_slice(),
+      U2.aux.X.as_slice(),
     ]
     .concat();
     let eq_beta = EqPolynomial::new(beta.clone());
@@ -167,7 +164,7 @@ where
       ck_cyclefold,
       ro_consts,
       U1.comm_W,
-      U2.comm_W,
+      U2.aux.comm_W,
       rho,
       (U1_cyclefold, W1_cyclefold),
     )?;
@@ -191,13 +188,13 @@ where
     ro_consts: &ROConstants<Dual<E>>,
     pp_digest: &E::Scalar,
     U1: &LR1CSInstance<E>,
-    U2: &R1CSInstance<E>,
+    U2: &SplitR1CSInstance<E>,
     U1_cyclefold: &RelaxedR1CSInstance<Dual<E>>,
   ) -> Result<(LR1CSInstance<E>, RelaxedR1CSInstance<Dual<E>>), NovaError> {
     // squeeze rho, gamma, beta
     let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(*pp_digest);
-    absorb_primary_r1cs::<E, Dual<E>>(U2, &mut ro);
+    absorb_split_instance::<E>(U2, &mut ro);
     let rho = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
     let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(rho);
@@ -332,8 +329,6 @@ where
 
 #[cfg(test)]
 mod tests {
-  use std::sync::Arc;
-
   use crate::{
     cyclefold::circuit::CycleFoldCircuit,
     frontend::{
@@ -347,14 +342,15 @@ mod tests {
     hypernova::nifs::NIFS,
     provider::{Bn256EngineKZG, PallasEngine, Secp256k1Engine},
     r1cs::{
-      split::LR1CSInstance, R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance,
-      RelaxedR1CSWitness,
+      split::{LR1CSInstance, SplitR1CSInstance, SplitR1CSWitness},
+      R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness,
     },
     spartan::math::Math,
     traits::{snark::default_ck_hint, CurveCycleEquipped, Dual, Engine, ROConstants},
     CommitmentKey, R1CSWithArity,
   };
   use ff::{Field, PrimeField};
+  use std::sync::Arc;
 
   #[test]
   fn test_tiny_r1cs_bellpepper() {
@@ -370,11 +366,11 @@ mod tests {
     let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
     let ro_consts = ROConstants::<Dual<E>>::default();
 
-    let instance_witness = |x: E::Scalar| -> (R1CSInstance<E>, R1CSWitness<E>) {
+    let instance_witness = |x: E::Scalar| -> (SplitR1CSInstance<E>, SplitR1CSWitness<E>) {
       let mut cs = SatisfyingAssignment::<E>::new();
       let _ = synthesize_tiny_r1cs_bellpepper(&mut cs, Some(x));
-      let (u, w) = cs.r1cs_instance_and_witness(&shape, &ck).unwrap();
-      shape.is_sat(&ck, &u, &w).unwrap();
+      let (u, w) = cs.split_r1cs_instance_and_witness(&shape, &ck).unwrap();
+      shape.is_sat_split(&ck, &u, &w).unwrap();
       (u, w)
     };
 
@@ -406,14 +402,14 @@ mod tests {
     ro_consts: &ROConstants<Dual<E>>,
     pp_digest: &<E as Engine>::Scalar,
     S: &R1CSShape<E>,
-    U1: &R1CSInstance<E>,
-    W1: &R1CSWitness<E>,
-    U2: &R1CSInstance<E>,
-    W2: &R1CSWitness<E>,
-    U3: &R1CSInstance<E>,
-    W3: &R1CSWitness<E>,
-    U4: &R1CSInstance<E>,
-    W4: &R1CSWitness<E>,
+    U1: &SplitR1CSInstance<E>,
+    W1: &SplitR1CSWitness<E>,
+    U2: &SplitR1CSInstance<E>,
+    W2: &SplitR1CSWitness<E>,
+    U3: &SplitR1CSInstance<E>,
+    W3: &SplitR1CSWitness<E>,
+    U4: &SplitR1CSInstance<E>,
+    W4: &SplitR1CSWitness<E>,
   ) {
     // Get the structure for the CycleFold circuit and corresponding commitment key
     let mut cs: ShapeCS<Dual<E>> = ShapeCS::new();
@@ -426,14 +422,13 @@ mod tests {
     let S_cyclefold = &S_cyclefold.r1cs_shape;
     let r_U_cyclefold = RelaxedR1CSInstance::default(&*ck_cyclefold, S_cyclefold);
     let r_W_cyclefold = RelaxedR1CSWitness::default(S_cyclefold);
-
     let s = S.num_cons.next_power_of_two().log_2();
     // produce a default running instance
-    let mut r_W = R1CSWitness::default(S);
+    let mut r_W = SplitR1CSWitness::default(S);
     let mut r_U = LR1CSInstance::default(S);
     S.is_sat_linearized(ck, &r_U, &r_W).unwrap();
 
-    let mut run_nifs = |u: &R1CSInstance<E>, w: &R1CSWitness<E>| {
+    let mut run_nifs = |u: &SplitR1CSInstance<E>, w: &SplitR1CSWitness<E>| {
       // produce a step SNARK with (W1, U1) as the first incoming witness-instance pair
       let (nifs, (_U, W), (_U_cyclefold, _W_cyclefold)) = NIFS::prove(
         (S, S_cyclefold),

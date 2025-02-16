@@ -8,3 +8,4 @@ pub mod error;
 pub mod nifs;
 pub mod ro_sumcheck;
 pub mod rs;
+mod utils;

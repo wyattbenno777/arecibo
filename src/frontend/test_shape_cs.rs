@@ -13,6 +13,8 @@ use crate::{
 use core::fmt::Write;
 use ff::{Field, PrimeField};
 
+use super::PCIndex;
+
 #[derive(Clone, Copy)]
 struct OrderedVariable(Variable);
 
@@ -271,16 +273,12 @@ where
     Ok(Variable::new_unchecked(Index::Aux(self.aux.len() - 1)))
   }
 
-  fn alloc_precommitted<F, A, AR>(&mut self, _: A, _: F) -> Result<Variable, SynthesisError>
-  where
-    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
-    A: FnOnce() -> AR,
-    AR: Into<String>,
-  {
-    unimplemented!()
-  }
-
-  fn alloc_precommitted1<F, A, AR>(&mut self, _: A, _: F) -> Result<Variable, SynthesisError>
+  fn alloc_precommitted<F, A, AR>(
+    &mut self,
+    _: A,
+    _: F,
+    _: PCIndex,
+  ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<E::Scalar, SynthesisError>,
     A: FnOnce() -> AR,

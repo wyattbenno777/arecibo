@@ -11,12 +11,12 @@ use crate::{
     alloc_num_equals, alloc_zero, conditionally_select_vec,
     emulated::AllocatedEmulPoint,
     hypernova::{
-      alloc_sized_vec, increment, AllocatedLR1CSInstance, AllocatedNIFS, AllocatedR1CSInstance,
+      alloc_sized_vec, increment, AllocatedLR1CSInstance, AllocatedNIFS, AllocatedSplitR1CSInstance,
     },
     le_bits_to_num, AllocatedRelaxedR1CSInstance,
   },
   map_field,
-  r1cs::{split::LR1CSInstance, R1CSInstance},
+  r1cs::split::{LR1CSInstance, SplitR1CSInstance},
   spartan::math::Math,
   traits::{
     commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
@@ -52,9 +52,11 @@ where
   z_i: Option<Vec<E::Scalar>>,
   nifs: Option<NIFS<E>>,
   U: Option<LR1CSInstance<E>>,
-  u: Option<R1CSInstance<E>>,
+  u: Option<SplitR1CSInstance<E>>,
   W_new: Option<Commitment<E>>,
   data_cyclefold: Option<FoldingData<Dual<E>>>,
+  pre_committed0: Option<Commitment<E>>,
+  pre_committed1: Option<Commitment<E>>,
 }
 
 impl<E> AugmentedCircuitInputs<E>
@@ -68,9 +70,11 @@ where
     z_i: Option<Vec<E::Scalar>>,
     nifs: Option<NIFS<E>>,
     U: Option<LR1CSInstance<E>>,
-    u: Option<R1CSInstance<E>>,
+    u: Option<SplitR1CSInstance<E>>,
     W_new: Option<Commitment<E>>,
     data_cyclefold: Option<FoldingData<Dual<E>>>,
+    pre_committed0: Option<Commitment<E>>,
+    pre_committed1: Option<Commitment<E>>,
   ) -> Self {
     Self {
       pp_digest,
@@ -82,6 +86,8 @@ where
       u,
       W_new,
       data_cyclefold,
+      pre_committed0,
+      pre_committed1,
     }
   }
 }
@@ -97,7 +103,7 @@ where
   ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
     // Allocate the witness
     let arity = self.step_circuit.arity();
-    let (pp_digest, i, z_0, z_i, nifs, U, u, W_new, data_cyclefold) =
+    let (pp_digest, i, z_0, z_i, nifs, U, u, W_new, data_cyclefold, pre_committed0, pre_committed1) =
       self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
 
     // Base case: i = 0
@@ -129,6 +135,8 @@ where
         &u,
         W_new,
         &data_cyclefold,
+        pre_committed0,
+        pre_committed1,
       )?;
 
     // Check that u references U in the output of the prior iteration
@@ -223,9 +231,11 @@ where
     ro_consts: &ROConstantsCircuit<Dual<E>>,
     nifs: &AllocatedNIFS<E>,
     U: &AllocatedLR1CSInstance<E>,
-    u: &AllocatedR1CSInstance<E>,
+    u: &AllocatedSplitR1CSInstance<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
     data_cyclefold: &AllocatedCycleFoldData<Dual<E>>,
+    pre_committed0: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    pre_committed1: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
   ) -> Result<
     (
       AllocatedLR1CSInstance<E>,
@@ -257,6 +267,8 @@ where
       U,
       u,
       W_new,
+      pre_committed0,
+      pre_committed1,
       self.num_rounds,
     )?;
     let U_cyclefold = data_cyclefold.apply_fold(
@@ -268,6 +280,128 @@ where
     Ok((U, U_cyclefold, io_check))
   }
 
+  pub fn synthesize_base_case<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+  ) -> Result<
+    (
+      AllocatedLR1CSInstance<E>,
+      AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+    ),
+    SynthesisError,
+  > {
+    let U_default = AllocatedLR1CSInstance::default(
+      cs.namespace(|| "Allocated U_default"),
+      self.params.limb_width,
+      self.params.n_limbs,
+      self.num_rounds,
+    )?;
+    let U_cyclefold_default = AllocatedRelaxedR1CSInstance::default(
+      cs.namespace(|| "Allocate U_c_default"),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    Ok((U_default, U_cyclefold_default))
+  }
+
+  fn alloc_witness<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+    arity: usize,
+  ) -> Result<
+    (
+      AllocatedNum<E::Scalar>,                     // pp_digest
+      AllocatedNum<E::Scalar>,                     // i
+      Vec<AllocatedNum<E::Scalar>>,                // z_0
+      Vec<AllocatedNum<E::Scalar>>,                // z_i
+      AllocatedNIFS<E>,                            // nifs
+      AllocatedLR1CSInstance<E>,                   // U
+      AllocatedSplitR1CSInstance<E>,               // u
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>, // W_new
+      AllocatedCycleFoldData<Dual<E>>,             // data_cyclefold
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>, // pre_committed0
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>, // pre_committed1
+    ),
+    SynthesisError,
+  > {
+    // Allocate primitives: pp_digest, i, z_0
+    let pp_digest = AllocatedNum::alloc(cs.namespace(|| "pp_digest"), || {
+      Ok(self.inputs.get()?.pp_digest)
+    })?;
+    let i = AllocatedNum::alloc(cs.namespace(|| "i"), || Ok(self.inputs.get()?.i))?;
+    let z_0 = alloc_sized_vec(
+      cs.namespace(|| "z_0"),
+      map_field!(self.inputs, ref, z_0),
+      arity,
+    )?;
+
+    // Allocate z_i. If inputs.z_i is not provided (base case) allocate default value 0
+    let z_i = alloc_sized_vec(
+      cs.namespace(|| "z_i"),
+      and_then_field!(self.inputs, z_i),
+      arity,
+    )?;
+
+    // Allocate primary folding data
+    let nifs = AllocatedNIFS::alloc(
+      cs.namespace(|| "nifs"),
+      and_then_field!(self.inputs, nifs),
+      self.num_rounds,
+    )?;
+    let U = AllocatedLR1CSInstance::alloc(
+      cs.namespace(|| "allocate U"),
+      and_then_field!(self.inputs, U),
+      self.params.limb_width,
+      self.params.n_limbs,
+      self.num_rounds,
+    )?;
+    let u = AllocatedSplitR1CSInstance::alloc(
+      cs.namespace(|| "allocate u"),
+      and_then_field!(self.inputs, u),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    let W_new = AllocatedEmulPoint::alloc(
+      cs.namespace(|| "allocate W_new"),
+      and_then_field!(self.inputs, W_new).map(|W_new| W_new.to_coordinates()),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+
+    let data_cyclefold = AllocatedCycleFoldData::alloc(
+      cs.namespace(|| "data_c_1"),
+      and_then_field!(self.inputs, data_cyclefold),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    let pre_committed0 = AllocatedEmulPoint::alloc(
+      cs.namespace(|| "allocate pre_committed0"),
+      and_then_field!(self.inputs, pre_committed0).map(|pc| pc.to_coordinates()),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    let pre_committed1 = AllocatedEmulPoint::alloc(
+      cs.namespace(|| "allocate pre_committed1"),
+      and_then_field!(self.inputs, pre_committed1).map(|pc| pc.to_coordinates()),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+
+    Ok((
+      pp_digest,
+      i,
+      z_0,
+      z_i,
+      nifs,
+      U,
+      u,
+      W_new,
+      data_cyclefold,
+      pre_committed0,
+      pre_committed1,
+    ))
+  }
+
   pub fn io_check<CS: ConstraintSystem<E::Scalar>>(
     &self,
     mut cs: CS,
@@ -276,7 +410,7 @@ where
     z_0: &[AllocatedNum<E::Scalar>],
     z_i: &[AllocatedNum<E::Scalar>],
     U: &AllocatedLR1CSInstance<E>,
-    u: &AllocatedR1CSInstance<E>,
+    u: &AllocatedSplitR1CSInstance<E>,
     U_cyclefold: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
   ) -> Result<AllocatedBit, SynthesisError> {
     // Hash check: u.X[0] = H(pp, i, z_0, z_i, U)
@@ -309,7 +443,7 @@ where
     z_0: &[AllocatedNum<E::Scalar>],
     z_i: &[AllocatedNum<E::Scalar>],
     U: &AllocatedLR1CSInstance<E>,
-    u: &AllocatedR1CSInstance<E>,
+    u: &AllocatedSplitR1CSInstance<E>,
   ) -> Result<AllocatedBit, SynthesisError> {
     let hash = self.calculate_hash(cs.namespace(|| "calculate_hash"), pp_digest, i, z_0, z_i, U)?;
     let hash_check = alloc_num_equals(
@@ -326,7 +460,7 @@ where
     pp_digest: &AllocatedNum<E::Scalar>,
     i: &AllocatedNum<E::Scalar>,
     U: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
-    u: &AllocatedR1CSInstance<E>,
+    u: &AllocatedSplitR1CSInstance<E>,
   ) -> Result<AllocatedBit, SynthesisError> {
     let hash = self.calculate_hash_cyclefold(cs.namespace(|| "calculate_hash"), pp_digest, i, U)?;
     let hash_check = alloc_num_equals(
@@ -375,101 +509,6 @@ where
     let hash_bits = ro.squeeze(cs.namespace(|| "primary hash bits"), NUM_HASH_BITS)?;
     let hash = le_bits_to_num(cs.namespace(|| "primary hash"), &hash_bits)?;
     Ok(hash)
-  }
-
-  fn alloc_witness<CS: ConstraintSystem<E::Scalar>>(
-    &self,
-    mut cs: CS,
-    arity: usize,
-  ) -> Result<
-    (
-      AllocatedNum<E::Scalar>,                     // pp_digest
-      AllocatedNum<E::Scalar>,                     // i
-      Vec<AllocatedNum<E::Scalar>>,                // z_0
-      Vec<AllocatedNum<E::Scalar>>,                // z_i
-      AllocatedNIFS<E>,                            // nifs
-      AllocatedLR1CSInstance<E>,                   // U
-      AllocatedR1CSInstance<E>,                    // u
-      AllocatedEmulPoint<<Dual<E> as Engine>::GE>, // W_new
-      AllocatedCycleFoldData<Dual<E>>,             // data_cyclefold
-    ),
-    SynthesisError,
-  > {
-    // Allocate primitives: pp_digest, i, z_0
-    let pp_digest = AllocatedNum::alloc(cs.namespace(|| "pp_digest"), || {
-      Ok(self.inputs.get()?.pp_digest)
-    })?;
-    let i = AllocatedNum::alloc(cs.namespace(|| "i"), || Ok(self.inputs.get()?.i))?;
-    let z_0 = alloc_sized_vec(
-      cs.namespace(|| "z_0"),
-      map_field!(self.inputs, ref, z_0),
-      arity,
-    )?;
-
-    // Allocate z_i. If inputs.z_i is not provided (base case) allocate default value 0
-    let z_i = alloc_sized_vec(
-      cs.namespace(|| "z_i"),
-      and_then_field!(self.inputs, z_i),
-      arity,
-    )?;
-
-    // Allocate primary folding data
-    let nifs = AllocatedNIFS::alloc(
-      cs.namespace(|| "nifs"),
-      and_then_field!(self.inputs, nifs),
-      self.num_rounds,
-    )?;
-    let U = AllocatedLR1CSInstance::alloc(
-      cs.namespace(|| "allocate U"),
-      and_then_field!(self.inputs, U),
-      self.params.limb_width,
-      self.params.n_limbs,
-      self.num_rounds,
-    )?;
-    let u = AllocatedR1CSInstance::alloc(
-      cs.namespace(|| "allocate u"),
-      and_then_field!(self.inputs, u),
-      self.params.limb_width,
-      self.params.n_limbs,
-    )?;
-    let W_new = AllocatedEmulPoint::alloc(
-      cs.namespace(|| "allocate W_new"),
-      and_then_field!(self.inputs, W_new).map(|W_new| W_new.to_coordinates()),
-      self.params.limb_width,
-      self.params.n_limbs,
-    )?;
-
-    let data_cyclefold = AllocatedCycleFoldData::alloc(
-      cs.namespace(|| "data_c_1"),
-      and_then_field!(self.inputs, data_cyclefold),
-      self.params.limb_width,
-      self.params.n_limbs,
-    )?;
-    Ok((pp_digest, i, z_0, z_i, nifs, U, u, W_new, data_cyclefold))
-  }
-
-  pub fn synthesize_base_case<CS: ConstraintSystem<E::Scalar>>(
-    &self,
-    mut cs: CS,
-  ) -> Result<
-    (
-      AllocatedLR1CSInstance<E>,
-      AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
-    ),
-    SynthesisError,
-  > {
-    let U_default = AllocatedLR1CSInstance::default(
-      cs.namespace(|| "Allocated U_default"),
-      self.params.limb_width,
-      self.params.n_limbs,
-      self.num_rounds,
-    )?;
-    let U_cyclefold_default = AllocatedRelaxedR1CSInstance::default(
-      cs.namespace(|| "Allocate U_c_default"),
-      self.params.limb_width,
-      self.params.n_limbs,
-    )?;
-    Ok((U_default, U_cyclefold_default))
   }
 
   pub const fn new(

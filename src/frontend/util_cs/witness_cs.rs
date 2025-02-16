@@ -2,7 +2,9 @@
 
 use ff::PrimeField;
 
-use crate::frontend::{ConstraintSystem, Index, LinearCombination, SynthesisError, Variable};
+use crate::frontend::{
+  ConstraintSystem, Index, LinearCombination, PCIndex, SynthesisError, Variable,
+};
 
 /// A [`ConstraintSystem`] trait
 pub trait SizedWitness<Scalar: PrimeField> {
@@ -70,6 +72,20 @@ where
   }
 }
 
+/// Alloc precommitted generic
+fn alloc_precommitted_generic<F, Scalar>(
+  assignment: &mut Vec<Scalar>,
+  f: F,
+  index_fn: impl FnOnce(usize) -> Index,
+) -> Result<Variable, SynthesisError>
+where
+  F: FnOnce() -> Result<Scalar, SynthesisError>,
+  Scalar: PrimeField,
+{
+  assignment.push(f()?);
+  Ok(Variable(index_fn(assignment.len() - 1)))
+}
+
 impl<Scalar> ConstraintSystem<Scalar> for WitnessCS<Scalar>
 where
   Scalar: PrimeField,
@@ -98,28 +114,25 @@ where
     Ok(Variable(Index::Aux(self.aux_assignment.len() - 1)))
   }
 
-  fn alloc_precommitted<F, A, AR>(&mut self, _: A, f: F) -> Result<Variable, SynthesisError>
+  fn alloc_precommitted<F, A, AR>(
+    &mut self,
+    _: A,
+    f: F,
+    idx: PCIndex,
+  ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<Scalar, SynthesisError>,
     A: FnOnce() -> AR,
     AR: Into<String>,
   {
-    self.precommitted_assignment.push(f()?);
-
-    Ok(Variable(Index::Aux(self.precommitted_assignment.len() - 1)))
-  }
-
-  fn alloc_precommitted1<F, A, AR>(&mut self, _: A, f: F) -> Result<Variable, SynthesisError>
-  where
-    F: FnOnce() -> Result<Scalar, SynthesisError>,
-    A: FnOnce() -> AR,
-    AR: Into<String>,
-  {
-    self.precommitted1_assignment.push(f()?);
-
-    Ok(Variable(Index::Aux(
-      self.precommitted1_assignment.len() - 1,
-    )))
+    match idx {
+      PCIndex::ZERO => {
+        alloc_precommitted_generic(&mut self.precommitted_assignment, f, Index::Precommitted)
+      }
+      PCIndex::ONE => {
+        alloc_precommitted_generic(&mut self.precommitted1_assignment, f, Index::Precommitted1)
+      }
+    }
   }
 
   fn alloc_input<F, A, AR>(&mut self, _: A, f: F) -> Result<Variable, SynthesisError>

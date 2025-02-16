@@ -1,6 +1,6 @@
 use ff::PrimeField;
 
-use crate::frontend::{ConstraintSystem, LinearCombination, SynthesisError, Variable};
+use crate::frontend::{ConstraintSystem, LinearCombination, PCIndex, SynthesisError, Variable};
 
 #[derive(Debug)]
 pub struct MultiEq<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> {
@@ -88,26 +88,14 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
     &mut self,
     annotation: A,
     f: F,
+    idx: PCIndex,
   ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<Scalar, SynthesisError>,
     A: FnOnce() -> AR,
     AR: Into<String>,
   {
-    self.cs.alloc_precommitted(annotation, f)
-  }
-
-  fn alloc_precommitted1<F, A, AR>(
-    &mut self,
-    annotation: A,
-    f: F,
-  ) -> Result<Variable, SynthesisError>
-  where
-    F: FnOnce() -> Result<Scalar, SynthesisError>,
-    A: FnOnce() -> AR,
-    AR: Into<String>,
-  {
-    self.cs.alloc_precommitted1(annotation, f)
+    self.cs.alloc_precommitted(annotation, f, idx)
   }
 
   fn alloc_input<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>

@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 
-use crate::frontend::{ConstraintSystem, Index, LinearCombination, SynthesisError, Variable};
+use crate::frontend::{
+  ConstraintSystem, Index, LinearCombination, PCIndex, SynthesisError, Variable,
+};
 
 use ff::PrimeField;
 
@@ -157,6 +159,30 @@ impl<Scalar: PrimeField> TestConstraintSystem<Scalar> {
 
     self.named_objects.insert(path, to);
   }
+
+  fn alloc_precommitted_generic<F, A, AR>(
+    &mut self,
+    annotation: A,
+    f: F,
+    idx: PCIndex,
+    index_fn: impl FnOnce(usize) -> Index,
+  ) -> Result<Variable, SynthesisError>
+  where
+    F: FnOnce() -> Result<Scalar, SynthesisError>,
+    A: FnOnce() -> AR,
+    AR: Into<String>,
+  {
+    let precommitted = match idx {
+      PCIndex::ZERO => &mut self.precommitted,
+      PCIndex::ONE => &mut self.precommitted1,
+    };
+    let index = precommitted.len();
+    let path = compute_path(&self.current_namespace, &annotation().into());
+    precommitted.push((f()?, path.clone()));
+    let var = Variable::new_unchecked(index_fn(index));
+    self.set_named_obj(path, NamedObject::Var);
+    Ok(var)
+  }
 }
 
 fn compute_path(ns: &[String], this: &str) -> String {
@@ -195,38 +221,17 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for TestConstraintSystem<Scala
     &mut self,
     annotation: A,
     f: F,
+    idx: PCIndex,
   ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<Scalar, SynthesisError>,
     A: FnOnce() -> AR,
     AR: Into<String>,
   {
-    let index = self.precommitted.len();
-    let path = compute_path(&self.current_namespace, &annotation().into());
-    self.precommitted.push((f()?, path.clone()));
-    let var = Variable::new_unchecked(Index::Precommitted(index));
-    self.set_named_obj(path, NamedObject::Var);
-
-    Ok(var)
-  }
-
-  fn alloc_precommitted1<F, A, AR>(
-    &mut self,
-    annotation: A,
-    f: F,
-  ) -> Result<Variable, SynthesisError>
-  where
-    F: FnOnce() -> Result<Scalar, SynthesisError>,
-    A: FnOnce() -> AR,
-    AR: Into<String>,
-  {
-    let index = self.precommitted1.len();
-    let path = compute_path(&self.current_namespace, &annotation().into());
-    self.precommitted1.push((f()?, path.clone()));
-    let var = Variable::new_unchecked(Index::Precommitted1(index));
-    self.set_named_obj(path, NamedObject::Var);
-
-    Ok(var)
+    match idx {
+      PCIndex::ZERO => self.alloc_precommitted_generic(annotation, f, idx, Index::Precommitted),
+      PCIndex::ONE => self.alloc_precommitted_generic(annotation, f, idx, Index::Precommitted1),
+    }
   }
 
   fn alloc_input<F, A, AR>(&mut self, annotation: A, f: F) -> Result<Variable, SynthesisError>
