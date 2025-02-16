@@ -1,5 +1,6 @@
 use super::int::{add, mul, sub};
 use crate::frontend::gadgets::Assignment;
+use crate::frontend::PCIndex;
 use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::PrimeField;
 
@@ -42,19 +43,20 @@ where
 }
 
 /// Converts an addr, val, ts tuple `(usize, u64, u64)` to a `Vec<Scalar>`
-pub fn alloc_avt_tuple<F, CS>(
+pub fn allocated_avt<F, CS>(
   mut cs: CS,
   tuple: (usize, u64, u64),
+  idx: PCIndex,
 ) -> Result<(AllocatedNum<F>, AllocatedNum<F>, AllocatedNum<F>), SynthesisError>
 where
   F: PrimeField,
   CS: ConstraintSystem<F>,
 {
   let (addr, val, ts) = tuple;
-  let addr = AllocatedNum::alloc(cs.namespace(|| "addr"), || Ok(F::from(addr as u64)))?;
-  let val = AllocatedNum::alloc(cs.namespace(|| "val"), || Ok(F::from(val)))?;
-  let ts = AllocatedNum::alloc(cs.namespace(|| "ts"), || Ok(F::from(ts)))?;
-
+  let addr =
+    AllocatedNum::alloc_pre_committed(cs.namespace(|| "addr"), || Ok(F::from(addr as u64)), idx)?;
+  let val = AllocatedNum::alloc_pre_committed(cs.namespace(|| "val"), || Ok(F::from(val)), idx)?;
+  let ts = AllocatedNum::alloc_pre_committed(cs.namespace(|| "ts"), || Ok(F::from(ts)), idx)?;
   Ok((addr, val, ts))
 }
 

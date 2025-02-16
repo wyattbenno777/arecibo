@@ -3,7 +3,7 @@
 use ff::{PrimeField, PrimeFieldBits};
 use serde::{Deserialize, Serialize};
 
-use crate::frontend::{ConstraintSystem, LinearCombination, SynthesisError, Variable};
+use crate::frontend::{ConstraintSystem, LinearCombination, PCIndex, SynthesisError, Variable};
 
 use crate::frontend::gadgets::boolean::{self, AllocatedBit, Boolean};
 
@@ -40,6 +40,35 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
 
         Ok(tmp)
       },
+    )?;
+
+    Ok(AllocatedNum {
+      value: new_value,
+      variable: var,
+    })
+  }
+
+  /// Allocate a `Variable(Aux)` in a `ConstraintSystem`.
+  pub fn alloc_pre_committed<CS, F>(
+    mut cs: CS,
+    value: F,
+    idx: PCIndex,
+  ) -> Result<Self, SynthesisError>
+  where
+    CS: ConstraintSystem<Scalar>,
+    F: FnOnce() -> Result<Scalar, SynthesisError>,
+  {
+    let mut new_value = None;
+    let var = cs.alloc_precommitted(
+      || "num",
+      || {
+        let tmp = value()?;
+
+        new_value = Some(tmp);
+
+        Ok(tmp)
+      },
+      idx,
     )?;
 
     Ok(AllocatedNum {
