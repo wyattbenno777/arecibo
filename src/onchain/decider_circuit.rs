@@ -272,6 +272,7 @@ where
     //         the Relaxed R1CS relation of the CycleFoldCircuit.
     //         - This involves non-native operations because W_{EC,n}.{E, W} ∈ Fq.
     //         - With naive sparse matrix-vector product, this increases the number of constraints.
+    // TODO: Do we need to do this?
 
     // Step 6.1: Partially enforce that U_{n+1} is the correct folding of U_n and un.
     //           - Only field elements in U_{n+1} are checked, while group elements (commitments) are not.
@@ -331,8 +332,6 @@ where
       Ok(self.kzg_challenges.1)
     })?;
     kzg_alloc_re.inputize(cs.namespace(|| "kzg_alloc_re"))?;
-
-
 
     let (alloc_rw, alloc_re) = KZGChallengesGadget::get_challenges_gadget::<CS, E>(cs, U_i1)?;
 

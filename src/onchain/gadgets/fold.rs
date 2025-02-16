@@ -1,40 +1,38 @@
 use crate::{
-  constants::{
-    BN_LIMB_WIDTH, BN_N_LIMBS, NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS,
+  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_FE_IN_EMULATED_POINT},
+  cyclefold::gadgets::emulated::{
+    AllocatedEmulPoint, AllocatedEmulR1CSInstance, AllocatedEmulRelaxedR1CSInstance,
   },
-  cyclefold::{
-    gadgets::emulated::{
-      AllocatedEmulPoint, AllocatedEmulR1CSInstance, AllocatedEmulRelaxedR1CSInstance,
-    },
-    util::absorb_primary_commitment,
-  },
-  frontend::{num::AllocatedNum, AllocatedBit, ConstraintSystem, SynthesisError},
-  gadgets::{alloc_scalar_as_base, le_bits_to_num, scalar_as_base, AllocatedPoint},
+  frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
   nebula::nifs::NIFS,
+  provider::kzg_commitment::UVKZGCommitment,
   traits::{
-    commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, Group, ROCircuitTrait,
+    commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
     ROConstantsCircuit,
   },
-  Commitment,
 };
-
+use group::Curve;
+use pairing::Engine as PairingEngine;
 pub struct FoldGadget {}
 
 impl FoldGadget {
-  pub fn fold_group_elements_native<E: CurveCycleEquipped>(
-    U_commitments: (Commitment<E>, Commitment<E>),
-    u_commitments: Commitment<E>,
-    // cmT: Commitment<E>,
-    r: E::Scalar,
-  ) -> Result<(Commitment<E>, Commitment<E>), SynthesisError> {
+  pub fn fold_group_elements_native<E: PairingEngine>(
+    U_commitments: (UVKZGCommitment<E>, UVKZGCommitment<E>),
+    u_commitments: UVKZGCommitment<E>,
+    cmT: E::G1,
+    r: E::Fr,
+  ) -> Result<(UVKZGCommitment<E>, UVKZGCommitment<E>), SynthesisError> {
     let U_cmW = U_commitments.0;
     let U_cmE = U_commitments.1;
     let u_cmW = u_commitments;
-    // *comm_E_1 + *comm_T * *r;
-    let cmW = U_cmW + u_cmW * r;
-    let cmE = U_cmE; // + cmT * r;
 
-    Ok((cmW, cmE))
+    let cmW = E::G1::from(U_cmW.0) + E::G1::from(u_cmW.0) * r;
+    let cmE = E::G1::from(U_cmE.0) + cmT * r;
+
+    Ok((
+      UVKZGCommitment::<E>::new(cmW.to_affine()),
+      UVKZGCommitment::<E>::new(cmE.to_affine()),
+    ))
   }
 
   pub fn fold_field_elements_gadget<CS, E: CurveCycleEquipped>(
@@ -50,7 +48,7 @@ impl FoldGadget {
   {
     let mut ro_circuit = <Dual<E> as Engine>::ROCircuit::new(
       ROConstantsCircuit::<Dual<E>>::default(),
-      1 + NUM_FE_IN_EMULATED_POINT + 2 + NUM_FE_IN_EMULATED_POINT, // pp_digest + u.W + u.X + T    
+      1 + NUM_FE_IN_EMULATED_POINT + 2 + NUM_FE_IN_EMULATED_POINT, // pp_digest + u.W + u.X + T
     );
     ro_circuit.absorb(&pp_hash);
     u.absorb_in_ro(cs.namespace(|| "u"), &mut ro_circuit)?;
@@ -72,17 +70,11 @@ impl FoldGadget {
     //   |lc| lc,
     //   |lc| lc + r.get_variable() - r_1.get_variable(),
     // );
-    
+
     let r_mul_x0 = r.mul(cs.namespace(|| "mul x0"), &u.x0)?;
-    let x0 = U.x0.add(
-      cs.namespace(|| "add x0"),
-      &r_mul_x0,
-    )?;
+    let x0 = U.x0.add(cs.namespace(|| "add x0"), &r_mul_x0)?;
     let r_mul_x1 = r.mul(cs.namespace(|| "mul x1"), &u.x1)?;
-    let x1 = U.x1.add(
-      cs.namespace(|| "add x1"),
-      &r_mul_x1,
-    )?;
+    let x1 = U.x1.add(cs.namespace(|| "add x1"), &r_mul_x1)?;
     let u = U.u.add(cs.namespace(|| "add u"), &r)?;
     let folded_U = AllocatedEmulRelaxedR1CSInstance {
       comm_W: AllocatedEmulPoint::default(cs.namespace(|| "comm_W"), BN_LIMB_WIDTH, BN_N_LIMBS)?,

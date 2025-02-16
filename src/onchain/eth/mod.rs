@@ -1,9 +1,8 @@
 //! This module provides a trait and implementations for converting Rust types
 //! to EVM calldata.
-use crate::{frontend::groth16::Proof as Groth16Proof, provider::{pedersen::Commitment, traits::DlogGroup, Bn256EngineKZG}};
+use crate::{frontend::groth16::Proof as Groth16Proof, provider::{kzg_commitment::UVKZGCommitment, pedersen::Commitment, traits::DlogGroup, Bn256EngineKZG}};
 use ff::PrimeField;
-use halo2curves::bn256::{Fq, Fq2, Fr, G1Affine, G2Affine, G1};
-use pairing::Engine;
+use halo2curves::bn256::{Bn256, Fq, Fq2, Fr, G1Affine, G2Affine, G1};
 pub mod evm;
 
 pub trait ToEth {
@@ -64,6 +63,18 @@ impl ToEth for G1 {
 impl ToEth for Groth16Proof<Bn256EngineKZG> {
     fn to_eth(&self) -> Vec<u8> {
         [self.a.to_eth(), self.b.to_eth(), self.c.to_eth()].concat()
+    }
+}
+
+impl ToEth for UVKZGCommitment<Bn256> {
+    fn to_eth(&self) -> Vec<u8> {
+        self.0.to_eth()
+    }
+}
+
+impl ToEth for UVKZGCommitment<Bn256EngineKZG> {
+    fn to_eth(&self) -> Vec<u8> {
+        self.0.to_eth()
     }
 }
 

@@ -9,13 +9,14 @@ use crate::{
     num::AllocatedNum, ConstraintSystem, SynthesisError,
   },
   gadgets::{le_bits_to_num, scalar_as_base},
-  provider::{kzg_commitment::KZGProverKey, traits::DlogGroup},
+  provider::{kzg_commitment::{KZGProverKey, KZGVerifierKey, UVKZGCommitment}, traits::DlogGroup},
   r1cs::RelaxedR1CSInstance,
   traits::{
     CurveCycleEquipped, Dual, Engine, ROCircuitTrait, ROConstants, ROConstantsCircuit, ROTrait,
-  },
+  }, Commitment,
 };
 use ec_gpu_gen::threadpool::Worker;
+use group::Curve;
 use pairing::Engine as PairingEngine;
 use serde::{Deserialize, Serialize};
 
@@ -73,8 +74,8 @@ pub struct KZGProof<E: PairingEngine> {
 }
 
 impl<E: PairingEngine> KZGProof<E> {
-  pub fn prove_with_challenge(
-    params: &KZGProverKey<E>,
+  pub fn prove(
+    pk: &KZGProverKey<E>,
     challenge: E::Fr,
     v: &[E::Fr],
   ) -> Result<KZGProof<E>, PCSError>
@@ -89,7 +90,7 @@ impl<E: PairingEngine> KZGProof<E> {
     domain.ifft(&worker, &mut None).expect("FFT failed");
 
     let polynomial = DensePolynomial::from_coeffs(domain.into_coeffs());
-    if polynomial.degree() >= params.powers_of_g().len() {
+    if polynomial.degree() >= pk.powers_of_g().len() {
       return Err(PCSError::LengthError);
     }
 
@@ -102,15 +103,30 @@ impl<E: PairingEngine> KZGProof<E> {
       remainder_poly.coeffs()[0]
     };
 
-    if witness_poly.degree() >= params.powers_of_g().len() {
-      return Err(PCSError::LengthError);
-    }
-
     let proof = E::G1::vartime_multiscalar_mul(
       &witness_poly.coeffs(),
-      &params.powers_of_g()[..witness_poly.coeffs().len()],
+      &pk.powers_of_g()[..witness_poly.coeffs().len()],
     );
 
     Ok(KZGProof { proof, eval })
   }
+
+  pub fn verify(
+    &self,
+    vk: &KZGVerifierKey<E>,
+    commitment: &UVKZGCommitment<E>,
+    challenge: E::Fr,
+  ) -> Result<(), PCSError> {
+    // Verify that `proof.eval` is the evaluation at `challenge` of the polynomial committed inside `commitment`.
+    let cm = E::G1::from(commitment.0);
+    let inner = cm - vk.g * self.eval;
+    let lhs = E::pairing(&inner.to_affine(), &vk.h);
+    let inner = E::G2::from(vk.beta_h) - vk.h * challenge;
+    let rhs = E::pairing(&self.proof.to_affine(), &inner.to_affine());
+    if lhs != rhs {
+      return Err(PCSError::InvalidPCS);
+    }
+    Ok(())
+  }
 }
+

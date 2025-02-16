@@ -504,6 +504,8 @@ where
             identity_count += 1;
         }
     }
+
+    println!("identity_count: {}", identity_count);
     for e in l_affine.iter() {
         if e.is_identity().into() {
             return Err(SynthesisError::UnconstrainedVariable);

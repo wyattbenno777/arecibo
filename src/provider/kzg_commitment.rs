@@ -192,6 +192,12 @@ pub struct UVKZGCommitment<E: Engine>(
   pub E::G1Affine,
 );
 
+impl<E: Engine> UVKZGCommitment<E> {
+  pub fn new(commitment: E::G1Affine) -> Self {
+    Self(commitment)
+  }
+}
+
 impl<E: Engine> TranscriptReprTrait<E::G1> for UVKZGCommitment<E>
 where
   E::G1: DlogGroup,
