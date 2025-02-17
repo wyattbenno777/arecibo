@@ -446,6 +446,32 @@ where
       |lc| lc + kzg_alloc_re_eval.get_variable() - alloc_re_eval.get_variable(),
     );
 
+    // ------------------------------
+
+    let (cmT_x, cmT_y, cmT_id) = self.nifs_proof.nifs_primary.comm_T.to_coordinates();
+    for (i, limb )in cmT_x.as_limbs().iter().enumerate() {
+      let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of x to num")))?;
+      tmp.inputize(cs.namespace(|| format!("convert limb {i} of x to num")))?;
+    }
+
+    for (i, limb )in cmT_y.as_limbs().iter().enumerate() {
+      let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of y to num")))?;
+      tmp.inputize(cs.namespace(|| format!("convert limb {i} of y to num")))?;
+    }
+
+    let input_cmT_id = cs.alloc_input(
+      || "input variable",
+      || cmT_id.get_value().map(|x| E::Scalar::from(x as u64)).ok_or(SynthesisError::AssignmentMissing),
+    )?;
+
+    cs.enforce(
+      || "enforce input is correct",
+      |lc| lc + input_cmT_id,
+      |lc| lc + CS::one(),
+      |lc| lc + cmT_id.get_variable(),
+    );
+
     Ok(())
   }
 }
+

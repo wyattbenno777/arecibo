@@ -161,6 +161,17 @@ impl Decider {
       let id_fr = Fr::from(id);
       (x_limbs, y_limbs, id_fr)
     };
+
+    let (cmT_x, cmT_y, cmT_id) = {
+      let (x, y, id) = self.nifs_proof.nifs_primary.comm_T.to_coordinates();
+      let x_bignat = BigInt::from_bytes_le(Sign::Plus, &x.to_repr());
+      let x_limbs = nat_to_limbs(&x_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
+      let y_bignat = BigInt::from_bytes_le(Sign::Plus, &y.to_repr());
+      let y_limbs = nat_to_limbs(&y_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
+      let id_fr = Fr::from(id);
+      (x_limbs, y_limbs, id_fr)
+    };
+
     let public_inputs = [
       &[pp_hash],
       &[i],
@@ -174,6 +185,9 @@ impl Decider {
       &[U_cmE_id],
       &[self.kzg_challenges.0, self.kzg_challenges.1],
       &[self.kzg_proofs.0.eval, self.kzg_proofs.1.eval],
+      &cmT_x[..],
+      &cmT_y[..],
+      &[cmT_id],
     ]
     .concat();
 
@@ -217,11 +231,11 @@ pub fn prepare_calldata(
       running_instance.comm_W.to_eth(),
       running_instance.comm_E.to_eth(),
       incoming_instance.comm_W.to_eth(),
-      proof.nifs_proof.nifs_primary.comm_T.to_eth(),                 // cmT
+      proof.nifs_proof.nifs_primary.comm_T.to_eth(),  // cmT
       proof.rho.to_eth(),              // r
       proof.groth16_proof.to_eth(),    // pA, pB, pC
-      proof.kzg_challenges.0.to_eth(), // challenge_W, challenge_E
-      proof.kzg_challenges.1.to_eth(), // challenge_W, challenge_E
+      proof.kzg_challenges.0.to_eth(), // challenge_W
+      proof.kzg_challenges.1.to_eth(), // challenge_E
       proof.kzg_proofs.0.eval.to_eth(),  // eval W
       proof.kzg_proofs.1.eval.to_eth(),  // eval E
       proof.kzg_proofs.0.proof.to_eth(), // W kzg_proof
