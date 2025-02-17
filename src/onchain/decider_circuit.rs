@@ -346,7 +346,7 @@ where
       pp_hash,
       U_i,
       u_i,
-      self.nifs_proof,
+      self.nifs_proof.clone(),
       r,
     )?;
 
@@ -448,7 +448,13 @@ where
 
     // ------------------------------
 
-    let (cmT_x, cmT_y, cmT_id) = self.nifs_proof.nifs_primary.comm_T.to_coordinates();
+    let alloc_cmT: AllocatedEmulPoint<<Dual<E> as Engine>::GE> = AllocatedEmulPoint::alloc(
+      cs.namespace(|| "alloc_cmT"),
+      Some(self.nifs_proof.nifs_primary.comm_T.to_coordinates()),
+      BN_LIMB_WIDTH,
+      BN_N_LIMBS,
+    )?;
+    let (cmT_x, cmT_y, cmT_id) = alloc_cmT.to_coordinates();
     for (i, limb )in cmT_x.as_limbs().iter().enumerate() {
       let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of x to num")))?;
       tmp.inputize(cs.namespace(|| format!("convert limb {i} of x to num")))?;
