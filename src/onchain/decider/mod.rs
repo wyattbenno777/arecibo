@@ -5,28 +5,22 @@ use super::{
   gadgets::{FoldGadget, KZGProof},
 };
 use crate::{
-  errors::NovaError,
-  frontend::groth16::{
+  constants::{BN_LIMB_WIDTH, BN_N_LIMBS}, errors::NovaError, frontend::groth16::{
     self, create_random_proof, generate_random_parameters, verify_proof, Parameters,
     Proof as Groth16Proof,
-  },
-  nebula::{
+  }, gadgets::{nat_to_limbs, scalar_as_base, BigNat}, nebula::{
     nifs::NIFS,
     rs::{PublicParams, RecursiveSNARK},
-  },
-  onchain::eth::ToEth,
-  provider::{
-    hyperkzg::EvaluationEngine,
-    kzg_commitment::{KZGProverKey, KZGVerifierKey, UVKZGCommitment},
-    Bn256EngineKZG,
-  },
-  Commitment,
-  r1cs::{R1CSInstance, RelaxedR1CSInstance},
-  traits::{evaluation::EvaluationEngineTrait, Engine, ROConstants},
+  }, onchain::eth::ToEth, provider::{
+    hyperkzg::EvaluationEngine, kzg_commitment::{KZGProverKey, KZGVerifierKey, UVKZGCommitment}, traits::DlogGroup, Bn256EngineKZG
+  }, r1cs::{R1CSInstance, RelaxedR1CSInstance}, traits::{evaluation::EvaluationEngineTrait, Dual, Engine, ROConstants}, Commitment
 };
 use halo2curves::bn256::{Bn256, Fr};
+use num_bigint::{BigInt, Sign};
 use rand::RngCore;
 use group::Curve;
+use ff::PrimeField;
+use crate::traits::commitment::CommitmentTrait;
 
 pub mod test;
 
@@ -112,7 +106,7 @@ impl Decider {
       KZGProof::prove(&pk.kzg_pk, kzg_challenges.0, &circuit.W_i1.W[..])?,
       KZGProof::prove(&pk.kzg_pk, kzg_challenges.1, &circuit.W_i1.E[..])?,
     );
-    let groth16_proof = create_random_proof(circuit, &pk.groth16_pk, rng)?;
+    let groth16_proof = create_random_proof(circuit.clone(), &pk.groth16_pk, rng)?;
     Ok(Self {
       groth16_proof,
       rho,
@@ -148,12 +142,36 @@ impl Decider {
       self.rho,
     )?;
 
+    let (U_cmW_x, U_cmW_y, U_cmW_id) = {
+      let (x, y, id) = U_cmW.to_coordinates();
+      let x_bignat = BigInt::from_bytes_le(Sign::Plus, &x.to_repr());
+      let x_limbs = nat_to_limbs(&x_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
+      let y_bignat = BigInt::from_bytes_le(Sign::Plus, &y.to_repr());
+      let y_limbs = nat_to_limbs(&y_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
+      let id_fr = Fr::from(id);
+      (x_limbs, y_limbs, id_fr)
+    };
+
+    let (U_cmE_x, U_cmE_y, U_cmE_id) = {
+      let (x, y, id) = U_cmE.to_coordinates();
+      let x_bignat = BigInt::from_bytes_le(Sign::Plus, &x.to_repr());
+      let x_limbs = nat_to_limbs(&x_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
+      let y_bignat = BigInt::from_bytes_le(Sign::Plus, &y.to_repr());
+      let y_limbs = nat_to_limbs(&y_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
+      let id_fr = Fr::from(id);
+      (x_limbs, y_limbs, id_fr)
+    };
     let public_inputs = [
       &[pp_hash],
       &[i],
       &z_0[..],
       &z_i[..],
-      // TODO: Pass U commitments as inputs
+      &U_cmW_x[..],
+      &U_cmW_y[..],
+      &[U_cmW_id],
+      &U_cmE_x[..],
+      &U_cmE_y[..],
+      &[U_cmE_id],
       &[self.kzg_challenges.0, self.kzg_challenges.1],
       &[self.kzg_proofs.0.eval, self.kzg_proofs.1.eval],
     ]
@@ -169,8 +187,8 @@ impl Decider {
       return Err(NovaError::ProofVerifyError);
     }
 
-    let kzg_U_cmW = UVKZGCommitment::<Bn256>::new(U_cmW.comm.to_affine());
-    let kzg_U_cmE = UVKZGCommitment::<Bn256>::new(U_cmE.comm.to_affine());
+    // let kzg_U_cmW = UVKZGCommitment::<Bn256>::new(U_cmW.comm.to_affine());
+    // let kzg_U_cmE = UVKZGCommitment::<Bn256>::new(U_cmE.comm.to_affine());
 
     // 7.3 Verify KZG proofs
     // self.kzg_proofs.0.verify(&kzg_vk, &kzg_U_cmW, self.kzg_challenges.0)?;

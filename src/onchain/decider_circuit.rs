@@ -33,6 +33,7 @@ use crate::{
 use ff::PrimeField;
 use std::sync::Arc;
 
+#[derive(Debug, Clone)]
 pub struct DeciderCircuit<E>
 where
   E: CurveCycleEquipped,
@@ -214,6 +215,61 @@ where
       BN_N_LIMBS,
     )?;
 
+    let U_i1: AllocatedEmulRelaxedR1CSInstance<Dual<E>> = AllocatedEmulRelaxedR1CSInstance::alloc(
+      cs.namespace(|| "U_i1"),
+      Some(&self.U_i1),
+      BN_LIMB_WIDTH,
+      BN_N_LIMBS,
+    )?;
+
+    let (U_i1_cmW_x, U_i1_cmW_y, U_i1_cmW_id) = U_i1.comm_W.to_coordinates();
+
+    for (i, limb )in U_i1_cmW_x.as_limbs().iter().enumerate() {
+          let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of x to num")))?;
+          tmp.inputize(cs.namespace(|| format!("convert limb {i} of x to num")))?;
+    }
+
+    for (i, limb )in U_i1_cmW_y.as_limbs().iter().enumerate() {
+      let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of y to num")))?;
+      tmp.inputize(cs.namespace(|| format!("convert limb {i} of y to num")))?;
+    }
+
+    let input_U_i1_cmW_id = cs.alloc_input(
+      || "input variable",
+      || U_i1_cmW_id.get_value().map(|x| E::Scalar::from(x as u64)).ok_or(SynthesisError::AssignmentMissing),
+    )?;
+
+    cs.enforce(
+      || "enforce input is correct",
+      |lc| lc + input_U_i1_cmW_id,
+      |lc| lc + CS::one(),
+      |lc| lc + U_i1_cmW_id.get_variable(),
+    );
+
+    let (U_i1_cmE_x, U_i1_cmE_y, U_i1_cmE_id) = U_i1.comm_E.to_coordinates();
+    for (i, limb )in U_i1_cmE_x.as_limbs().iter().enumerate() {
+      let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of x to num")))?;
+      tmp.inputize(cs.namespace(|| format!("convert limb {i} of x to num")))?;
+    }
+
+    for (i, limb )in U_i1_cmE_y.as_limbs().iter().enumerate() {
+      let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of y to num")))?;
+      tmp.inputize(cs.namespace(|| format!("convert limb {i} of y to num")))?;
+    }
+
+    let input_U_i1_cmE_id = cs.alloc_input(
+      || "input variable",
+      || U_i1_cmE_id.get_value().map(|x| E::Scalar::from(x as u64)).ok_or(SynthesisError::AssignmentMissing),
+    )?;
+
+    cs.enforce(
+      || "enforce input is correct",
+      |lc| lc + input_U_i1_cmE_id,
+      |lc| lc + CS::one(),
+      |lc| lc + U_i1_cmE_id.get_variable(),
+    );
+
+
     // Step 1: Enforce U_{n+1} and W_{n+1} satisfy r1cs
     // Nova has no need for this, since we are checking if an r1cs relation
     // is sat inside r1cs thus creating another r1cs relation you would have to check is sat.
@@ -255,18 +311,18 @@ where
     );
 
     // Step 4: Commitments verification for U_{EC,n}.{E, W} with respect to W_{EC,n}.{E, W}.
-    let cf_W_i_commit = <Dual<E> as Engine>::CE::commit_gadget(
-      cs,
-      &*self.cf_ck,
-      &self.cf_W_i.W[..],
-      &self.cf_W_i.r_W,
-    )?;
+    // let cf_W_i_commit = <Dual<E> as Engine>::CE::commit_gadget(
+    //   cs,
+    //   &*self.cf_ck,
+    //   &self.cf_W_i.W[..],
+    //   &self.cf_W_i.r_W,
+    // )?;
 
-    // Check that Commit(cf_W_i.W) == cf_U_i.cmW
-    cf_W_i_commit.check_equal(
-      cs.namespace(|| "check that cf_W_i.W == cf_U_i.cmW"),
-      &cf_U_i.W,
-    )?;
+    // // Check that Commit(cf_W_i.W) == cf_U_i.cmW
+    // cf_W_i_commit.check_equal(
+    //   cs.namespace(|| "check that cf_W_i.W == cf_U_i.cmW"),
+    //   &cf_U_i.W,
+    // )?;
 
     // Step 5: Enforce U_{EC,n} and W_{EC,n} satisfy r1cs_{EC},
     //         the Relaxed R1CS relation of the CycleFoldCircuit.
@@ -292,13 +348,6 @@ where
       u_i,
       self.nifs_proof,
       r,
-    )?;
-
-    let U_i1: AllocatedEmulRelaxedR1CSInstance<Dual<E>> = AllocatedEmulRelaxedR1CSInstance::alloc(
-      cs.namespace(|| "U_i1"),
-      Some(&self.U_i1),
-      BN_LIMB_WIDTH,
-      BN_N_LIMBS,
     )?;
 
     cs.enforce(

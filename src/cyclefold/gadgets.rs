@@ -414,6 +414,10 @@ pub mod emulated {
 
       Ok(Self { x, y, is_infinity })
     }
+
+    pub fn to_coordinates(&self) -> (BigNat<G::Base>, BigNat<G::Base>, AllocatedBit) {
+      (self.x.clone(), self.y.clone(), self.is_infinity.clone())
+    }
   }
 
   #[derive(Clone, Debug)]
