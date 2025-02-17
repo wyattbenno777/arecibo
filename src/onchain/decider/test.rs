@@ -6,11 +6,13 @@ mod tests {
   use crate::{
     constants::{BN_LIMB_WIDTH, BN_N_LIMBS}, cyclefold::gadgets::emulated::AllocatedEmulRelaxedR1CSInstance, frontend::{
       groth16::{self, create_random_proof, generate_random_parameters, verify_proof}, num::AllocatedNum, r1cs::NovaShape, shape_cs::ShapeCS, test_cs::TestConstraintSystem, Circuit, ConstraintSystem, SynthesisError
-    }, nebula::rs::{PublicParams, RecursiveSNARK, StepCircuit}, onchain::{decider_circuit::DeciderCircuit, gadgets::{EvalGadget, KZGChallengesGadget, KZGProof}}, provider::{hyperkzg::EvaluationEngine, Bn256EngineKZG, GrumpkinEngine}, r1cs::RelaxedR1CSInstance, traits::{evaluation::EvaluationEngineTrait, snark::RelaxedR1CSSNARKTrait, Dual, Engine}, Commitment
+    }, nebula::rs::{PublicParams, RecursiveSNARK, StepCircuit}, onchain::{decider_circuit::DeciderCircuit, gadgets::{EvalGadget, FoldGadget, KZGChallengesGadget, KZGProof}}, provider::{hyperkzg::EvaluationEngine, kzg_commitment::UVKZGCommitment, Bn256EngineKZG, GrumpkinEngine}, r1cs::RelaxedR1CSInstance, traits::{evaluation::EvaluationEngineTrait, snark::RelaxedR1CSSNARKTrait, Dual, Engine}, Commitment
   };
   use ff::Field;
   use halo2curves::bn256::{Bn256, Fr};
   use rand::thread_rng;
+  use group::Curve;
+  use crate::provider::non_hiding_zeromorph::{UVKZGPCS, UVKZGPoly};
 
   type E1 = Bn256EngineKZG;
   type E2 = GrumpkinEngine;
@@ -170,12 +172,15 @@ mod tests {
     let eval_e = EvalGadget::evaluate_native(relaxed_witness.clone().E, challenge_e);
 
     let proof_w = KZGProof::prove(&kzg_pk, challenge_w, &relaxed_witness.W).unwrap();
+    // let poly_w = UVKZGPoly::new(relaxed_witness.W.clone());
+    // let (proof_w, p_eval_w) = UVKZGPCS::open(&kzg_pk, &poly_w, &challenge_w).unwrap();
 
     let proof_e = KZGProof::prove(&kzg_pk, challenge_e, &relaxed_witness.E).unwrap();
 
     assert_eq!(eval_w, proof_w.eval);
     assert_eq!(eval_e, proof_e.eval);
   }
+
 
   #[test]
   fn test_eval_gadget() {
@@ -199,11 +204,14 @@ mod tests {
       .collect::<Vec<_>>();
     let point = Fr::random(&mut thread_rng());
     let alloc_point = AllocatedNum::alloc(cs.namespace(|| "alloc_point"), || Ok(point)).unwrap();
+    // let poly = UVKZGPoly::new(random_vec.clone());
+    // let ev = poly.evaluate(&point);
     let eval_native = EvalGadget::evaluate_native(random_vec, point);
     let eval_gadget =
       EvalGadget::evaluate_gadget::<_, Bn256EngineKZG>(&mut cs, random_allocated_vec, &alloc_point)
         .unwrap();
     assert!(cs.is_satisfied());
+    // assert_eq!(ev, eval_native);
     assert_eq!(eval_native, eval_gadget.get_value().unwrap());
   }
 
@@ -246,24 +254,66 @@ mod tests {
     let f_circuit = CubicFCircuit::new();
     let rs_pp = PublicParams::<E1>::setup(&f_circuit, &*S1::ck_floor(), &*S2::ck_floor());
     let z0 = vec![<Bn256EngineKZG as Engine>::Scalar::from(3u64)];
-    let mut recursive_snark: RecursiveSNARK<Bn256EngineKZG> =
+    let mut rs: RecursiveSNARK<Bn256EngineKZG> =
       RecursiveSNARK::<Bn256EngineKZG>::new(&rs_pp, &f_circuit, &z0).unwrap();
     let mut IC_i = <Bn256EngineKZG as Engine>::Scalar::ZERO;
     for _i in 0..num_steps {
-      recursive_snark
+      rs
         .prove_step(&rs_pp, &f_circuit, IC_i)
         .unwrap();
 
-      IC_i = recursive_snark.increment_commitment(&rs_pp, &f_circuit);
+      IC_i = rs.increment_commitment(&rs_pp, &f_circuit);
     }
 
-    let res = recursive_snark.verify(&rs_pp, num_steps, &z0, IC_i);
-    println!("RecursiveSNARK::verify: {:?}", res.is_ok(),);
+    let res = rs.verify(&rs_pp, num_steps, &z0, IC_i);
     res.unwrap();
     let decider_circuit =
-      DeciderCircuit::<Bn256EngineKZG>::new(&rs_pp, recursive_snark.clone()).unwrap();
+      DeciderCircuit::<Bn256EngineKZG>::new(&rs_pp, rs.clone()).unwrap();
     let mut cs = TestConstraintSystem::new();
     let _ = decider_circuit.synthesize(&mut cs);
     assert!(cs.is_satisfied());
   }
+
+#[test]
+fn test_fold_gadget() {
+  let num_steps = 5;
+  let f_circuit = CubicFCircuit::new();
+  let rs_pp = PublicParams::<E1>::setup(&f_circuit, &*S1::ck_floor(), &*S2::ck_floor());
+  let z0 = vec![<Bn256EngineKZG as Engine>::Scalar::from(3u64)];
+  let mut rs: RecursiveSNARK<Bn256EngineKZG> =
+    RecursiveSNARK::<Bn256EngineKZG>::new(&rs_pp, &f_circuit, &z0).unwrap();
+  let mut IC_i = <Bn256EngineKZG as Engine>::Scalar::ZERO;
+  for _i in 0..num_steps {
+    rs
+      .prove_step(&rs_pp, &f_circuit, IC_i)
+      .unwrap();
+
+    IC_i = rs.increment_commitment(&rs_pp, &f_circuit);
+  }
+
+  let (kzg_pk, kzg_vk) = EvaluationEngine::<Bn256, Bn256EngineKZG>::setup(rs_pp.ck_primary.clone());
+
+  let circuit = DeciderCircuit::<Bn256EngineKZG>::new(&rs_pp, rs.clone()).unwrap();
+  let rho = circuit.randomness;
+  let nifs_proof = circuit.nifs_proof.clone();
+  let (kzg_challenges_w, kzg_challenges_e) = circuit.kzg_challenges.clone();
+
+  let (kzg_proof_w, kzg_proof_e) = (
+    KZGProof::prove(&kzg_pk, kzg_challenges_w, &circuit.W_i1.W[..]).unwrap(),
+    KZGProof::prove(&kzg_pk, kzg_challenges_e, &circuit.W_i1.E[..]).unwrap(),
+  );
+  let (U_cmW, U_cmE) = FoldGadget::fold_group_elements_native::<Bn256EngineKZG>(
+    (rs.r_U_primary.comm_W, rs.r_U_primary.comm_E),
+    rs.l_u_primary.comm_W,
+    nifs_proof.nifs_primary.comm_T,
+    rho,
+  ).unwrap();
+
+  let kzg_U_cmW = UVKZGCommitment::<Bn256>::new(U_cmW.comm.to_affine());
+  let kzg_U_cmE = UVKZGCommitment::<Bn256>::new(U_cmE.comm.to_affine());
+
+  // 7.3 Verify KZG proofs
+  kzg_proof_w.verify(&kzg_vk, &kzg_U_cmW, kzg_challenges_w).unwrap();
+  kzg_proof_e.verify(&kzg_vk, &kzg_U_cmE, kzg_challenges_e).unwrap();
+}
 }
