@@ -6,7 +6,7 @@ use crate::{
 };
 use ff::PrimeField;
 
-use super::PCIndex;
+use super::Split;
 
 /// `ShapeCS` is a `ConstraintSystem` for creating `R1CSShape`s for a circuit.
 pub struct ShapeCS<E: Engine>
@@ -87,7 +87,7 @@ impl<E: Engine> ConstraintSystem<E::Scalar> for ShapeCS<E> {
     &mut self,
     _annotation: A,
     _f: F,
-    idx: PCIndex,
+    idx: Split,
   ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<E::Scalar, SynthesisError>,
@@ -95,8 +95,8 @@ impl<E: Engine> ConstraintSystem<E::Scalar> for ShapeCS<E> {
     AR: Into<String>,
   {
     match idx {
-      PCIndex::ZERO => alloc_precommitted_generic(&mut self.precommitted, Index::Precommitted),
-      PCIndex::ONE => alloc_precommitted_generic(&mut self.precommitted1, Index::Precommitted1),
+      Split::ZERO => alloc_precommitted_generic(&mut self.precommitted, Index::Precommitted),
+      Split::ONE => alloc_precommitted_generic(&mut self.precommitted1, Index::Precommitted1),
     }
   }
 

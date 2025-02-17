@@ -3,7 +3,7 @@
 use ff::{PrimeField, PrimeFieldBits};
 use serde::{Deserialize, Serialize};
 
-use crate::frontend::{ConstraintSystem, LinearCombination, PCIndex, SynthesisError, Variable};
+use crate::frontend::{ConstraintSystem, LinearCombination, Split, SynthesisError, Variable};
 
 use crate::frontend::gadgets::boolean::{self, AllocatedBit, Boolean};
 
@@ -52,7 +52,7 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
   pub fn alloc_pre_committed<CS, F>(
     mut cs: CS,
     value: F,
-    idx: PCIndex,
+    idx: Split,
   ) -> Result<Self, SynthesisError>
   where
     CS: ConstraintSystem<Scalar>,

@@ -6,7 +6,7 @@ use super::lc::{Index, LinearCombination, Variable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Determines which precommited value to store
-pub enum PCIndex {
+pub enum Split {
   /// Store the first precommitted value
   ZERO,
   /// Store the second precommitted value
@@ -99,7 +99,7 @@ pub trait ConstraintSystem<Scalar: PrimeField>: Sized + Send {
     &mut self,
     annotation: A,
     f: F,
-    idx: PCIndex,
+    idx: Split,
   ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<Scalar, SynthesisError>,
@@ -284,7 +284,7 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
     &mut self,
     annotation: A,
     f: F,
-    idx: PCIndex,
+    idx: Split,
   ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<Scalar, SynthesisError>,
@@ -386,7 +386,7 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar> 
     &mut self,
     annotation: A,
     f: F,
-    idx: PCIndex,
+    idx: Split,
   ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<Scalar, SynthesisError>,

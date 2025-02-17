@@ -22,3 +22,6 @@ pub(crate) mod emulated;
 pub(crate) mod hypernova;
 pub(crate) mod int;
 pub(crate) mod nebula;
+
+#[cfg(test)]
+pub(crate) use utils::conditionally_select2;

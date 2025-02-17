@@ -1,1 +1,426 @@
+use ff::PrimeField;
+use itertools::Itertools;
 
+use crate::{
+  frontend::{gadgets::Assignment, num::AllocatedNum, ConstraintSystem, Split, SynthesisError},
+  gadgets::{conditionally_select2, nebula::allocated_avt, Num},
+  hypernova::rs::{PublicParams, RecursiveSNARK, StepCircuit},
+  provider::Bn256EngineIPA,
+  traits::{snark::default_ck_hint, Engine},
+};
+
+use super::product_circuits::MEMORY_OPS_PER_STEP;
+
+const MAX_BITS: usize = 32;
+
+type E = Bn256EngineIPA;
+type F = <E as Engine>::Scalar;
+
+#[derive(Default, Clone, Debug)]
+struct HeapifyCircuit {
+  pub RS: Vec<(usize, u64, u64)>,
+  pub WS: Vec<(usize, u64, u64)>,
+}
+
+impl<F> StepCircuit<F> for HeapifyCircuit
+where
+  F: PrimeField + PartialOrd,
+{
+  fn synthesize<CS>(
+    &self,
+    cs: &mut CS,
+    z: &[AllocatedNum<F>],
+  ) -> Result<Vec<AllocatedNum<F>>, SynthesisError>
+  where
+    CS: ConstraintSystem<F>,
+  {
+    let parent_node_addr = z[0].clone();
+    let left_child_addr = AllocatedNum::alloc(cs.namespace(|| "left_child_addr"), || {
+      parent_node_addr
+        .get_value()
+        .map(|i| i.mul(F::from(2)) + F::ONE)
+        .ok_or(SynthesisError::AssignmentMissing)
+    })?;
+    cs.enforce(
+      || "(2*addr + 1) * 1 = left_child_addr",
+      |lc| lc + (F::from(2), parent_node_addr.get_variable()) + CS::one(),
+      |lc| lc + CS::one(),
+      |lc| lc + left_child_addr.get_variable(),
+    );
+    let right_child_addr = AllocatedNum::alloc(cs.namespace(|| "right_child_addr"), || {
+      left_child_addr
+        .get_value()
+        .map(|i| i + F::ONE)
+        .ok_or(SynthesisError::AssignmentMissing)
+    })?;
+    cs.enforce(
+      || "(left_child_addr + 1) * 1 = right_child_addr",
+      |lc| lc + left_child_addr.get_variable() + CS::one(),
+      |lc| lc + CS::one(),
+      |lc| lc + right_child_addr.get_variable(),
+    );
+    let parent = self.read(cs.namespace(|| "get parent value"), &parent_node_addr, 0)?;
+    let left_child = self.read(cs.namespace(|| "get left child value"), &left_child_addr, 1)?;
+    let right_child = self.read(
+      cs.namespace(|| "get right child value"),
+      &right_child_addr,
+      2,
+    )?;
+    let is_left_child_smaller = less_than(
+      cs.namespace(|| "left_child < parent"),
+      &left_child,
+      &parent,
+      MAX_BITS,
+    )?;
+    let new_parent_left = conditionally_select2(
+      cs.namespace(|| "new_left_pair_parent"),
+      &left_child,
+      &parent,
+      &is_left_child_smaller,
+    )?;
+    let new_left_child = conditionally_select2(
+      cs.namespace(|| "new_left_pair_child"),
+      &parent,
+      &left_child,
+      &is_left_child_smaller,
+    )?;
+    self.write(
+      cs.namespace(|| "write new left parent"),
+      &parent_node_addr,
+      &new_parent_left,
+      3,
+    )?;
+    self.write(
+      cs.namespace(|| "write new left child"),
+      &left_child_addr,
+      &new_left_child,
+      4,
+    )?;
+    let is_right_child_smaller = less_than(
+      cs.namespace(|| "right_child < parent"),
+      &right_child,
+      &new_parent_left,
+      MAX_BITS,
+    )?;
+    let new_parent_right = conditionally_select2(
+      cs.namespace(|| "new_right_pair_parent"),
+      &right_child,
+      &new_parent_left,
+      &is_right_child_smaller,
+    )?;
+    let new_right_child = conditionally_select2(
+      cs.namespace(|| "new_right_pair_child"),
+      &new_parent_left,
+      &right_child,
+      &is_right_child_smaller,
+    )?;
+    self.write(
+      cs.namespace(|| "write new right parent"),
+      &parent_node_addr,
+      &new_parent_right,
+      5,
+    )?;
+    self.write(
+      cs.namespace(|| "write new right child"),
+      &right_child_addr,
+      &new_right_child,
+      6,
+    )?;
+    let next_addr = AllocatedNum::alloc(cs.namespace(|| "next_addr"), || {
+      parent_node_addr
+        .get_value()
+        .map(|addr| addr - F::ONE)
+        .ok_or(SynthesisError::AssignmentMissing)
+    })?;
+    cs.enforce(
+      || "(next_addr + 1) * 1 = addr",
+      |lc| lc + next_addr.get_variable() + CS::one(),
+      |lc| lc + CS::one(),
+      |lc| lc + parent_node_addr.get_variable(),
+    );
+    Ok(vec![next_addr])
+  }
+
+  fn arity(&self) -> usize {
+    1
+  }
+}
+
+impl HeapifyCircuit {
+  pub fn empty() -> Self {
+    HeapifyCircuit {
+      RS: vec![(0, 0, 0); MEMORY_OPS_PER_STEP / 2],
+      WS: vec![(0, 0, 0); MEMORY_OPS_PER_STEP / 2],
+    }
+  }
+
+  /// Pefrom a read to zkVM read-write memory.  for a read operation, the
+  /// advice is (a, v, rt) and (a, v, wt); F checks that the address a in
+  /// the advice matches the address it requested and then uses the
+  /// provided value v (e.g., in the rest of its computation).
+  fn read<CS, F>(
+    &self,
+    mut cs: CS,
+    addr: &AllocatedNum<F>,
+    advice_idx: usize,
+  ) -> Result<AllocatedNum<F>, SynthesisError>
+  where
+    F: PrimeField,
+    CS: ConstraintSystem<F>,
+  {
+    let (advice_addr, advice_val, _) = allocated_avt(
+      cs.namespace(|| "allocate advice"),
+      self.RS[advice_idx],
+      Split::ZERO,
+    )?;
+
+    // allocate the WS aswell, so it can be incrementaly committed
+    let _ = allocated_avt(
+      cs.namespace(|| "allocate WS advice"),
+      self.WS[advice_idx],
+      Split::ZERO,
+    )?;
+
+    // F checks that the address a in the advice matches the address it
+    // requested
+    cs.enforce(
+      || "addr == advice_addr",
+      |lc| lc + addr.get_variable(),
+      |lc| lc + CS::one(),
+      |lc| lc + advice_addr.get_variable(),
+    );
+    Ok(advice_val)
+  }
+
+  /// Perform a write to zkVM read-write memory.  For a write operation, the
+  /// advice is (a, v, rt) and (a, v′, wt); F checks that the address a
+  /// and the value v′ match the address and value it wishes to write.
+  /// Otherwise, F ignores the remaining components in the provided advice.
+  fn write<CS, F>(
+    &self,
+    mut cs: CS,
+    addr: &AllocatedNum<F>,
+    val: &AllocatedNum<F>,
+    advice_idx: usize,
+  ) -> Result<(), SynthesisError>
+  where
+    F: PrimeField,
+    CS: ConstraintSystem<F>,
+  {
+    // allocate the RS aswell, so it can be incrementaly committed
+    let _ = allocated_avt(
+      cs.namespace(|| "allocate WS advice"),
+      self.RS[advice_idx],
+      Split::ZERO,
+    )?;
+
+    // Allocate the advice
+    let (advice_addr, advice_val, _) = allocated_avt(
+      cs.namespace(|| "allocate advice"),
+      self.WS[advice_idx],
+      Split::ZERO,
+    )?;
+
+    // F checks that the address a  match the address it wishes to write to.
+    cs.enforce(
+      || "addr == advice_addr",
+      |lc| lc + addr.get_variable(),
+      |lc| lc + CS::one(),
+      |lc| lc + advice_addr.get_variable(),
+    );
+
+    // F checks that the value v′ match value it wishes to write.
+    cs.enforce(
+      || "val == advice_val",
+      |lc| lc + val.get_variable(),
+      |lc| lc + CS::one(),
+      |lc| lc + advice_val.get_variable(),
+    );
+    Ok(())
+  }
+}
+
+/// a < b ? 1 : 0
+pub fn less_than<F: PrimeField + PartialOrd, CS: ConstraintSystem<F>>(
+  mut cs: CS,
+  a: &AllocatedNum<F>,
+  b: &AllocatedNum<F>,
+  n_bits: usize,
+) -> Result<AllocatedNum<F>, SynthesisError> {
+  assert!(n_bits < 64, "not support n_bits {n_bits} >= 64");
+  let range = F::from(1u64 << n_bits);
+  // diff = (lhs - rhs) + (if lt { range } else { 0 });
+  let diff = Num::alloc(cs.namespace(|| "diff"), || {
+    a.get_value()
+      .zip(b.get_value())
+      .map(|(a, b)| {
+        let lt = a < b;
+        (a - b) + (if lt { range } else { F::ZERO })
+      })
+      .ok_or(SynthesisError::AssignmentMissing)
+  })?;
+  diff.fits_in_bits(cs.namespace(|| "diff fit in bits"), n_bits)?;
+  let diff = diff.as_allocated_num(cs.namespace(|| "diff_alloc_num"))?;
+  let lt = AllocatedNum::alloc(cs.namespace(|| "lt"), || {
+    a.get_value()
+      .zip(b.get_value())
+      .map(|(a, b)| F::from(u64::from(a < b)))
+      .ok_or(SynthesisError::AssignmentMissing)
+  })?;
+  cs.enforce(
+    || "lt is bit",
+    |lc| lc + lt.get_variable(),
+    |lc| lc + CS::one() - lt.get_variable(),
+    |lc| lc,
+  );
+  cs.enforce(
+    || "lt ⋅ range == diff - lhs + rhs",
+    |lc| lc + (range, lt.get_variable()),
+    |lc| lc + CS::one(),
+    |lc| lc + diff.get_variable() - a.get_variable() + b.get_variable(),
+  );
+  Ok(lt)
+}
+
+#[test]
+fn test_heapify() {
+  let pp: PublicParams<E> = PublicParams::setup(
+    &HeapifyCircuit::empty(),
+    &*default_ck_hint(),
+    &*default_ck_hint(),
+  );
+  let size = 2;
+  let memory_size = 2usize.pow(size);
+  let mut init_memory = (0..memory_size - 1)
+    .map(|i| (i, (memory_size - 2 - i) as u64, 0_u64))
+    .collect_vec();
+  init_memory.push((memory_size - 1, 0, 0)); // attach 1 dummy element to assure table size is power of 2
+  let mut final_memory = init_memory.clone();
+  let circuits = heapify_circuits(&mut final_memory);
+  let z_0 = [F::from(((memory_size - 4) / 2) as u64)];
+  let mut rs = RecursiveSNARK::new(&pp, &circuits[0], &z_0).unwrap();
+  let ic = (F::zero(), F::zero());
+  for circuit in circuits.iter() {
+    rs.prove_step(&pp, circuit, ic).unwrap();
+  }
+}
+
+fn heapify_circuits(memory: &mut [(usize, u64, u64)]) -> Vec<HeapifyCircuit> {
+  let mut circuits = Vec::new();
+  let initial_index = (memory.len() - 4) / 2;
+  let num_steps = initial_index + 1;
+  let mut global_ts = 0;
+  for i in 0..num_steps {
+    let mut RS = Vec::new();
+    let mut WS = Vec::new();
+    let parent_addr = initial_index - i;
+    read_op(parent_addr, &mut global_ts, memory, &mut RS, &mut WS);
+    let left_child_addr = 2 * parent_addr + 1;
+    read_op(left_child_addr, &mut global_ts, memory, &mut RS, &mut WS);
+    let right_child_addr = 2 * parent_addr + 2;
+    read_op(right_child_addr, &mut global_ts, memory, &mut RS, &mut WS);
+
+    // Swap parent with left
+    let (new_parent_left, new_left_child) = if memory[left_child_addr].1 < memory[parent_addr].1 {
+      (memory[left_child_addr].1, memory[parent_addr].1)
+    } else {
+      (memory[parent_addr].1, memory[left_child_addr].1)
+    };
+    write_op(
+      parent_addr,
+      new_parent_left,
+      &mut global_ts,
+      memory,
+      &mut RS,
+      &mut WS,
+    );
+    write_op(
+      left_child_addr,
+      new_left_child,
+      &mut global_ts,
+      memory,
+      &mut RS,
+      &mut WS,
+    );
+
+    // Swap parent with right
+    let (new_parent_right, new_right_child) = if memory[right_child_addr].1 < new_parent_left {
+      (memory[right_child_addr].1, new_parent_left)
+    } else {
+      (new_parent_left, memory[right_child_addr].1)
+    };
+    write_op(
+      parent_addr,
+      new_parent_right,
+      &mut global_ts,
+      memory,
+      &mut RS,
+      &mut WS,
+    );
+    write_op(
+      right_child_addr,
+      new_right_child,
+      &mut global_ts,
+      memory,
+      &mut RS,
+      &mut WS,
+    );
+    circuits.push(HeapifyCircuit { RS, WS });
+  }
+  circuits
+}
+
+/// Read operation between an untrusted memory and a checker
+fn read_op(
+  addr: usize,
+  global_ts: &mut u64,
+  FS: &mut [(usize, u64, u64)],
+  RS: &mut Vec<(usize, u64, u64)>,
+  WS: &mut Vec<(usize, u64, u64)>,
+) {
+  // 1. ts ← ts + 1
+  *global_ts += 1;
+
+  // untrusted memory responds with a value-timestamp pair (v, t)
+  let (_, r_val, r_ts) = FS[addr];
+
+  // 2. assert t < ts
+  debug_assert!(r_ts < *global_ts);
+
+  // 3. RS ← RS ∪ {(a,v,t)};
+  RS.push((addr, r_val, r_ts));
+
+  // 4. store (v, ts) at address a in the untrusted memory; and
+  FS[addr] = (addr, r_val, *global_ts);
+
+  // 5. WS ← WS ∪ {(a,v,ts)}.
+  WS.push((addr, r_val, *global_ts));
+}
+
+/// Write operation between an untrusted memory and a checker
+fn write_op(
+  addr: usize,
+  val: u64,
+  global_ts: &mut u64,
+  FS: &mut [(usize, u64, u64)],
+  RS: &mut Vec<(usize, u64, u64)>,
+  WS: &mut Vec<(usize, u64, u64)>,
+) {
+  // 1. ts ← ts + 1
+  *global_ts += 1;
+
+  // untrusted memory responds with a value-timestamp pair (v, t)
+  let (_, r_val, r_ts) = FS[addr];
+
+  // 2. assert t < ts
+  debug_assert!(r_ts < *global_ts);
+
+  // 3. RS ← RS ∪ {(a,v,t)};
+  RS.push((addr, r_val, r_ts));
+
+  // 4. store (v', ts) at address a in the untrusted memory; and
+  FS[addr] = (addr, val, *global_ts);
+
+  // 5. WS ← WS ∪ {(a,v',ts)}.
+  WS.push((addr, val, *global_ts));
+}

@@ -2,7 +2,7 @@
 //! derived from the RoK from memory checks to grand product checks
 
 use crate::{
-  frontend::{num::AllocatedNum, ConstraintSystem, PCIndex, SynthesisError},
+  frontend::{num::AllocatedNum, ConstraintSystem, Split, SynthesisError},
   gadgets::{
     alloc_one, alloc_zero,
     int::{add, enforce_equal, enforce_lt_32, mul},
@@ -14,7 +14,7 @@ use ff::PrimeField;
 use itertools::Itertools;
 
 /// Maximum number of memory ops allowed per step of the zkVM
-pub const MEMORY_OPS_PER_STEP: usize = 8;
+pub const MEMORY_OPS_PER_STEP: usize = 14;
 
 /// Circuit to compute multiset hashes of (RS, WS)
 #[derive(Clone, Debug)]
@@ -55,11 +55,11 @@ where
     for (i, (rs, ws)) in self.RS.iter().zip_eq(self.WS.iter()).enumerate() {
       // (a) (a,v,rt) ← RS[i]
       let (r_addr, r_val, r_ts) =
-        allocated_avt(cs.namespace(|| format!("rs{i}")), *rs, PCIndex::ZERO)?;
+        allocated_avt(cs.namespace(|| format!("rs{i}")), *rs, Split::ZERO)?;
 
       // (b) (a′,v′,wt) ← WS[i]
       let (w_addr, w_val, w_ts) =
-        allocated_avt(cs.namespace(|| format!("ws{i}")), *ws, PCIndex::ZERO)?;
+        allocated_avt(cs.namespace(|| format!("ws{i}")), *ws, Split::ZERO)?;
 
       // (c) gts ← gts + 1
       gts = add(cs.namespace(|| format!("{i},  gts ← gts + 1")), &gts, &one)?;
@@ -182,11 +182,11 @@ where
     for (i, (is, fs)) in self.IS.iter().zip_eq(self.FS.iter()).enumerate() {
       // (a) (a,v,it)←IS[i]
       let (i_addr, i_val, i_ts) =
-        allocated_avt(cs.namespace(|| format!("is{i}")), *is, PCIndex::ZERO)?;
+        allocated_avt(cs.namespace(|| format!("is{i}")), *is, Split::ZERO)?;
 
       // (b) (a′,v′,ft) ← FS[i]
       let (f_addr, f_val, f_ts) =
-        allocated_avt(cs.namespace(|| format!("fs{i}")), *fs, PCIndex::ONE)?;
+        allocated_avt(cs.namespace(|| format!("fs{i}")), *fs, Split::ONE)?;
 
       // (c) assert a=a′
       cs.enforce(

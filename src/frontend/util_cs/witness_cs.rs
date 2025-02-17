@@ -3,7 +3,7 @@
 use ff::PrimeField;
 
 use crate::frontend::{
-  ConstraintSystem, Index, LinearCombination, PCIndex, SynthesisError, Variable,
+  ConstraintSystem, Index, LinearCombination, Split, SynthesisError, Variable,
 };
 
 /// A [`ConstraintSystem`] trait
@@ -118,7 +118,7 @@ where
     &mut self,
     _: A,
     f: F,
-    idx: PCIndex,
+    idx: Split,
   ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<Scalar, SynthesisError>,
@@ -126,10 +126,10 @@ where
     AR: Into<String>,
   {
     match idx {
-      PCIndex::ZERO => {
+      Split::ZERO => {
         alloc_precommitted_generic(&mut self.precommitted_assignment, f, Index::Precommitted)
       }
-      PCIndex::ONE => {
+      Split::ONE => {
         alloc_precommitted_generic(&mut self.precommitted1_assignment, f, Index::Precommitted1)
       }
     }

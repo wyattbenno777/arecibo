@@ -13,7 +13,7 @@ use crate::{
 use core::fmt::Write;
 use ff::{Field, PrimeField};
 
-use super::PCIndex;
+use super::Split;
 
 #[derive(Clone, Copy)]
 struct OrderedVariable(Variable);
@@ -277,7 +277,7 @@ where
     &mut self,
     _: A,
     _: F,
-    _: PCIndex,
+    _: Split,
   ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<E::Scalar, SynthesisError>,

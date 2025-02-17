@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::frontend::{
-  ConstraintSystem, Index, LinearCombination, PCIndex, SynthesisError, Variable,
+  ConstraintSystem, Index, LinearCombination, Split, SynthesisError, Variable,
 };
 
 use ff::PrimeField;
@@ -164,7 +164,7 @@ impl<Scalar: PrimeField> TestConstraintSystem<Scalar> {
     &mut self,
     annotation: A,
     f: F,
-    idx: PCIndex,
+    idx: Split,
     index_fn: impl FnOnce(usize) -> Index,
   ) -> Result<Variable, SynthesisError>
   where
@@ -173,8 +173,8 @@ impl<Scalar: PrimeField> TestConstraintSystem<Scalar> {
     AR: Into<String>,
   {
     let precommitted = match idx {
-      PCIndex::ZERO => &mut self.precommitted,
-      PCIndex::ONE => &mut self.precommitted1,
+      Split::ZERO => &mut self.precommitted,
+      Split::ONE => &mut self.precommitted1,
     };
     let index = precommitted.len();
     let path = compute_path(&self.current_namespace, &annotation().into());
@@ -221,7 +221,7 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for TestConstraintSystem<Scala
     &mut self,
     annotation: A,
     f: F,
-    idx: PCIndex,
+    idx: Split,
   ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<Scalar, SynthesisError>,
@@ -229,8 +229,8 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for TestConstraintSystem<Scala
     AR: Into<String>,
   {
     match idx {
-      PCIndex::ZERO => self.alloc_precommitted_generic(annotation, f, idx, Index::Precommitted),
-      PCIndex::ONE => self.alloc_precommitted_generic(annotation, f, idx, Index::Precommitted1),
+      Split::ZERO => self.alloc_precommitted_generic(annotation, f, idx, Index::Precommitted),
+      Split::ONE => self.alloc_precommitted_generic(annotation, f, idx, Index::Precommitted1),
     }
   }
 

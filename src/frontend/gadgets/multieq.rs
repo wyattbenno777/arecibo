@@ -1,6 +1,6 @@
 use ff::PrimeField;
 
-use crate::frontend::{ConstraintSystem, LinearCombination, PCIndex, SynthesisError, Variable};
+use crate::frontend::{ConstraintSystem, LinearCombination, Split, SynthesisError, Variable};
 
 #[derive(Debug)]
 pub struct MultiEq<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> {
@@ -88,7 +88,7 @@ impl<Scalar: PrimeField, CS: ConstraintSystem<Scalar>> ConstraintSystem<Scalar>
     &mut self,
     annotation: A,
     f: F,
-    idx: PCIndex,
+    idx: Split,
   ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<Scalar, SynthesisError>,

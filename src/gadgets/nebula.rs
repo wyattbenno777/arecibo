@@ -1,6 +1,6 @@
 use super::int::{add, mul, sub};
 use crate::frontend::{
-  gadgets::Assignment, num::AllocatedNum, ConstraintSystem, PCIndex, SynthesisError,
+  gadgets::Assignment, num::AllocatedNum, ConstraintSystem, Split, SynthesisError,
 };
 use ff::PrimeField;
 
@@ -46,7 +46,7 @@ where
 pub fn allocated_avt<F, CS>(
   mut cs: CS,
   tuple: (usize, u64, u64),
-  idx: PCIndex,
+  idx: Split,
 ) -> Result<(AllocatedNum<F>, AllocatedNum<F>, AllocatedNum<F>), SynthesisError>
 where
   F: PrimeField,

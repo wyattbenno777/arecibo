@@ -439,7 +439,7 @@ where
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
   use super::{RecursiveSNARK, IC};
   use crate::{
     frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
