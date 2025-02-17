@@ -11,10 +11,51 @@ use crate::{
 
 use super::product_circuits::MEMORY_OPS_PER_STEP;
 
+/// Used in the lt circuit to determine how many bits the range check should
+/// check
 const MAX_BITS: usize = 32;
 
+// Basic type alias's for specifying proving curve-cycle
 type E = Bn256EngineIPA;
 type F = <E as Engine>::Scalar;
+
+#[test]
+fn test_heapify() {
+  let pp: PublicParams<E> = PublicParams::setup(
+    &HeapifyCircuit::empty(),
+    &*default_ck_hint(),
+    &*default_ck_hint(),
+  );
+
+  // Calculate testing memory (heap) size. We keep the test simple and ensure
+  // memory size is a power of two
+  let size_log = 2;
+  let (init_memory, mut final_memory) = heap_memory(size_log);
+
+  // construct circuits and maintain memory
+  let circuits = heapify_circuits(&mut final_memory);
+
+  // Produce an IVC proof for the Heapify computation
+  // ////////////////////////////////////////////////
+  //
+  // z_0 <- [ first_addr ]
+  let z_0 = [F::from(((init_memory.len() - 4) / 2) as u64)];
+  let mut rs = RecursiveSNARK::new(&pp, &circuits[0], &z_0).unwrap();
+  let ic = (F::zero(), F::zero());
+  for circuit in circuits.iter() {
+    rs.prove_step(&pp, circuit, ic).unwrap();
+  }
+}
+
+// returns initial_memory (IS) & final_memory (FS)
+fn heap_memory(size_log: u32) -> (Vec<(usize, u64, u64)>, Vec<(usize, u64, u64)>) {
+  let memory_size = 2usize.pow(size_log);
+  let mut init_memory = (0..memory_size - 1)
+    .map(|i| (i, (memory_size - 2 - i) as u64, 0_u64))
+    .collect_vec();
+  init_memory.push((memory_size - 1, 0, 0)); // attach 1 dummy element to assure table size is power of 2
+  (init_memory.clone(), init_memory)
+}
 
 #[derive(Default, Clone, Debug)]
 struct HeapifyCircuit {
@@ -280,29 +321,6 @@ pub fn less_than<F: PrimeField + PartialOrd, CS: ConstraintSystem<F>>(
     |lc| lc + diff.get_variable() - a.get_variable() + b.get_variable(),
   );
   Ok(lt)
-}
-
-#[test]
-fn test_heapify() {
-  let pp: PublicParams<E> = PublicParams::setup(
-    &HeapifyCircuit::empty(),
-    &*default_ck_hint(),
-    &*default_ck_hint(),
-  );
-  let size = 2;
-  let memory_size = 2usize.pow(size);
-  let mut init_memory = (0..memory_size - 1)
-    .map(|i| (i, (memory_size - 2 - i) as u64, 0_u64))
-    .collect_vec();
-  init_memory.push((memory_size - 1, 0, 0)); // attach 1 dummy element to assure table size is power of 2
-  let mut final_memory = init_memory.clone();
-  let circuits = heapify_circuits(&mut final_memory);
-  let z_0 = [F::from(((memory_size - 4) / 2) as u64)];
-  let mut rs = RecursiveSNARK::new(&pp, &circuits[0], &z_0).unwrap();
-  let ic = (F::zero(), F::zero());
-  for circuit in circuits.iter() {
-    rs.prove_step(&pp, circuit, ic).unwrap();
-  }
 }
 
 fn heapify_circuits(memory: &mut [(usize, u64, u64)]) -> Vec<HeapifyCircuit> {
