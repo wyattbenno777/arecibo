@@ -2,7 +2,7 @@ use ff::PrimeField;
 use itertools::Itertools;
 
 use crate::{
-  frontend::{gadgets::Assignment, num::AllocatedNum, ConstraintSystem, Split, SynthesisError},
+  frontend::{num::AllocatedNum, ConstraintSystem, Split, SynthesisError},
   gadgets::{conditionally_select2, nebula::allocated_avt, Num},
   hypernova::rs::{PublicParams, RecursiveSNARK, StepCircuit},
   provider::Bn256EngineIPA,
