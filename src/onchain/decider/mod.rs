@@ -55,6 +55,7 @@ impl Decider {
   pub fn setup<R>(
     pp: &PublicParams<Bn256EngineKZG>,
     rng: &mut R,
+    state_len: usize,
   ) -> Result<(DeciderProverKey, DeciderVerifierKey), NovaError>
   where
     R: RngCore,
@@ -65,7 +66,7 @@ impl Decider {
       &pp.circuit_shape_cyclefold.r1cs_shape,
       ROConstants::<Bn256EngineKZG>::default(),
       pp_hash,
-      1, // TODO: Parameterize
+      state_len,
       (&*pp.ck_primary, &*pp.ck_cyclefold),
     );
 
@@ -142,6 +143,7 @@ impl Decider {
       self.rho,
     )?;
 
+    // TODO: Refactor
     let (U_cmW_x, U_cmW_y, U_cmW_id) = {
       let (x, y, id) = U_cmW.to_coordinates();
       let x_bignat = BigInt::from_bytes_le(Sign::Plus, &x.to_repr());
@@ -222,6 +224,24 @@ pub fn prepare_calldata(
   incoming_instance: &R1CSInstance<Bn256EngineKZG>,
   proof: &Decider,
 ) -> Result<Vec<u8>, NovaError> {
+  println!("function_signature_check: {:?}", function_signature_check.to_eth());
+  println!("i: {:?}", i.to_eth());
+  println!("z_0: {:?}", z_0.to_eth());
+  println!("z_i: {:?}", z_i.to_eth());
+  println!("running_instance.comm_W: {:?}", running_instance.comm_W.to_eth());
+  println!("running_instance.comm_E: {:?}", running_instance.comm_E.to_eth());
+  println!("incoming_instance.comm_W: {:?}", incoming_instance.comm_W.to_eth());
+  println!("proof.nifs_proof.nifs_primary.comm_T: {:?}", proof.nifs_proof.nifs_primary.comm_T.to_eth());
+  println!("proof.rho: {:?}", proof.rho.to_eth());
+  println!("proof.groth16_proof a: {:?}", proof.groth16_proof.a.to_eth());
+  println!("proof.groth16_proof b: {:?}", proof.groth16_proof.b.to_eth());
+  println!("proof.groth16_proof c: {:?}", proof.groth16_proof.c.to_eth());
+  println!("proof.kzg_challenges.0: {:?}", proof.kzg_challenges.0.to_eth());
+  println!("proof.kzg_challenges.1: {:?}", proof.kzg_challenges.1.to_eth());
+  println!("proof.kzg_proofs.0.eval: {:?}", proof.kzg_proofs.0.eval.to_eth());
+  println!("proof.kzg_proofs.1.eval: {:?}", proof.kzg_proofs.1.eval.to_eth());
+  println!("proof.kzg_proofs.0.proof: {:?}", proof.kzg_proofs.0.proof.to_eth());
+  println!("proof.kzg_proofs.1.proof: {:?}", proof.kzg_proofs.1.proof.to_eth());
   Ok(
     [
       function_signature_check.to_eth(),

@@ -23,13 +23,17 @@ impl ToEth for u8 {
 
 impl ToEth for Fr {
     fn to_eth(&self) -> Vec<u8> {
-        self.to_repr().to_vec()
+        let mut repr = self.to_repr().to_vec();
+        repr.reverse();
+        repr
     }
 }
 
 impl ToEth for Fq {
     fn to_eth(&self) -> Vec<u8> {
-        self.to_repr().to_vec()
+        let mut repr = self.to_repr().to_vec();
+        repr.reverse();
+        repr
     }
 }
 

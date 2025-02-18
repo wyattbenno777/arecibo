@@ -1,10 +1,10 @@
 //! Utility functions for onchain verification
 use crate::onchain::verifiers::{GPL3_SDPX_IDENTIFIER, PRAGMA_GROTH16_VERIFIER};
 use askama::Template;
-use sha3::{Digest, Keccak256};
+// use sha3::{Digest, Keccak256};
 use num_bigint::BigUint;
 use ff::PrimeField;
-
+use crypto::{digest::Digest, sha3::Sha3};
 pub mod encoding;
 
 /// Formats call data from a vec of bytes to a hashmap
@@ -24,13 +24,12 @@ pub fn get_formatted_calldata(calldata: Vec<u8>) -> Vec<String> {
 pub fn get_function_selector_for_nova_cyclefold_verifier(
     first_param_array_length: usize,
 ) -> [u8; 4] {
-    let mut hasher = Keccak256::new();
+    let mut hasher = Sha3::keccak256();
     let fn_sig = format!("verifyNovaProof(uint256[{}],uint256[4],uint256[2],uint256[3],uint256[2],uint256[2][2],uint256[2],uint256[4],uint256[2][2])", first_param_array_length);
-    hasher.update(&fn_sig);
+    hasher.input_str(&fn_sig);
     let hash = &mut [0u8; 32];
-    hasher.update(hash);
-    let h = hasher.finalize();
-    [h[0], h[1], h[2], h[3]]
+    hasher.result(hash);
+    [hash[0], hash[1], hash[2], hash[3]]
 }
 
 /// Header inclusion template

@@ -135,6 +135,7 @@ impl<'a> Evm<'a> {
     fn transact_success_or_panic(&mut self, tx: TxEnv) -> (u64, Output) {
         *self.evm.tx_mut() = tx;
         let result = self.evm.transact_commit().unwrap();
+
         match result {
             ExecutionResult::Success {
                 gas_used,
@@ -154,7 +155,11 @@ impl<'a> Evm<'a> {
                 }
                 (gas_used, output)
             }
-            ExecutionResult::Revert { gas_used, output } => (gas_used, Output::Call(output)),
+            ExecutionResult::Revert { gas_used, output } => {
+                let error_message = str::from_utf8(&output[..]).expect("Invalid UTF-8");
+                println!("Revert: {:?}", error_message);
+                (gas_used, Output::Call(output))
+            }
             ExecutionResult::Halt { reason, gas_used } => panic!(
                 "Transaction halts unexpectedly with gas_used {gas_used} and reason {reason:?}"
             ),

@@ -1,5 +1,6 @@
 //! Nova verifier
 use askama::Template;
+use crate::constants::{BN_N_LIMBS, BN_LIMB_WIDTH};
 use crate::frontend::num::AllocatedNum;
 use crate::onchain::decider::DeciderVerifierKey;
 use crate::provider::kzg_commitment::KZGVerifierKey;
@@ -64,15 +65,15 @@ impl From<NovaCycleFoldVerifierKey> for NovaCycleFoldDecider {
         let solidity_groth16_verifier_key = SolidityGroth16VerifierKey::from(value.g16_vk);
         let solidity_kzg_verifier_key = SolidityKZGVerifierKey::from(value.kzg_vk);
         let public_inputs_len = solidity_groth16_verifier_key.vk.ic.len();
-        let bits_per_limb = NonNativeUintVar::<Fq>::bits_per_limb();
+        // let bits_per_limb = NonNativeUintVar::<Fq>::bits_per_limb();
         Self {
             pp_hash: value.pp_hash,
             groth16_verifier: SolidityGroth16Verifier::from(solidity_groth16_verifier_key),
             kzg10_verifier: SolidityKZGVerifier::from(solidity_kzg_verifier_key),
             z_len: value.z_len,
             public_inputs_len,
-            num_limbs: (250_f32 / (bits_per_limb as f32)).ceil() as usize,
-            bits_per_limb,
+            num_limbs: BN_N_LIMBS,   //: (250_f32 / (bits_per_limb as f32)).ceil() as usize,
+            bits_per_limb: BN_LIMB_WIDTH,
         }
     }
 }

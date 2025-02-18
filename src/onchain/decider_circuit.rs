@@ -311,6 +311,7 @@ where
     );
 
     // Step 4: Commitments verification for U_{EC,n}.{E, W} with respect to W_{EC,n}.{E, W}.
+    // TODO: Add a flag for testing
     // let cf_W_i_commit = <Dual<E> as Engine>::CE::commit_gadget(
     //   cs,
     //   &*self.cf_ck,
