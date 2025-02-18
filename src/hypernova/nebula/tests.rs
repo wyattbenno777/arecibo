@@ -2,11 +2,14 @@ use ff::PrimeField;
 use itertools::Itertools;
 
 use crate::{
-  frontend::{num::AllocatedNum, ConstraintSystem, Split, SynthesisError},
+  frontend::{
+    num::AllocatedNum, test_cs::TestConstraintSystem, ConstraintSystem, Split, SynthesisError,
+  },
   gadgets::{conditionally_select2, nebula::allocated_avt, Num},
   hypernova::rs::{PublicParams, RecursiveSNARK, StepCircuit},
   provider::Bn256EngineIPA,
-  traits::{snark::default_ck_hint, Engine},
+  traits::{snark::default_ck_hint, CurveCycleEquipped, Engine},
+  NovaError,
 };
 
 use super::product_circuits::MEMORY_OPS_PER_STEP;
@@ -29,7 +32,7 @@ fn test_heapify() {
 
   // Calculate testing memory (heap) size. We keep the test simple and ensure
   // memory size is a power of two
-  let size_log = 2;
+  let size_log = 5;
   let (init_memory, mut final_memory) = heap_memory(size_log);
 
   // construct circuits and maintain memory
@@ -39,11 +42,12 @@ fn test_heapify() {
   // ////////////////////////////////////////////////
   //
   // z_0 <- [ first_addr ]
-  let z_0 = [F::from(((init_memory.len() - 4) / 2) as u64)];
+  let z_0 = vec![F::from(((init_memory.len() - 4) / 2) as u64)];
   let mut rs = RecursiveSNARK::new(&pp, &circuits[0], &z_0).unwrap();
   let ic = (F::zero(), F::zero());
-  for circuit in circuits.iter() {
+  for (i, circuit) in circuits.iter().enumerate() {
     rs.prove_step(&pp, circuit, ic).unwrap();
+    rs.verify(&pp, i + 1, &z_0).unwrap();
   }
 }
 
@@ -281,48 +285,6 @@ impl HeapifyCircuit {
   }
 }
 
-/// a < b ? 1 : 0
-pub fn less_than<F: PrimeField + PartialOrd, CS: ConstraintSystem<F>>(
-  mut cs: CS,
-  a: &AllocatedNum<F>,
-  b: &AllocatedNum<F>,
-  n_bits: usize,
-) -> Result<AllocatedNum<F>, SynthesisError> {
-  assert!(n_bits < 64, "not support n_bits {n_bits} >= 64");
-  let range = F::from(1u64 << n_bits);
-  // diff = (lhs - rhs) + (if lt { range } else { 0 });
-  let diff = Num::alloc(cs.namespace(|| "diff"), || {
-    a.get_value()
-      .zip(b.get_value())
-      .map(|(a, b)| {
-        let lt = a < b;
-        (a - b) + (if lt { range } else { F::ZERO })
-      })
-      .ok_or(SynthesisError::AssignmentMissing)
-  })?;
-  diff.fits_in_bits(cs.namespace(|| "diff fit in bits"), n_bits)?;
-  let diff = diff.as_allocated_num(cs.namespace(|| "diff_alloc_num"))?;
-  let lt = AllocatedNum::alloc(cs.namespace(|| "lt"), || {
-    a.get_value()
-      .zip(b.get_value())
-      .map(|(a, b)| F::from(u64::from(a < b)))
-      .ok_or(SynthesisError::AssignmentMissing)
-  })?;
-  cs.enforce(
-    || "lt is bit",
-    |lc| lc + lt.get_variable(),
-    |lc| lc + CS::one() - lt.get_variable(),
-    |lc| lc,
-  );
-  cs.enforce(
-    || "lt ⋅ range == diff - lhs + rhs",
-    |lc| lc + (range, lt.get_variable()),
-    |lc| lc + CS::one(),
-    |lc| lc + diff.get_variable() - a.get_variable() + b.get_variable(),
-  );
-  Ok(lt)
-}
-
 fn heapify_circuits(memory: &mut [(usize, u64, u64)]) -> Vec<HeapifyCircuit> {
   let mut circuits = Vec::new();
   let initial_index = (memory.len() - 4) / 2;
@@ -388,6 +350,48 @@ fn heapify_circuits(memory: &mut [(usize, u64, u64)]) -> Vec<HeapifyCircuit> {
   circuits
 }
 
+/// a < b ? 1 : 0
+pub fn less_than<F: PrimeField + PartialOrd, CS: ConstraintSystem<F>>(
+  mut cs: CS,
+  a: &AllocatedNum<F>,
+  b: &AllocatedNum<F>,
+  n_bits: usize,
+) -> Result<AllocatedNum<F>, SynthesisError> {
+  assert!(n_bits < 64, "not support n_bits {n_bits} >= 64");
+  let range = F::from(1u64 << n_bits);
+  // diff = (lhs - rhs) + (if lt { range } else { 0 });
+  let diff = Num::alloc(cs.namespace(|| "diff"), || {
+    a.get_value()
+      .zip(b.get_value())
+      .map(|(a, b)| {
+        let lt = a < b;
+        (a - b) + (if lt { range } else { F::ZERO })
+      })
+      .ok_or(SynthesisError::AssignmentMissing)
+  })?;
+  diff.fits_in_bits(cs.namespace(|| "diff fit in bits"), n_bits)?;
+  let diff = diff.as_allocated_num(cs.namespace(|| "diff_alloc_num"))?;
+  let lt = AllocatedNum::alloc(cs.namespace(|| "lt"), || {
+    a.get_value()
+      .zip(b.get_value())
+      .map(|(a, b)| F::from(u64::from(a < b)))
+      .ok_or(SynthesisError::AssignmentMissing)
+  })?;
+  cs.enforce(
+    || "lt is bit",
+    |lc| lc + lt.get_variable(),
+    |lc| lc + CS::one() - lt.get_variable(),
+    |lc| lc,
+  );
+  cs.enforce(
+    || "lt ⋅ range == diff - lhs + rhs",
+    |lc| lc + (range, lt.get_variable()),
+    |lc| lc + CS::one(),
+    |lc| lc + diff.get_variable() - a.get_variable() + b.get_variable(),
+  );
+  Ok(lt)
+}
+
 /// Read operation between an untrusted memory and a checker
 fn read_op(
   addr: usize,
@@ -441,4 +445,25 @@ fn write_op(
 
   // 5. WS ← WS ∪ {(a,v',ts)}.
   WS.push((addr, val, *global_ts));
+}
+
+#[allow(dead_code)]
+fn debug_step<E>(circuit: &impl StepCircuit<E::Scalar>, z_i: &[E::Scalar]) -> Result<(), NovaError>
+where
+  E: CurveCycleEquipped,
+{
+  let mut cs = TestConstraintSystem::<E::Scalar>::new();
+  let z_i: Vec<AllocatedNum<E::Scalar>> = z_i
+    .iter()
+    .enumerate()
+    .map(|(i, scalar)| AllocatedNum::alloc(cs.namespace(|| format!("z_{}", i)), || Ok(*scalar)))
+    .collect::<Result<Vec<_>, _>>()?;
+  circuit
+    .synthesize(&mut cs, &z_i)
+    .map_err(|_| NovaError::from(SynthesisError::AssignmentMissing))?;
+  let is_sat = cs.is_satisfied();
+  if !is_sat {
+    assert!(is_sat);
+  }
+  Ok(())
 }

@@ -15,7 +15,6 @@ use crate::{
     r1cs::{NovaShape, NovaWitness},
     shape_cs::ShapeCS,
     solver::SatisfyingAssignment,
-    test_cs::TestConstraintSystem,
     ConstraintSystem, SynthesisError,
   },
   gadgets::scalar_as_base,
@@ -419,23 +418,6 @@ pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
   ) -> Result<Vec<AllocatedNum<F>>, SynthesisError>
   where
     CS: ConstraintSystem<F>;
-}
-
-#[allow(dead_code)]
-fn debug_step<E, SC>(circuit: AugmentedCircuit<'_, E, SC>) -> Result<(), NovaError>
-where
-  E: CurveCycleEquipped,
-  SC: StepCircuit<E::Scalar>,
-{
-  let mut cs = TestConstraintSystem::<E::Scalar>::new();
-  circuit
-    .synthesize(&mut cs)
-    .map_err(|_| NovaError::from(SynthesisError::AssignmentMissing))?;
-  let is_sat = cs.is_satisfied();
-  if !is_sat {
-    assert!(is_sat);
-  }
-  Ok(())
 }
 
 #[cfg(test)]

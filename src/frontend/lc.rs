@@ -188,6 +188,18 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
       .iter()
       .map(|(k, v)| (Variable(Index::Input(*k)), v))
       .chain(self.aux.iter().map(|(k, v)| (Variable(Index::Aux(*k)), v)))
+      .chain(
+        self
+          .precommitted
+          .iter()
+          .map(|(k, v)| (Variable(Index::Precommitted(*k)), v)),
+      )
+      .chain(
+        self
+          .precommitted1
+          .iter()
+          .map(|(k, v)| (Variable(Index::Precommitted1(*k)), v)),
+      )
   }
 
   /// Iter inputs for the [`LinearCombination`]
@@ -202,6 +214,18 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
     self.aux.iter()
   }
 
+  /// Iter precommitted for the [`LinearCombination`]
+  #[inline]
+  pub fn iter_precommitted(&self) -> impl Iterator<Item = (&usize, &Scalar)> + '_ {
+    self.precommitted.iter()
+  }
+
+  /// Iter precommitted1 for the [`LinearCombination`]
+  #[inline]
+  pub fn iter_precommitted1(&self) -> impl Iterator<Item = (&usize, &Scalar)> + '_ {
+    self.precommitted1.iter()
+  }
+
   /// Iter mut for the [`LinearCombination`]
   pub fn iter_mut(&mut self) -> impl Iterator<Item = (Variable, &mut Scalar)> + '_ {
     self
@@ -213,6 +237,18 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
           .aux
           .iter_mut()
           .map(|(k, v)| (Variable(Index::Aux(*k)), v)),
+      )
+      .chain(
+        self
+          .precommitted
+          .iter_mut()
+          .map(|(k, v)| (Variable(Index::Precommitted(*k)), v)),
+      )
+      .chain(
+        self
+          .precommitted1
+          .iter_mut()
+          .map(|(k, v)| (Variable(Index::Precommitted1(*k)), v)),
       )
   }
 
@@ -314,7 +350,12 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
   }
 
   /// Evaluate the [`LinearCombination`] with the given input and aux assignments.
-  pub fn eval(&self, input_assignment: &[Scalar], aux_assignment: &[Scalar]) -> Scalar {
+  pub fn eval(
+    &self,
+    input_assignment: &[Scalar],
+    aux_assignment: &[Scalar],
+    precommitted_assignment: (&[Scalar], &[Scalar]),
+  ) -> Scalar {
     let mut acc = Scalar::ZERO;
 
     let one = Scalar::ONE;
@@ -329,6 +370,22 @@ impl<Scalar: PrimeField> LinearCombination<Scalar> {
 
     for (index, coeff) in self.iter_aux() {
       let mut tmp = aux_assignment[*index];
+      if coeff != &one {
+        tmp *= coeff;
+      }
+      acc += tmp;
+    }
+
+    for (index, coeff) in self.iter_precommitted() {
+      let mut tmp = precommitted_assignment.0[*index];
+      if coeff != &one {
+        tmp *= coeff;
+      }
+      acc += tmp;
+    }
+
+    for (index, coeff) in self.iter_precommitted1() {
+      let mut tmp = precommitted_assignment.1[*index];
       if coeff != &one {
         tmp *= coeff;
       }
