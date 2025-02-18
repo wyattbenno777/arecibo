@@ -148,6 +148,9 @@ impl<E> SimpleDigestible for PublicParams<E> where E: CurveCycleEquipped {}
 ///
 /// * (U, W, u, w) -> IVC Proof
 /// * (i, z_0, z_i) -> Statement being proven
+///
+/// # Note
+///
 /// * Carries two commitments
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
