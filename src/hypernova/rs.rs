@@ -399,7 +399,8 @@ where
     res_l_u?;
     res_r_U_cyclefold?;
 
-    // Parse u_i.C_W as (C_ωi−1 , C_aux_i−1 ). Then check that C_i = hash(C_i−1 , C_ωi−1)
+    // 1. Parse u_i.C_W as (C_ωi−1 , C_aux_i−1 ).
+    // 2. Then check that C_i = hash(C_i−1 , C_ωi−1)
     self.ic_check(pp, ic)?;
     Ok(self.z_i.to_vec())
   }
