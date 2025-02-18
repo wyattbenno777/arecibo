@@ -27,6 +27,8 @@ pub struct NIFS<E: CurveCycleEquipped> {
   pub(crate) sigmas: Vec<E::Scalar>,
   pub(crate) thetas: Vec<E::Scalar>,
   pub(crate) cyclefold_nifs: CycleFoldNIFS<E>,
+  pub(crate) cyclefold_nifs_1: CycleFoldNIFS<E>,
+  pub(crate) cyclefold_nifs_2: CycleFoldNIFS<E>,
 }
 
 impl<E> NIFS<E>
@@ -34,6 +36,10 @@ where
   E: CurveCycleEquipped,
 {
   /// Prove a step of an incremental computation. Implements CycleFold.
+  ///
+  /// # Note:
+  ///
+  /// This protocol is modified to handle two splits in the witness.
   pub fn prove(
     (S, S_cyclefold): (&R1CSShape<E>, &R1CSShape<Dual<E>>),
     ck_cyclefold: &CommitmentKey<Dual<E>>,
@@ -118,7 +124,7 @@ where
       (a * b - c) * eq * gamma_cubed
     };
 
-    // hypernova's sumcheck
+    // HyperNova's sum-check.
     let comb_func =
       |L_abc: E::Scalar,
        L_eq: E::Scalar,
@@ -158,8 +164,8 @@ where
     let U = U1.fold(U2, rho, &rx_p, &sigmas, &thetas)?;
     let W = W1.fold(W2, rho)?;
 
-    // CycleFold
-    let (cyclefold_nifs, (U_cyclefold, W_cyclefold)) = CycleFoldNIFS::<E>::prove(
+    // CycleFold for main part of the witness
+    let (cyclefold_nifs, (U_cyclefold_temp, W_cyclefold_temp)) = CycleFoldNIFS::<E>::prove(
       S_cyclefold,
       ck_cyclefold,
       ro_consts,
@@ -169,12 +175,36 @@ where
       (U1_cyclefold, W1_cyclefold),
     )?;
 
+    // CycleFold for first split of the witness
+    let (cyclefold_nifs_1, (U_cyclefold_temp_1, W_cyclefold_temp_1)) = CycleFoldNIFS::<E>::prove(
+      S_cyclefold,
+      ck_cyclefold,
+      ro_consts,
+      U1.pre_committed.0,
+      U2.pre_committed.0,
+      rho,
+      (&U_cyclefold_temp, &W_cyclefold_temp),
+    )?;
+
+    // CycleFold for second split of the witness
+    let (cyclefold_nifs_2, (U_cyclefold, W_cyclefold)) = CycleFoldNIFS::<E>::prove(
+      S_cyclefold,
+      ck_cyclefold,
+      ro_consts,
+      U1.pre_committed.1,
+      U2.pre_committed.1,
+      rho,
+      (&U_cyclefold_temp_1, &W_cyclefold_temp_1),
+    )?;
+
     Ok((
       Self {
         sc,
         sigmas,
         thetas,
         cyclefold_nifs,
+        cyclefold_nifs_1,
+        cyclefold_nifs_2,
       },
       (U, W),
       (U_cyclefold, W_cyclefold),
@@ -228,7 +258,11 @@ where
 
     // Output folded instance.
     let U = U1.fold(U2, rho, &rx_p, &self.sigmas, &self.thetas)?;
-    let U_cyclefold = self.cyclefold_nifs.verify(ro_consts, U1_cyclefold)?;
+    let U_cyclefold_temp = self.cyclefold_nifs.verify(ro_consts, U1_cyclefold)?;
+    let U_cyclefold_temp_1 = self.cyclefold_nifs_1.verify(ro_consts, &U_cyclefold_temp)?;
+    let U_cyclefold = self
+      .cyclefold_nifs_2
+      .verify(ro_consts, &U_cyclefold_temp_1)?;
     Ok((U, U_cyclefold))
   }
 }
