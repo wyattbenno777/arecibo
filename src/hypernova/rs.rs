@@ -259,26 +259,15 @@ where
       return Ok(());
     }
 
-    // Parse u_i.C_W as (C_ωi−1 , C_aux_i−1). Abort if C_i != hash(C_i−1, C_ωi−1)
+    // 1. Parse u_i.C_W as (C_ωi−1 , C_aux_i−1).
+    // 2. Abort if C_i != hash(C_i−1, C_ωi−1)
     self.ic_check(pp, ic)?;
 
-    // Parse Πi (self) as ((Ui, Wi), (ui, wi)) and then:
-    //
-    // 1. compute (Ui+1,Wi+1,T) ← NIFS.P(pk,(Ui,Wi),(ui,wi)),
-    let (nifs, (r_U, r_W), (r_U_cyclefold, r_W_cyclefold)) = NIFS::prove(
-      (
-        &pp.circuit_shape.r1cs_shape,
-        &pp.circuit_shape_cyclefold.r1cs_shape,
-      ),
-      &pp.ck_cyclefold,
-      &pp.ro_consts,
-      &pp.digest(),
-      (&self.r_U, &self.r_W),
-      (&self.l_u, &self.l_w),
-      (&self.r_U_cyclefold, &self.r_W_cyclefold),
-    )?;
+    // 1. Parse Π_i (self) as ((U_i, W_i), (u_i, w_i)).
+    // 2. compute (U_i+1,W_i+1) ← NIFS.P(pk, (U_i, W_i), (u_i, w_i)),
+    let (nifs, (r_U, r_W), (r_U_cyclefold, r_W_cyclefold)) = self.nifs(pp)?;
 
-    // 2. compute (ui+1, wi+1) ← trace(F ′, (vk, Ui, ui, (i, z_0, z_i), ωi, T )),
+    // Compute (u_i+1, w_i+1) ← trace(F', (vk, Ui, ui, (i, z_0, z_i), ωi)),
     let mut cs = SatisfyingAssignment::<E>::new();
     let cyclefold_data = FoldingData::new(
       self.r_U_cyclefold.clone(),
@@ -426,6 +415,31 @@ where
       return Err(NovaError::InvalidIC);
     }
     Ok(())
+  }
+
+  fn nifs(
+    &self,
+    pp: &PublicParams<E>,
+  ) -> Result<
+    (
+      NIFS<E>,
+      (LR1CSInstance<E>, SplitR1CSWitness<E>),
+      (RelaxedR1CSInstance<Dual<E>>, RelaxedR1CSWitness<Dual<E>>),
+    ),
+    NovaError,
+  > {
+    NIFS::prove(
+      (
+        &pp.circuit_shape.r1cs_shape,
+        &pp.circuit_shape_cyclefold.r1cs_shape,
+      ),
+      &pp.ck_cyclefold,
+      &pp.ro_consts,
+      &pp.digest(),
+      (&self.r_U, &self.r_W),
+      (&self.l_u, &self.l_w),
+      (&self.r_U_cyclefold, &self.r_W_cyclefold),
+    )
   }
 }
 
