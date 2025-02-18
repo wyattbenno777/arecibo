@@ -1,11 +1,10 @@
 //! This module contains an incremental commitment scheme implementation.
 
-use std::marker::PhantomData;
-
 use crate::{
   constants::{DEFAULT_ABSORBS, NUM_HASH_BITS},
   cyclefold::util::absorb_primary_commitment,
   gadgets::scalar_as_base,
+  hypernova::rs::IncrementalCommitment,
   traits::{
     commitment::CommitmentEngineTrait, CurveCycleEquipped, Dual, Engine, ROConstants, ROTrait,
   },
@@ -13,24 +12,24 @@ use crate::{
 };
 use ff::Field;
 
-/// Incremental commitment engine
+/// Produces two incremental commitments to non-deterministic advice ω
 ///
-/// Produces the incremental commitments needed for CC-NIVC
-pub struct ICEngine<E>
+/// * commits to advice with Pedersen
+/// * hashes previous commitment & pedersen commitment to advice
+/// * outputs hash bits as scalar
+pub fn increment_ic<E>(
+  ck: &CommitmentKey<E>,
+  ro_consts: &ROConstants<Dual<E>>,
+  prev_ic: IncrementalCommitment<E>,
+  advice: (&[E::Scalar], &[E::Scalar]),
+) -> (E::Scalar, E::Scalar)
 where
   E: CurveCycleEquipped,
 {
-  _engine: PhantomData<E>,
-}
-
-impl<E> ICEngine<E>
-where
-  E: CurveCycleEquipped,
-{
-  /// Produce all the incremental commitments needed for CC-NIVC
-  pub fn incremental_comms(advice: &[Vec<E::Scalar>]) -> Vec<E::Scalar> {
-    todo!()
-  }
+  (
+    increment_sole_ic::<E>(ck, ro_consts, prev_ic.0, advice.0),
+    increment_sole_ic::<E>(ck, ro_consts, prev_ic.1, advice.1),
+  )
 }
 
 /// Produce an incremental commitment to a non-deterministic advice ω
@@ -38,7 +37,7 @@ where
 /// * commits to advice with Pedersen
 /// * hashes previous commitment & pedersen commitment to advice
 /// * outputs hash bits as scalar
-pub fn increment_ic<E>(
+fn increment_sole_ic<E>(
   ck: &CommitmentKey<E>,
   ro_consts: &ROConstants<Dual<E>>,
   prev_ic: E::Scalar,
@@ -48,11 +47,26 @@ where
   E: CurveCycleEquipped,
 {
   let comm_advice = E::CE::commit(ck, advice, &E::Scalar::ZERO);
-  increment_comm::<E>(ro_consts, prev_ic, comm_advice)
+  increment_sole_comm::<E>(ro_consts, prev_ic, comm_advice)
+}
+
+/// Produce two incremental commitment to already pedersen committed non-deterministic advice ω
+pub(crate) fn increment_comm<E>(
+  ro_consts: &ROConstants<Dual<E>>,
+  prev_ic: IncrementalCommitment<E>,
+  comm_advice: (Commitment<E>, Commitment<E>),
+) -> (E::Scalar, E::Scalar)
+where
+  E: CurveCycleEquipped,
+{
+  (
+    increment_sole_comm::<E>(ro_consts, prev_ic.0, comm_advice.0),
+    increment_sole_comm::<E>(ro_consts, prev_ic.1, comm_advice.1),
+  )
 }
 
 /// Produce an incremental commitment to already pedersen committed non-deterministic advice ω
-pub fn increment_comm<E>(
+pub(crate) fn increment_sole_comm<E>(
   ro_consts: &ROConstants<Dual<E>>,
   prev_ic: E::Scalar,
   comm_advice: Commitment<E>, // commitment to non-deterministic witness ω

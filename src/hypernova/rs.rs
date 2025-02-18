@@ -37,7 +37,7 @@ use std::sync::Arc;
 use super::nebula::ic::increment_comm;
 
 /// A type that represents the carried commitments for this commitment-carrying HyperNova IVC scheme.
-type IC<E> = (<E as Engine>::Scalar, <E as Engine>::Scalar);
+pub type IncrementalCommitment<E> = (<E as Engine>::Scalar, <E as Engine>::Scalar);
 
 /// The public parameters used in the HyperNova recursiveSNARK proving and verification
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -164,7 +164,7 @@ where
   z_0: Vec<E::Scalar>,
   i: usize,
   z_i: Vec<E::Scalar>,
-  prev_ic: IC<E>,
+  prev_ic: IncrementalCommitment<E>,
 }
 
 impl<E> RecursiveSNARK<E>
@@ -249,7 +249,7 @@ where
     &mut self,
     pp: &PublicParams<E>,
     step_circuit: &C,
-    ic: IC<E>,
+    ic: IncrementalCommitment<E>,
   ) -> Result<(), NovaError>
   where
     C: StepCircuit<E::Scalar>,
@@ -333,7 +333,7 @@ where
     pp: &PublicParams<E>,
     num_steps: usize,
     z_0: &[E::Scalar],
-    ic: IC<E>,
+    ic: IncrementalCommitment<E>,
   ) -> Result<Vec<E::Scalar>, NovaError> {
     // Basic checks for IVC proof
     // //////////////////////////
@@ -420,13 +420,8 @@ impl<E> RecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
 {
-  fn ic_check(&self, pp: &PublicParams<E>, ic: IC<E>) -> Result<(), NovaError> {
-    let expected_ic = {
-      (
-        increment_comm::<E>(&pp.ro_consts, self.prev_ic.0, self.l_u.pre_committed.0),
-        increment_comm::<E>(&pp.ro_consts, self.prev_ic.1, self.l_u.pre_committed.1),
-      )
-    };
+  fn ic_check(&self, pp: &PublicParams<E>, ic: IncrementalCommitment<E>) -> Result<(), NovaError> {
+    let expected_ic = increment_comm::<E>(&pp.ro_consts, self.prev_ic, self.l_u.pre_committed);
     if expected_ic != ic {
       return Err(NovaError::InvalidIC);
     }
@@ -456,7 +451,7 @@ pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
 
 #[cfg(test)]
 mod tests {
-  use super::{RecursiveSNARK, IC};
+  use super::{IncrementalCommitment, RecursiveSNARK};
   use crate::{
     frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
     hypernova::rs::StepCircuit,
@@ -491,7 +486,7 @@ mod tests {
   fn run_circuit<E: CurveCycleEquipped>(c: &impl StepCircuit<E::Scalar>) -> Result<(), NovaError> {
     let pp = super::PublicParams::<E>::setup(c, &*default_ck_hint(), &*default_ck_hint());
     let z_0 = vec![E::Scalar::from(2u64)];
-    let ic = IC::<E>::default();
+    let ic = IncrementalCommitment::<E>::default();
     let mut recursive_snark = RecursiveSNARK::new(&pp, c, &z_0)?;
     for i in 0..100 {
       recursive_snark.prove_step(&pp, c, ic)?;

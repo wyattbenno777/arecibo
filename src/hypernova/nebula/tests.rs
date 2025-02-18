@@ -47,8 +47,8 @@ fn test_heapify() {
   let mut ic = (F::zero(), F::zero());
   for (i, circuit) in circuits.iter().enumerate() {
     rs.prove_step(&pp, circuit, ic).unwrap();
-    ic.0 = increment_ic::<E>(&pp.ck, &pp.ro_consts, ic.0, &circuit.advice().0);
-    ic.1 = increment_ic::<E>(&pp.ck, &pp.ro_consts, ic.1, &circuit.advice().1);
+    let (advice_0, advice_1) = circuit.advice();
+    ic = increment_ic::<E>(&pp.ck, &pp.ro_consts, ic, (&advice_0, &advice_1));
     rs.verify(&pp, i + 1, &z_0, ic).unwrap();
   }
 }
