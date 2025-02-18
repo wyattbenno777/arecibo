@@ -34,6 +34,8 @@ use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use super::nebula::ic::increment_comm;
+
 /// A type that represents the carried commitments for this commitment-carrying HyperNova IVC scheme.
 type IC<E> = (<E as Engine>::Scalar, <E as Engine>::Scalar);
 
@@ -257,6 +259,9 @@ where
       return Ok(());
     }
 
+    // Parse u_i.C_W as (C_ωi−1 , C_aux_i−1). Abort if C_i != hash(C_i−1, C_ωi−1)
+    self.ic_check(pp, ic)?;
+
     // Parse Πi (self) as ((Ui, Wi), (ui, wi)) and then:
     //
     // 1. compute (Ui+1,Wi+1,T) ← NIFS.P(pk,(Ui,Wi),(ui,wi)),
@@ -328,6 +333,7 @@ where
     pp: &PublicParams<E>,
     num_steps: usize,
     z_0: &[E::Scalar],
+    ic: IC<E>,
   ) -> Result<Vec<E::Scalar>, NovaError> {
     // Basic checks for IVC proof
     // //////////////////////////
@@ -403,7 +409,28 @@ where
     res_r_U?;
     res_l_u?;
     res_r_U_cyclefold?;
+
+    // Parse u_i.C_W as (C_ωi−1 , C_aux_i−1 ). Then check that C_i = hash(C_i−1 , C_ωi−1)
+    self.ic_check(pp, ic)?;
     Ok(self.z_i.to_vec())
+  }
+}
+
+impl<E> RecursiveSNARK<E>
+where
+  E: CurveCycleEquipped,
+{
+  fn ic_check(&self, pp: &PublicParams<E>, ic: IC<E>) -> Result<(), NovaError> {
+    let expected_ic = {
+      (
+        increment_comm::<E>(&pp.ro_consts, self.prev_ic.0, self.l_u.pre_committed.0),
+        increment_comm::<E>(&pp.ro_consts, self.prev_ic.1, self.l_u.pre_committed.1),
+      )
+    };
+    if expected_ic != ic {
+      return Err(NovaError::InvalidIC);
+    }
+    Ok(())
   }
 }
 
@@ -468,7 +495,7 @@ mod tests {
     let mut recursive_snark = RecursiveSNARK::new(&pp, c, &z_0)?;
     for i in 0..100 {
       recursive_snark.prove_step(&pp, c, ic)?;
-      recursive_snark.verify(&pp, i + 1, &z_0)?;
+      recursive_snark.verify(&pp, i + 1, &z_0, ic)?;
     }
     Ok(())
   }

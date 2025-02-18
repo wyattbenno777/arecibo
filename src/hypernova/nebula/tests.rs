@@ -12,7 +12,7 @@ use crate::{
   NovaError,
 };
 
-use super::{ic::increment_commitment, product_circuits::MEMORY_OPS_PER_STEP};
+use super::{ic::increment_ic, product_circuits::MEMORY_OPS_PER_STEP};
 
 /// Used in the lt circuit to determine how many bits the range check should
 /// check
@@ -47,8 +47,9 @@ fn test_heapify() {
   let mut ic = (F::zero(), F::zero());
   for (i, circuit) in circuits.iter().enumerate() {
     rs.prove_step(&pp, circuit, ic).unwrap();
-    ic.0 = increment_commitment::<E>(&pp.ck, &pp.ro_consts, ic.0, &circuit.advice().0);
-    rs.verify(&pp, i + 1, &z_0).unwrap();
+    ic.0 = increment_ic::<E>(&pp.ck, &pp.ro_consts, ic.0, &circuit.advice().0);
+    ic.1 = increment_ic::<E>(&pp.ck, &pp.ro_consts, ic.1, &circuit.advice().1);
+    rs.verify(&pp, i + 1, &z_0, ic).unwrap();
   }
 }
 

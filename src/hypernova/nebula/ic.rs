@@ -9,7 +9,7 @@ use crate::{
   traits::{
     commitment::CommitmentEngineTrait, CurveCycleEquipped, Dual, Engine, ROConstants, ROTrait,
   },
-  CommitmentKey,
+  Commitment, CommitmentKey,
 };
 use ff::Field;
 
@@ -38,7 +38,7 @@ where
 /// * commits to advice with Pedersen
 /// * hashes previous commitment & pedersen commitment to advice
 /// * outputs hash bits as scalar
-pub fn increment_commitment<E>(
+pub fn increment_ic<E>(
   ck: &CommitmentKey<E>,
   ro_consts: &ROConstants<Dual<E>>,
   prev_ic: E::Scalar,
@@ -48,6 +48,18 @@ where
   E: CurveCycleEquipped,
 {
   let comm_advice = E::CE::commit(ck, advice, &E::Scalar::ZERO);
+  increment_comm::<E>(ro_consts, prev_ic, comm_advice)
+}
+
+/// Produce an incremental commitment to already pedersen committed non-deterministic advice ω
+pub fn increment_comm<E>(
+  ro_consts: &ROConstants<Dual<E>>,
+  prev_ic: E::Scalar,
+  comm_advice: Commitment<E>, // commitment to non-deterministic witness ω
+) -> E::Scalar
+where
+  E: CurveCycleEquipped,
+{
   let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
   ro.absorb(prev_ic);
   absorb_primary_commitment::<E, Dual<E>>(&comm_advice, &mut ro);
