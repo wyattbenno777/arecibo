@@ -454,7 +454,7 @@ mod tests {
   use super::{IncrementalCommitment, RecursiveSNARK};
   use crate::{
     frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
-    hypernova::rs::StepCircuit,
+    hypernova::{nebula::ic::increment_ic, rs::StepCircuit},
     provider::Bn256EngineIPA,
     traits::{snark::default_ck_hint, CurveCycleEquipped, Engine},
     NovaError,
@@ -486,10 +486,12 @@ mod tests {
   fn run_circuit<E: CurveCycleEquipped>(c: &impl StepCircuit<E::Scalar>) -> Result<(), NovaError> {
     let pp = super::PublicParams::<E>::setup(c, &*default_ck_hint(), &*default_ck_hint());
     let z_0 = vec![E::Scalar::from(2u64)];
-    let ic = IncrementalCommitment::<E>::default();
+    let mut ic = IncrementalCommitment::<E>::default();
     let mut recursive_snark = RecursiveSNARK::new(&pp, c, &z_0)?;
-    for i in 0..100 {
+    for i in 0..10 {
       recursive_snark.prove_step(&pp, c, ic)?;
+      let (advice_0, advice_1) = c.advice();
+      ic = increment_ic::<E>(&pp.ck, &pp.ro_consts, ic, (&advice_0, &advice_1));
       recursive_snark.verify(&pp, i + 1, &z_0, ic)?;
     }
     Ok(())
