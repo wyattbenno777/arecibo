@@ -45,24 +45,26 @@ where
   E: CurveCycleEquipped,
 {
   /// The arity of the step circuit
-  F_arity: usize,
+  pub F_arity: usize,
   /// RO constants for primary circuit
-  ro_consts: ROConstants<Dual<E>>,
+  pub ro_consts: ROConstants<Dual<E>>,
   /// RO constants for primary circuit
-  ro_consts_circuit: ROConstantsCircuit<Dual<E>>,
+  pub ro_consts_circuit: ROConstantsCircuit<Dual<E>>,
   /// Commitment key for primary circuit
-  ck: Arc<CommitmentKey<E>>,
+  pub ck: Arc<CommitmentKey<E>>,
   /// R1CS shape we are arguing about
-  circuit_shape: R1CSWithArity<E>,
+  pub circuit_shape: R1CSWithArity<E>,
   /// Parameters of big nats in circuit
-  augmented_circuit_params: AugmentedCircuitParams,
+  pub augmented_circuit_params: AugmentedCircuitParams,
   /// secondary commitment key
-  ck_cyclefold: Arc<CommitmentKey<Dual<E>>>,
+  pub ck_cyclefold: Arc<CommitmentKey<Dual<E>>>,
   /// R1CS shape of cyclefold circuit
-  circuit_shape_cyclefold: R1CSWithArity<Dual<E>>,
+  pub circuit_shape_cyclefold: R1CSWithArity<Dual<E>>,
+  /// Digest of the public parameters
   #[serde(skip, default = "OnceCell::new")]
-  digest: OnceCell<E::Scalar>,
-  num_rounds: usize,
+  pub digest: OnceCell<E::Scalar>,
+  /// Number of sumcheck rounds used in the NIFS for the augmented circuit
+  pub num_rounds: usize,
 }
 
 impl<E> PublicParams<E>
@@ -418,6 +420,11 @@ pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
   ) -> Result<Vec<AllocatedNum<F>>, SynthesisError>
   where
     CS: ConstraintSystem<F>;
+
+  /// Get non-deterministic advice for the circuit
+  fn advice(&self) -> (Vec<F>, Vec<F>) {
+    (vec![], vec![])
+  }
 }
 
 #[cfg(test)]

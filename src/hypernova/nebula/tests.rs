@@ -12,7 +12,7 @@ use crate::{
   NovaError,
 };
 
-use super::product_circuits::MEMORY_OPS_PER_STEP;
+use super::{ic::increment_commitment, product_circuits::MEMORY_OPS_PER_STEP};
 
 /// Used in the lt circuit to determine how many bits the range check should
 /// check
@@ -44,9 +44,10 @@ fn test_heapify() {
   // z_0 <- [ first_addr ]
   let z_0 = vec![F::from(((init_memory.len() - 4) / 2) as u64)];
   let mut rs = RecursiveSNARK::new(&pp, &circuits[0], &z_0).unwrap();
-  let ic = (F::zero(), F::zero());
+  let mut ic = (F::zero(), F::zero());
   for (i, circuit) in circuits.iter().enumerate() {
     rs.prove_step(&pp, circuit, ic).unwrap();
+    ic.0 = increment_commitment::<E>(&pp.ck, &pp.ro_consts, ic.0, &circuit.advice().0);
     rs.verify(&pp, i + 1, &z_0).unwrap();
   }
 }
@@ -188,6 +189,10 @@ where
 
   fn arity(&self) -> usize {
     1
+  }
+
+  fn advice(&self) -> (Vec<F>, Vec<F>) {
+    (convert_advice(&self.RS, &self.WS), vec![])
   }
 }
 
@@ -466,4 +471,30 @@ where
     assert!(is_sat);
   }
   Ok(())
+}
+
+pub fn convert_advice<F>(
+  multiset_a: &[(usize, u64, u64)],
+  multiset_b: &[(usize, u64, u64)],
+) -> Vec<F>
+where
+  F: PrimeField,
+{
+  multiset_a
+    .iter()
+    .zip_eq(multiset_b.iter())
+    .flat_map(|(ms_a, ms_b)| {
+      avt_scalars::<F>(*ms_a)
+        .into_iter()
+        .chain(avt_scalars::<F>(*ms_b))
+    })
+    .collect()
+}
+/// Converts an addr, val, ts tuple `(usize, u64, u64)` to a `Vec<Scalar>`
+pub fn avt_scalars<F>(tuple: (usize, u64, u64)) -> Vec<F>
+where
+  F: PrimeField,
+{
+  let (addr, val, ts) = tuple;
+  vec![F::from(addr as u64), F::from(val), F::from(ts)]
 }
