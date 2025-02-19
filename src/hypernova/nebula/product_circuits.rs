@@ -127,6 +127,10 @@ where
 
     Ok(vec![gamma, alpha, gts, h_rs, h_ws, size])
   }
+
+  fn advice(&self) -> (Vec<F>, Vec<F>) {
+    (convert_advice(&self.RS, &self.WS), vec![])
+  }
 }
 
 impl OpsCircuit {
@@ -135,10 +139,9 @@ impl OpsCircuit {
   pub fn new(RS: Vec<(usize, u64, u64)>, WS: Vec<(usize, u64, u64)>) -> Self {
     OpsCircuit { RS, WS }
   }
-}
 
-impl Default for OpsCircuit {
-  fn default() -> Self {
+  /// Create a empty instance of [`OpsCircuit`]. Used to produce public parameters
+  pub fn empty() -> Self {
     OpsCircuit {
       RS: vec![(0, 0, 0); MEMORY_OPS_PER_STEP / 2],
       WS: vec![(0, 0, 0); MEMORY_OPS_PER_STEP / 2],
@@ -252,6 +255,13 @@ where
 
     Ok(vec![gamma, alpha, h_is, h_fs, size])
   }
+
+  fn advice(&self) -> (Vec<F>, Vec<F>) {
+    (
+      convert_advice_separate(&self.IS),
+      convert_advice_separate(&self.FS),
+    )
+  }
 }
 
 impl ScanCircuit {
@@ -270,4 +280,43 @@ impl ScanCircuit {
       FS: vec![(0, 0, 0); step_size],
     }
   }
+}
+
+/// Converts two of (addr, val, ts) tuples to a `Vec<Scalar>`. Alternating between the two multisets
+pub fn convert_advice<F>(
+  multiset_a: &[(usize, u64, u64)],
+  multiset_b: &[(usize, u64, u64)],
+) -> Vec<F>
+where
+  F: PrimeField,
+{
+  multiset_a
+    .iter()
+    .zip_eq(multiset_b.iter())
+    .flat_map(|(ms_a, ms_b)| {
+      avt_scalars::<F>(*ms_a)
+        .into_iter()
+        .chain(avt_scalars::<F>(*ms_b))
+    })
+    .collect()
+}
+
+/// Converts a multiset of (addr, val, ts) tuples to a `Vec<Scalar>`
+pub fn convert_advice_separate<F>(multiset: &[(usize, u64, u64)]) -> Vec<F>
+where
+  F: PrimeField,
+{
+  multiset
+    .iter()
+    .flat_map(|ms| avt_scalars::<F>(*ms).into_iter())
+    .collect()
+}
+
+/// Converts an addr, val, ts tuple `(usize, u64, u64)` to a `Vec<Scalar>`
+pub fn avt_scalars<F>(tuple: (usize, u64, u64)) -> Vec<F>
+where
+  F: PrimeField,
+{
+  let (addr, val, ts) = tuple;
+  vec![F::from(addr as u64), F::from(val), F::from(ts)]
 }
