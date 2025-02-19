@@ -1,6 +1,7 @@
 use super::{
-  alloc_bignat_constant, alloc_zero, conditionally_select, emulated::AllocatedEmulPoint,
-  int::enforce_equal, utils::alloc_one, AllocatedPoint, AllocatedRelaxedR1CSInstance, BigNat, Num,
+  alloc_bignat_constant, alloc_tuple_comms, alloc_zero, conditionally_select,
+  emulated::AllocatedEmulPoint, int::enforce_equal, utils::alloc_one, AllocatedPoint,
+  AllocatedRelaxedR1CSInstance, BigNat, Num,
 };
 use crate::{
   constants::{
@@ -102,8 +103,10 @@ where
     U1: &AllocatedLR1CSInstance<E>,
     u1: &AllocatedSplitR1CSInstance<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-    pre_committed0: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-    pre_committed1: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    pre_committed: (
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    ),
     U1_cyclefold: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
     num_rounds: usize,
     limb_width: usize,
@@ -179,8 +182,7 @@ where
       &self.sigmas,
       &self.thetas,
       W_new,
-      pre_committed0,
-      pre_committed1,
+      pre_committed,
     )?;
     let U_cyclefold_temp = self.cyclefold_nifs.verify(
       cs.namespace(|| "cyclefold_nifs"),
@@ -596,8 +598,10 @@ where
   pub x1: AllocatedNum<E::Scalar>,
   pub rx: Vec<AllocatedNum<E::Scalar>>,
   pub vs: Vec<AllocatedNum<E::Scalar>>,
-  pub pre_committed0: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-  pub pre_committed1: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+  pub pre_committed: (
+    AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+  ),
 }
 
 impl<E> AllocatedLR1CSInstance<E>
@@ -614,7 +618,7 @@ where
   where
     CS: ConstraintSystem<E::Scalar>,
   {
-    let (comm_W, x0, x1, pre_committed0, pre_committed1) = alloc_instance_witness::<_, E>(
+    let (comm_W, x0, x1, pre_committed) = alloc_instance_witness::<_, E>(
       cs.namespace(|| "allocate instance witness"),
       map_field!(inst, comm_W).copied(),
       map_field!(inst, X),
@@ -632,8 +636,7 @@ where
       x1,
       rx,
       vs,
-      pre_committed0,
-      pre_committed1,
+      pre_committed,
     })
   }
   pub fn fold<CS>(
@@ -645,8 +648,10 @@ where
     sigmas: &[AllocatedNum<E::Scalar>],
     thetas: &[AllocatedNum<E::Scalar>],
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-    pre_committed0: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-    pre_committed1: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    pre_committed: (
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    ),
   ) -> Result<Self, SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
@@ -670,8 +675,7 @@ where
       x1: x1_fold,
       rx: rx_p,
       vs,
-      pre_committed0,
-      pre_committed1,
+      pre_committed,
     })
   }
 
@@ -696,10 +700,12 @@ where
       ro.absorb(v);
     }
     self
-      .pre_committed0
+      .pre_committed
+      .0
       .absorb_in_ro(cs.namespace(|| "pre_committed0"), ro)?;
     self
-      .pre_committed1
+      .pre_committed
+      .1
       .absorb_in_ro(cs.namespace(|| "pre_committed1"), ro)?;
     Ok(())
   }
@@ -754,14 +760,14 @@ where
         conditionally_select(cs.namespace(|| format!("vs[{}]", i)), a, b, condition)
       })
       .try_collect()?;
-    let pre_committed0 = self.pre_committed0.conditionally_select(
+    let pre_committed0 = self.pre_committed.0.conditionally_select(
       cs.namespace(|| "pre_committed0 = cond ? self.pre_committed0 : other.pre_committed0"),
-      &other.pre_committed0,
+      &other.pre_committed.0,
       condition,
     )?;
-    let pre_committed1 = self.pre_committed1.conditionally_select(
+    let pre_committed1 = self.pre_committed.1.conditionally_select(
       cs.namespace(|| "pre_committed1 = cond ? self.pre_committed1 : other.pre_committed1"),
-      &other.pre_committed1,
+      &other.pre_committed.1,
       condition,
     )?;
     Ok(Self {
@@ -771,8 +777,7 @@ where
       x1,
       rx,
       vs,
-      pre_committed0,
-      pre_committed1,
+      pre_committed: (pre_committed0, pre_committed1),
     })
   }
 
@@ -796,8 +801,7 @@ where
       x1,
       rx,
       vs,
-      pre_committed0: default_point.clone(),
-      pre_committed1: default_point,
+      pre_committed: (default_point.clone(), default_point),
     })
   }
 }
@@ -809,8 +813,10 @@ where
   pub comm_W: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
   pub x0: AllocatedNum<E::Scalar>,
   pub x1: AllocatedNum<E::Scalar>,
-  pub pre_committed0: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-  pub pre_committed1: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+  pub pre_committed: (
+    AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+  ),
 }
 
 impl<E> AllocatedSplitR1CSInstance<E>
@@ -826,7 +832,7 @@ where
   where
     CS: ConstraintSystem<E::Scalar>,
   {
-    let (comm_W, x0, x1, pre_committed0, pre_committed1) = alloc_instance_witness::<_, E>(
+    let (comm_W, x0, x1, pre_committed) = alloc_instance_witness::<_, E>(
       cs.namespace(|| "allocate instance witness"),
       inst.map(|inst| inst.aux.comm_W),
       inst.map(|inst| &inst.aux.X),
@@ -838,8 +844,7 @@ where
       comm_W,
       x0,
       x1,
-      pre_committed0,
-      pre_committed1,
+      pre_committed,
     })
   }
 
@@ -857,10 +862,12 @@ where
     ro.absorb(&self.x0);
     ro.absorb(&self.x1);
     self
-      .pre_committed0
+      .pre_committed
+      .0
       .absorb_in_ro(cs.namespace(|| "pre_committed0"), ro)?;
     self
-      .pre_committed1
+      .pre_committed
+      .1
       .absorb_in_ro(cs.namespace(|| "pre_committed1"), ro)?;
     Ok(())
   }
@@ -884,7 +891,7 @@ fn alloc_instance_witness<CS, E>(
   mut cs: CS,
   comm_W: Option<Commitment<E>>,
   X: Option<&Vec<E::Scalar>>,
-  precommitted: Option<(Commitment<E>, Commitment<E>)>,
+  pre_committed: Option<(Commitment<E>, Commitment<E>)>,
   limb_width: usize,
   n_limbs: usize,
 ) -> Result<
@@ -892,8 +899,10 @@ fn alloc_instance_witness<CS, E>(
     AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
     AllocatedNum<E::Scalar>,
     AllocatedNum<E::Scalar>,
-    AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-    AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    (
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    ),
   ),
   SynthesisError,
 >
@@ -909,19 +918,13 @@ where
   )?;
   let x0 = alloc_scalar(cs.namespace(|| "allocate x0"), X.map(|X| X[0]))?;
   let x1 = alloc_scalar(cs.namespace(|| "allocate x1"), X.map(|X| X[1]))?;
-  let pre_committed0 = AllocatedEmulPoint::alloc(
-    cs.namespace(|| "allocate pre_committed0"),
-    precommitted.map(|(x, _)| x.to_coordinates()),
+  let pre_committed = alloc_tuple_comms::<_, E>(
+    cs.namespace(|| "pre_committed"),
+    pre_committed,
     limb_width,
     n_limbs,
   )?;
-  let pre_committed1 = AllocatedEmulPoint::alloc(
-    cs.namespace(|| "allocate pre_committed1"),
-    precommitted.map(|(_, x)| x.to_coordinates()),
-    limb_width,
-    n_limbs,
-  )?;
-  Ok((comm_W, x0, x1, pre_committed0, pre_committed1))
+  Ok((comm_W, x0, x1, pre_committed))
 }
 
 fn alloc_scalar<CS, F>(mut cs: CS, s: Option<F>) -> Result<AllocatedNum<F>, SynthesisError>

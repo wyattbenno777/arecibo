@@ -7,7 +7,8 @@ use crate::{
     ConstraintSystem, SynthesisError,
   },
   gadgets::{
-    alloc_num_equals, alloc_tuple, alloc_zero, conditionally_select, conditionally_select_vec,
+    alloc_num_equals, alloc_tuple, alloc_tuple_comms, alloc_zero, conditionally_select,
+    conditionally_select_vec,
     emulated::AllocatedEmulPoint,
     hypernova::{
       alloc_sized_vec, increment, AllocatedLR1CSInstance, AllocatedNIFS, AllocatedSplitR1CSInstance,
@@ -57,8 +58,7 @@ where
   u: Option<SplitR1CSInstance<E>>,
   W_new: Option<Commitment<E>>,
   U_cyclefold: Option<RelaxedR1CSInstance<Dual<E>>>,
-  pre_committed0: Option<Commitment<E>>,
-  pre_committed1: Option<Commitment<E>>,
+  pre_committed: Option<(Commitment<E>, Commitment<E>)>,
   prev_IC: Option<(E::Scalar, E::Scalar)>,
 }
 
@@ -76,8 +76,7 @@ where
     u: Option<SplitR1CSInstance<E>>,
     W_new: Option<Commitment<E>>,
     U_cyclefold: Option<RelaxedR1CSInstance<Dual<E>>>,
-    pre_committed0: Option<Commitment<E>>,
-    pre_committed1: Option<Commitment<E>>,
+    pre_committed: Option<(Commitment<E>, Commitment<E>)>,
     prev_IC: Option<(E::Scalar, E::Scalar)>,
   ) -> Self {
     Self {
@@ -90,8 +89,7 @@ where
       u,
       W_new,
       U_cyclefold,
-      pre_committed0,
-      pre_committed1,
+      pre_committed,
       prev_IC,
     }
   }
@@ -108,20 +106,8 @@ where
   ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
     // Allocate the witness
     let arity = self.step_circuit.arity();
-    let (
-      pp_digest,
-      i,
-      z_0,
-      z_i,
-      nifs,
-      U,
-      u,
-      W_new,
-      U_cyclefold,
-      pre_committed0,
-      pre_committed1,
-      prev_IC,
-    ) = self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
+    let (pp_digest, i, z_0, z_i, nifs, U, u, W_new, U_cyclefold, pre_committed, prev_IC) =
+      self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
 
     // Base case: i = 0
     // ////////////////
@@ -152,8 +138,7 @@ where
         &u,
         W_new,
         &U_cyclefold,
-        pre_committed0,
-        pre_committed1,
+        pre_committed,
         (&prev_IC.0, &prev_IC.1),
       )?;
 
@@ -211,7 +196,7 @@ where
     let IC = self.increment_ic(
       cs.namespace(|| "increment IC"),
       prev_IC,
-      (&u.pre_committed0, &u.pre_committed1),
+      (&u.pre_committed.0, &u.pre_committed.1),
       &is_base_case,
     )?;
 
@@ -256,8 +241,10 @@ where
     u: &AllocatedSplitR1CSInstance<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
     U_cyclefold: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
-    pre_committed0: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-    pre_committed1: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    pre_committed: (
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    ),
     prev_IC: (&AllocatedNum<E::Scalar>, &AllocatedNum<E::Scalar>),
   ) -> Result<
     (
@@ -291,8 +278,7 @@ where
       U,
       u,
       W_new,
-      pre_committed0,
-      pre_committed1,
+      pre_committed,
       U_cyclefold,
       self.num_rounds,
       self.params.limb_width,
@@ -340,8 +326,10 @@ where
       AllocatedSplitR1CSInstance<E>,                         // u
       AllocatedEmulPoint<<Dual<E> as Engine>::GE>,           // W_new
       AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>, // U_cyclefold
-      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,           // pre_committed0
-      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,           // pre_committed1
+      (
+        AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+        AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+      ), // pre_committed
       (AllocatedNum<E::Scalar>, AllocatedNum<E::Scalar>),    // prev_IC
     ),
     SynthesisError,
@@ -397,15 +385,9 @@ where
       self.params.limb_width,
       self.params.n_limbs,
     )?;
-    let pre_committed0 = AllocatedEmulPoint::alloc(
-      cs.namespace(|| "allocate pre_committed0"),
-      and_then_field!(self.inputs, pre_committed0).map(|pc| pc.to_coordinates()),
-      self.params.limb_width,
-      self.params.n_limbs,
-    )?;
-    let pre_committed1 = AllocatedEmulPoint::alloc(
-      cs.namespace(|| "allocate pre_committed1"),
-      and_then_field!(self.inputs, pre_committed1).map(|pc| pc.to_coordinates()),
+    let pre_committed = alloc_tuple_comms::<_, E>(
+      cs.namespace(|| "pre_committed"),
+      self.inputs.as_ref().and_then(|inputs| inputs.pre_committed),
       self.params.limb_width,
       self.params.n_limbs,
     )?;
@@ -423,8 +405,7 @@ where
       u,
       W_new,
       U_cyclefold,
-      pre_committed0,
-      pre_committed1,
+      pre_committed,
       prev_IC,
     ))
   }

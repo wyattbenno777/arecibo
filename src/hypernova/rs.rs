@@ -210,7 +210,6 @@ where
       None,
       None,
       None,
-      None,
     );
     let circuit = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
@@ -284,8 +283,7 @@ where
       Some(self.l_u.clone()),
       Some(r_U.comm_W),
       Some(self.r_U_cyclefold.clone()),
-      Some(r_U.pre_committed.0),
-      Some(r_U.pre_committed.1),
+      Some(r_U.pre_committed),
       Some(self.prev_ic),
     );
     let circuit = AugmentedCircuit::new(
