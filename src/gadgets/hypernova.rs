@@ -1,12 +1,19 @@
 use super::{
-  alloc_zero, conditionally_select, emulated::AllocatedEmulPoint, int::enforce_equal,
-  utils::alloc_one,
+  alloc_bignat_constant, alloc_zero, conditionally_select, emulated::AllocatedEmulPoint,
+  int::enforce_equal, utils::alloc_one, AllocatedPoint, AllocatedRelaxedR1CSInstance, BigNat, Num,
 };
+use crate::traits::Group;
 use crate::{
-  constants::{DEFAULT_ABSORBS, NUM_CHALLENGE_BITS, NUM_MATRICES, NUM_UNIVARIATE_COEFFS},
+  constants::{
+    DEFAULT_ABSORBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_MATRICES, NUM_UNIVARIATE_COEFFS,
+  },
+  cyclefold::gadgets::AllocatedCycleFoldInstance,
   frontend::{gadgets::Assignment, num::AllocatedNum, Boolean, ConstraintSystem, SynthesisError},
   gadgets::le_bits_to_num,
-  hypernova::{nifs::NIFS, ro_sumcheck::ROSumcheckProof},
+  hypernova::{
+    nifs::{CycleFoldNIFS, NIFS},
+    ro_sumcheck::ROSumcheckProof,
+  },
   map_field,
   r1cs::split::{LR1CSInstance, SplitR1CSInstance},
   spartan::polys::univariate::UniPoly,
@@ -26,6 +33,9 @@ where
   sc: AllocatedSumcheckProof<E>,
   sigmas: Vec<AllocatedNum<E::Scalar>>,
   thetas: Vec<AllocatedNum<E::Scalar>>,
+  cyclefold_nifs: AllocatedCycleFoldNIFS<E>,
+  cyclefold_nifs_1: AllocatedCycleFoldNIFS<E>,
+  cyclefold_nifs_2: AllocatedCycleFoldNIFS<E>,
 }
 
 impl<E> AllocatedNIFS<E>
@@ -36,6 +46,8 @@ where
     mut cs: CS,
     inst: Option<&NIFS<E>>,
     num_rounds: usize,
+    limb_width: usize,
+    n_limbs: usize,
   ) -> Result<Self, SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
@@ -55,7 +67,32 @@ where
       map_field!(inst, thetas),
       NUM_MATRICES,
     )?;
-    Ok(Self { sc, sigmas, thetas })
+    let cyclefold_nifs = AllocatedCycleFoldNIFS::alloc(
+      cs.namespace(|| "cyclefold_nifs"),
+      map_field!(inst, cyclefold_nifs),
+      limb_width,
+      n_limbs,
+    )?;
+    let cyclefold_nifs_1 = AllocatedCycleFoldNIFS::alloc(
+      cs.namespace(|| "cyclefold_nifs_1"),
+      map_field!(inst, cyclefold_nifs_1),
+      limb_width,
+      n_limbs,
+    )?;
+    let cyclefold_nifs_2 = AllocatedCycleFoldNIFS::alloc(
+      cs.namespace(|| "cyclefold_nifs_2"),
+      map_field!(inst, cyclefold_nifs_2),
+      limb_width,
+      n_limbs,
+    )?;
+    Ok(Self {
+      sc,
+      sigmas,
+      thetas,
+      cyclefold_nifs,
+      cyclefold_nifs_1,
+      cyclefold_nifs_2,
+    })
   }
 
   pub fn verify<CS>(
@@ -63,20 +100,29 @@ where
     mut cs: CS,
     pp_digest: &AllocatedNum<E::Scalar>,
     ro_consts: &ROConstantsCircuit<Dual<E>>,
-    U: &AllocatedLR1CSInstance<E>,
-    u: &AllocatedSplitR1CSInstance<E>,
+    U1: &AllocatedLR1CSInstance<E>,
+    u1: &AllocatedSplitR1CSInstance<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
     pre_committed0: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
     pre_committed1: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    U1_cyclefold: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
     num_rounds: usize,
-  ) -> Result<AllocatedLR1CSInstance<E>, SynthesisError>
+    limb_width: usize,
+    n_limbs: usize,
+  ) -> Result<
+    (
+      AllocatedLR1CSInstance<E>,
+      AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+    ),
+    SynthesisError,
+  >
   where
     CS: ConstraintSystem<E::Scalar>,
   {
     // Squeeze rho, gamma, beta
     let mut ro = <Dual<E> as Engine>::ROCircuit::new(ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(pp_digest);
-    u.absorb_in_ro(cs.namespace(|| "absorb u"), &mut ro)?;
+    u1.absorb_in_ro(cs.namespace(|| "absorb u"), &mut ro)?;
     let rho_bits = ro.squeeze(cs.namespace(|| "rho bits"), NUM_CHALLENGE_BITS)?;
     let rho = le_bits_to_num(cs.namespace(|| "rho"), &rho_bits)?;
     let mut ro = <Dual<E> as Engine>::ROCircuit::new(ro_consts.clone(), DEFAULT_ABSORBS);
@@ -103,9 +149,9 @@ where
     let claim = Self::claim(
       cs.namespace(|| "claim"),
       &gamma,
-      &U.vs[0],
-      &U.vs[1],
-      &U.vs[2],
+      &U1.vs[0],
+      &U1.vs[1],
+      &U1.vs[2],
     )?;
     // ///////////////
     // verify sumcheck
@@ -118,7 +164,7 @@ where
     )?;
 
     // Compute cl, cr from thetas and sigmas
-    let cl = self.cl(cs.namespace(|| "cl"), &gamma, &U.rx, &rx_p, num_rounds)?;
+    let cl = self.cl(cs.namespace(|| "cl"), &gamma, &U1.rx, &rx_p, num_rounds)?;
     let cr = self.cr(cs.namespace(|| "cr"), &gamma, &beta, &rx_p, num_rounds)?;
     let cl_add_cr = cl.add(cs.namespace(|| "cl + cr"), &cr)?;
 
@@ -126,9 +172,9 @@ where
     enforce_equal(&mut cs, || "cl + cr = sub_claim", &cl_add_cr, &sub_claim);
 
     // Output the folded instance
-    U.fold(
+    let U = U1.fold(
       cs.namespace(|| "folded instance"),
-      u,
+      u1,
       &rho,
       rx_p,
       &self.sigmas,
@@ -136,7 +182,29 @@ where
       W_new,
       pre_committed0,
       pre_committed1,
-    )
+    )?;
+    let U_cyclefold_temp = self.cyclefold_nifs.verify(
+      cs.namespace(|| "cyclefold_nifs"),
+      ro_consts.clone(),
+      U1_cyclefold,
+      limb_width,
+      n_limbs,
+    )?;
+    let U_cyclefold_temp_1 = self.cyclefold_nifs_1.verify(
+      cs.namespace(|| "cyclefold_nifs_1"),
+      ro_consts.clone(),
+      &U_cyclefold_temp,
+      limb_width,
+      n_limbs,
+    )?;
+    let U_cyclefold = self.cyclefold_nifs_2.verify(
+      cs.namespace(|| "cyclefold_nifs_2"),
+      ro_consts.clone(),
+      &U_cyclefold_temp_1,
+      limb_width,
+      n_limbs,
+    )?;
+    Ok((U, U_cyclefold))
   }
 
   fn claim<CS>(
@@ -232,6 +300,122 @@ where
   }
 }
 
+pub struct AllocatedCycleFoldNIFS<E>
+where
+  E: CurveCycleEquipped,
+{
+  comm_T: AllocatedPoint<<Dual<E> as Engine>::GE>,
+  l_u: AllocatedCycleFoldInstance<Dual<E>>,
+}
+
+impl<E> AllocatedCycleFoldNIFS<E>
+where
+  E: CurveCycleEquipped,
+{
+  pub fn alloc<CS>(
+    mut cs: CS,
+    inst: Option<&CycleFoldNIFS<E>>,
+    limb_width: usize,
+    n_limbs: usize,
+  ) -> Result<Self, SynthesisError>
+  where
+    CS: ConstraintSystem<E::Scalar>,
+  {
+    let comm_T = AllocatedPoint::alloc(
+      cs.namespace(|| "allocate T"),
+      inst.map(|inst| inst.comm_T.to_coordinates()),
+    )?;
+    let l_u = AllocatedCycleFoldInstance::alloc(
+      cs.namespace(|| "l_u"),
+      map_field!(inst, l_u),
+      limb_width,
+      n_limbs,
+    )?;
+    Ok(Self { comm_T, l_u })
+  }
+
+  /// The NIFS verifier which folds the CycleFold instance into a running relaxed R1CS instance.
+  pub fn verify<CS>(
+    &self,
+    mut cs: CS,
+    ro_consts: ROConstantsCircuit<Dual<E>>,
+    U: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+    limb_width: usize,
+    n_limbs: usize,
+  ) -> Result<AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>, SynthesisError>
+  where
+    CS: ConstraintSystem<E::Scalar>,
+  {
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(ro_consts, DEFAULT_ABSORBS);
+    U.absorb_in_ro(
+      cs.namespace(|| "absorb cyclefold running instance"),
+      &mut ro,
+    )?;
+    self
+      .l_u
+      .absorb_in_ro(cs.namespace(|| "absorb cyclefold instance"), &mut ro)?;
+    ro.absorb(&self.comm_T.x);
+    ro.absorb(&self.comm_T.y);
+    ro.absorb(&self.comm_T.is_infinity);
+    let r_bits = ro.squeeze(cs.namespace(|| "r bits"), NUM_CHALLENGE_BITS)?;
+    let r = le_bits_to_num(cs.namespace(|| "r"), &r_bits)?;
+
+    // W_fold = self.W + r * u.W
+    let rW = self.l_u.W.scalar_mul(cs.namespace(|| "r * u.W"), &r_bits)?;
+    let W_fold = U.W.add(cs.namespace(|| "self.W + r * u.W"), &rW)?;
+
+    // E_fold = self.E + r * T
+    let rT = self.comm_T.scalar_mul(cs.namespace(|| "r * T"), &r_bits)?;
+    let E_fold = U.E.add(cs.namespace(|| "self.E + r * T"), &rT)?;
+
+    // u_fold = u_r + r
+    let u_fold = AllocatedNum::alloc(cs.namespace(|| "u_fold"), || {
+      Ok(*U.u.get_value().get()? + r.get_value().get()?)
+    })?;
+    cs.enforce(
+      || "Check u_fold",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + u_fold.get_variable() - U.u.get_variable() - r.get_variable(),
+    );
+
+    // Fold the IO:
+    // Analyze r into limbs
+    let r_bn = BigNat::from_num(
+      cs.namespace(|| "allocate r_bn"),
+      &Num::from(r),
+      limb_width,
+      n_limbs,
+    )?;
+
+    // Allocate the order of the non-native field as a constant
+    let m_bn = alloc_bignat_constant(
+      cs.namespace(|| "alloc m"),
+      &<Dual<E> as Engine>::GE::group_params().2,
+      limb_width,
+      n_limbs,
+    )?;
+
+    // fold io
+    let mut X_fold = vec![];
+    for (idx, (X, x)) in U.X.iter().zip_eq(self.l_u.X.iter()).enumerate() {
+      let (_, r) = x.mult_mod(cs.namespace(|| format!("r*u.X[{idx}]")), &r_bn, &m_bn)?;
+      let r_new = X.add(&r)?;
+      let X_i_fold = r_new.red_mod(cs.namespace(|| format!("reduce folded X[{idx}]")), &m_bn)?;
+      X_fold.push(X_i_fold);
+    }
+    let X_fold = X_fold.try_into().map_err(|err: Vec<_>| {
+      SynthesisError::IncompatibleLengthVector(format!("{} != {NIO_CYCLE_FOLD}", err.len()))
+    })?;
+    Ok(AllocatedRelaxedR1CSInstance {
+      W: W_fold,
+      E: E_fold,
+      u: u_fold,
+      X: X_fold,
+    })
+  }
+}
+
 pub struct AllocatedSumcheckProof<E>
 where
   E: CurveCycleEquipped,
@@ -299,6 +483,7 @@ where
     Ok((e, rx))
   }
 }
+
 pub struct AllocatedUniPoly<F>
 where
   F: PrimeField,

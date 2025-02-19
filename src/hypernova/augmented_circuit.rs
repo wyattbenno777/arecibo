@@ -2,7 +2,6 @@ use super::{nifs::NIFS, rs::StepCircuit};
 use crate::{
   and_then_field,
   constants::{DEFAULT_ABSORBS, NIO_CYCLE_FOLD, NUM_HASH_BITS},
-  cyclefold::{gadgets::AllocatedCycleFoldData, util::FoldingData},
   frontend::{
     gadgets::Assignment, num::AllocatedNum, shape_cs::ShapeCS, AllocatedBit, Boolean,
     ConstraintSystem, SynthesisError,
@@ -16,7 +15,10 @@ use crate::{
     le_bits_to_num, AllocatedRelaxedR1CSInstance,
   },
   map_field,
-  r1cs::split::{LR1CSInstance, SplitR1CSInstance},
+  r1cs::{
+    split::{LR1CSInstance, SplitR1CSInstance},
+    RelaxedR1CSInstance,
+  },
   spartan::math::Math,
   traits::{
     commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
@@ -54,7 +56,7 @@ where
   U: Option<LR1CSInstance<E>>,
   u: Option<SplitR1CSInstance<E>>,
   W_new: Option<Commitment<E>>,
-  data_cyclefold: Option<FoldingData<Dual<E>>>,
+  U_cyclefold: Option<RelaxedR1CSInstance<Dual<E>>>,
   pre_committed0: Option<Commitment<E>>,
   pre_committed1: Option<Commitment<E>>,
 }
@@ -72,7 +74,7 @@ where
     U: Option<LR1CSInstance<E>>,
     u: Option<SplitR1CSInstance<E>>,
     W_new: Option<Commitment<E>>,
-    data_cyclefold: Option<FoldingData<Dual<E>>>,
+    U_cyclefold: Option<RelaxedR1CSInstance<Dual<E>>>,
     pre_committed0: Option<Commitment<E>>,
     pre_committed1: Option<Commitment<E>>,
   ) -> Self {
@@ -85,7 +87,7 @@ where
       U,
       u,
       W_new,
-      data_cyclefold,
+      U_cyclefold,
       pre_committed0,
       pre_committed1,
     }
@@ -103,7 +105,7 @@ where
   ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
     // Allocate the witness
     let arity = self.step_circuit.arity();
-    let (pp_digest, i, z_0, z_i, nifs, U, u, W_new, data_cyclefold, pre_committed0, pre_committed1) =
+    let (pp_digest, i, z_0, z_i, nifs, U, u, W_new, U_cyclefold, pre_committed0, pre_committed1) =
       self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
 
     // Base case: i = 0
@@ -134,7 +136,7 @@ where
         &U,
         &u,
         W_new,
-        &data_cyclefold,
+        &U_cyclefold,
         pre_committed0,
         pre_committed1,
       )?;
@@ -228,7 +230,7 @@ where
     U: &AllocatedLR1CSInstance<E>,
     u: &AllocatedSplitR1CSInstance<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-    data_cyclefold: &AllocatedCycleFoldData<Dual<E>>,
+    U_cyclefold: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
     pre_committed0: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
     pre_committed1: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
   ) -> Result<
@@ -249,13 +251,13 @@ where
       z_i,
       U,
       u,
-      &data_cyclefold.U,
+      U_cyclefold,
     )?;
 
     // # NIFS.V
     //
     // Compute folded U and U_cyclefold
-    let U = nifs.verify(
+    let (U, U_cyclefold) = nifs.verify(
       cs.namespace(|| "NIFS.V"),
       pp_digest,
       ro_consts,
@@ -264,11 +266,8 @@ where
       W_new,
       pre_committed0,
       pre_committed1,
+      U_cyclefold,
       self.num_rounds,
-    )?;
-    let U_cyclefold = data_cyclefold.apply_fold(
-      cs.namespace(|| "fold u_cyclefold into U_cyclefold"),
-      self.ro_consts.clone(),
       self.params.limb_width,
       self.params.n_limbs,
     )?;
@@ -305,17 +304,17 @@ where
     arity: usize,
   ) -> Result<
     (
-      AllocatedNum<E::Scalar>,                     // pp_digest
-      AllocatedNum<E::Scalar>,                     // i
-      Vec<AllocatedNum<E::Scalar>>,                // z_0
-      Vec<AllocatedNum<E::Scalar>>,                // z_i
-      AllocatedNIFS<E>,                            // nifs
-      AllocatedLR1CSInstance<E>,                   // U
-      AllocatedSplitR1CSInstance<E>,               // u
-      AllocatedEmulPoint<<Dual<E> as Engine>::GE>, // W_new
-      AllocatedCycleFoldData<Dual<E>>,             // data_cyclefold
-      AllocatedEmulPoint<<Dual<E> as Engine>::GE>, // pre_committed0
-      AllocatedEmulPoint<<Dual<E> as Engine>::GE>, // pre_committed1
+      AllocatedNum<E::Scalar>,                               // pp_digest
+      AllocatedNum<E::Scalar>,                               // i
+      Vec<AllocatedNum<E::Scalar>>,                          // z_0
+      Vec<AllocatedNum<E::Scalar>>,                          // z_i
+      AllocatedNIFS<E>,                                      // nifs
+      AllocatedLR1CSInstance<E>,                             // U
+      AllocatedSplitR1CSInstance<E>,                         // u
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,           // W_new
+      AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>, // U_cyclefold
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,           // pre_committed0
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,           // pre_committed1
     ),
     SynthesisError,
   > {
@@ -342,6 +341,8 @@ where
       cs.namespace(|| "nifs"),
       and_then_field!(self.inputs, nifs),
       self.num_rounds,
+      self.params.limb_width,
+      self.params.n_limbs,
     )?;
     let U = AllocatedLR1CSInstance::alloc(
       cs.namespace(|| "allocate U"),
@@ -362,10 +363,9 @@ where
       self.params.limb_width,
       self.params.n_limbs,
     )?;
-
-    let data_cyclefold = AllocatedCycleFoldData::alloc(
-      cs.namespace(|| "data_c_1"),
-      and_then_field!(self.inputs, data_cyclefold),
+    let U_cyclefold = AllocatedRelaxedR1CSInstance::alloc(
+      cs.namespace(|| "allocate U_cyclefold"),
+      and_then_field!(self.inputs, U_cyclefold),
       self.params.limb_width,
       self.params.n_limbs,
     )?;
@@ -391,7 +391,7 @@ where
       U,
       u,
       W_new,
-      data_cyclefold,
+      U_cyclefold,
       pre_committed0,
       pre_committed1,
     ))
@@ -626,8 +626,8 @@ mod tests {
 
   use crate::{
     constants::{
-      BASE_CONSTRAINTS, BN_LIMB_WIDTH, BN_N_LIMBS, MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT,
-      MAX_CONSTRAINTS_PER_SUMCHECK_ROUND,
+      BASE_CONSTRAINTS, BN_LIMB_WIDTH, BN_N_LIMBS, EDGE_CASE_CONSTRAINTS,
+      MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT, MAX_CONSTRAINTS_PER_SUMCHECK_ROUND,
     },
     frontend::{num::AllocatedNum, shape_cs::ShapeCS, ConstraintSystem, SynthesisError},
     hypernova::{augmented_circuit::project_aug_circuit_size, rs::StepCircuit},
@@ -762,6 +762,7 @@ mod tests {
     let _ = circuit_primary.synthesize(&mut cs);
     let base_cons = cs.num_constraints();
     println!("Base constraints: {}", base_cons);
+    assert_eq!(base_cons, BASE_CONSTRAINTS - EDGE_CASE_CONSTRAINTS);
 
     // Constraint Generation #1: No inputs and 1 sumcheck round
     let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
@@ -848,10 +849,9 @@ mod tests {
     );
 
     println!("estimated num rounds: {}", num_rounds);
-    println!(
-      "actual num rounds: {}",
-      base_with_sumcheck15.next_power_of_two().log_2()
-    );
+    let expected = base_with_sumcheck15.next_power_of_two().log_2();
+    println!("actual num rounds: {}", expected);
+    assert_eq!(expected, num_rounds);
   }
 
   #[test]

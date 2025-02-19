@@ -7,7 +7,7 @@ use crate::{
     BASE_CONSTRAINTS, BN_LIMB_WIDTH, BN_N_LIMBS, DEFAULT_ABSORBS,
     MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT, MAX_CONSTRAINTS_PER_SUMCHECK_ROUND, NUM_HASH_BITS,
   },
-  cyclefold::{circuit::CycleFoldCircuit, util::FoldingData},
+  cyclefold::circuit::CycleFoldCircuit,
   digest::SimpleDigestible,
   errors::NovaError,
   frontend::{
@@ -15,6 +15,7 @@ use crate::{
     r1cs::{NovaShape, NovaWitness},
     shape_cs::ShapeCS,
     solver::SatisfyingAssignment,
+    test_cs::TestConstraintSystem,
     ConstraintSystem, SynthesisError,
   },
   gadgets::scalar_as_base,
@@ -272,11 +273,6 @@ where
 
     // Compute (u_i+1, w_i+1) ← trace(F', (vk, Ui, ui, (i, z_0, z_i), ωi)),
     let mut cs = SatisfyingAssignment::<E>::new();
-    let cyclefold_data = FoldingData::new(
-      self.r_U_cyclefold.clone(),
-      nifs.cyclefold_nifs.l_u.clone(),
-      nifs.cyclefold_nifs.comm_T,
-    );
     let inputs: AugmentedCircuitInputs<E> = AugmentedCircuitInputs::new(
       pp.digest(),
       E::Scalar::from(self.i as u64),
@@ -286,7 +282,7 @@ where
       Some(self.r_U.clone()),
       Some(self.l_u.clone()),
       Some(r_U.comm_W),
-      Some(cyclefold_data),
+      Some(self.r_U_cyclefold.clone()),
       Some(r_U.pre_committed.0),
       Some(r_U.pre_committed.1),
     );
@@ -465,6 +461,23 @@ pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
   fn advice(&self) -> (Vec<F>, Vec<F>) {
     (vec![], vec![])
   }
+}
+
+#[allow(dead_code)]
+fn debug_step<E, SC>(circuit: AugmentedCircuit<'_, E, SC>) -> Result<(), NovaError>
+where
+  E: CurveCycleEquipped,
+  SC: StepCircuit<E::Scalar>,
+{
+  let mut cs = TestConstraintSystem::<E::Scalar>::new();
+  circuit
+    .synthesize(&mut cs)
+    .map_err(|_| NovaError::from(SynthesisError::AssignmentMissing))?;
+  let is_sat = cs.is_satisfied();
+  if !is_sat {
+    assert!(is_sat);
+  }
+  Ok(())
 }
 
 #[cfg(test)]
