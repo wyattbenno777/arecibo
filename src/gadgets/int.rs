@@ -1,4 +1,4 @@
-use crate::frontend::{gadgets::Assignment, num::AllocatedNum, ConstraintSystem, SynthesisError};
+use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::PrimeField;
 
 use super::Num;
@@ -178,22 +178,4 @@ pub(crate) fn enforce_lt_32<F: PrimeField + PartialOrd, CS: ConstraintSystem<F>>
     |lc| lc + diff.get_variable() - a.get_variable() + b.get_variable(),
   );
   Ok(())
-}
-
-#[allow(dead_code)]
-/// Negate an AllocatedNum
-pub fn alloc_negate<F: PrimeField, CS: ConstraintSystem<F>>(
-  mut cs: CS,
-  a: &AllocatedNum<F>,
-) -> Result<AllocatedNum<F>, SynthesisError> {
-  let b = AllocatedNum::alloc(cs.namespace(|| "y"), || Ok(-*a.get_value().get()?))?;
-
-  cs.enforce(
-    || "check y = - self.y",
-    |lc| lc + a.get_variable(),
-    |lc| lc + CS::one(),
-    |lc| lc - b.get_variable(),
-  );
-
-  Ok(b)
 }
