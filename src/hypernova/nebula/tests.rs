@@ -1,4 +1,3 @@
-use crate::traits::TranscriptEngineTrait;
 use crate::{
   frontend::{
     num::AllocatedNum, test_cs::TestConstraintSystem, ConstraintSystem, Split, SynthesisError,
@@ -6,16 +5,17 @@ use crate::{
   gadgets::{conditionally_select2, nebula::allocated_avt, Num},
   hypernova::rs::{IncrementalCommitment, PublicParams, RecursiveSNARK, StepCircuit},
   provider::Bn256EngineIPA,
-  traits::{snark::default_ck_hint, CurveCycleEquipped, Engine},
+  traits::{snark::default_ck_hint, CurveCycleEquipped, Engine, TranscriptEngineTrait},
   NovaError,
 };
 use ff::PrimeField;
 use itertools::Itertools;
 
-use super::product_circuits::{convert_advice, convert_advice_separate, ScanCircuit};
 use super::{
   ic::increment_ic,
-  product_circuits::{OpsCircuit, MEMORY_OPS_PER_STEP},
+  product_circuits::{
+    convert_advice, convert_advice_separate, OpsCircuit, ScanCircuit, MEMORY_OPS_PER_STEP,
+  },
 };
 
 /// Used in the lt circuit to determine how many bits the range check should

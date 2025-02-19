@@ -2,7 +2,6 @@ use super::{
   alloc_bignat_constant, alloc_zero, conditionally_select, emulated::AllocatedEmulPoint,
   int::enforce_equal, utils::alloc_one, AllocatedPoint, AllocatedRelaxedR1CSInstance, BigNat, Num,
 };
-use crate::traits::Group;
 use crate::{
   constants::{
     DEFAULT_ABSORBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_MATRICES, NUM_UNIVARIATE_COEFFS,
@@ -18,7 +17,7 @@ use crate::{
   r1cs::split::{LR1CSInstance, SplitR1CSInstance},
   spartan::polys::univariate::UniPoly,
   traits::{
-    commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
+    commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, Group, ROCircuitTrait,
     ROConstantsCircuit,
   },
   Commitment,
