@@ -48,7 +48,7 @@ impl<Scalar: PrimeField> AllocatedNum<Scalar> {
     })
   }
 
-  /// Allocate a `Variable(Aux)` in a `ConstraintSystem`.
+  /// Allocate a `Variable(PreCommitted)` in a `ConstraintSystem`.
   pub fn alloc_pre_committed<CS, F>(
     mut cs: CS,
     value: F,
