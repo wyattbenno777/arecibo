@@ -9,7 +9,7 @@ use crate::{
     num::AllocatedNum, ConstraintSystem, SynthesisError,
   },
   gadgets::{le_bits_to_num, scalar_as_base},
-  provider::{kzg_commitment::{KZGProverKey, KZGVerifierKey, UVKZGCommitment}, traits::DlogGroup},
+  provider::{kzg_commitment::{KZGProverKey, KZGVerifierKey, UVKZGCommitment},  traits::DlogGroup},
   r1cs::RelaxedR1CSInstance,
   traits::{
     CurveCycleEquipped, Dual, Engine, ROCircuitTrait, ROConstants, ROConstantsCircuit, ROTrait,
@@ -84,12 +84,14 @@ impl<E: PairingEngine> KZGProof<E> {
     E::Fr: GpuName,
   {
     let mut domain =
-      EvaluationDomain::from_coeffs(v.to_vec()).expect("Failed to create evaluation domain");
+      EvaluationDomain::from_coeffs(v.to_vec()).expect("Failed to creat
+e evaluation domain");
 
     let worker = Worker::new();
     domain.ifft(&worker, &mut None).expect("FFT failed");
 
-    let polynomial = DensePolynomial::from_coeffs(domain.into_coeffs());
+    let polynomial = DensePolynomial::from_coeffs(domain.into_coeffs())
+;
     if polynomial.degree() >= pk.powers_of_g().len() {
       return Err(PCSError::LengthError);
     }

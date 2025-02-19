@@ -3,6 +3,7 @@
 
 use std::marker::PhantomData;
 
+use ec_gpu_gen::threadpool::Worker;
 use ff::{Field, PrimeField, PrimeFieldBits};
 use group::{prime::PrimeCurveAffine, Curve, Group as _};
 use pairing::Engine;
@@ -12,10 +13,10 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::{
-  digest::SimpleDigestible, provider::{pedersen::Commitment, traits::DlogGroup, util::fb_msm}, traits::{
+  digest::SimpleDigestible, frontend::{domain::EvaluationDomain, gpu::GpuName}, provider::{pedersen::Commitment, traits::DlogGroup, util::fb_msm}, traits::{
     commitment::{CommitmentEngineTrait, Len},
     Engine as NovaEngine, Group, TranscriptReprTrait,
-  }, 
+  } 
 };
 
 
@@ -235,7 +236,7 @@ where
   E::G1: DlogGroup<ScalarExt = E::Fr, AffineExt = E::G1Affine>,
   E::G1Affine: Serialize + for<'de> Deserialize<'de>,
   E::G2Affine: Serialize + for<'de> Deserialize<'de>,
-  E::Fr: PrimeFieldBits, // TODO due to use of gen_srs_for_testing, make optional
+  E::Fr: PrimeFieldBits + GpuName, // TODO due to use of gen_srs_for_testing, make optional
 {
   type CommitmentKey = UniversalKZGParam<E>;
   type Commitment = Commitment<NE>;
@@ -253,13 +254,20 @@ where
   fn commit(
     ck: &Self::CommitmentKey,
     v: &[<E::G1 as Group>::Scalar],
-    r: &<E::G1 as Group>::Scalar,
-  ) -> Self::Commitment {
+    _r: &<E::G1 as Group>::Scalar,
+  ) -> Self::Commitment 
+  where
+  E::G1: DlogGroup<ScalarExt = E::Fr, AffineExt = E::G1Affine>,
+  {
     assert!(ck.length() >= v.len());
-    let mut scalars = v.to_vec();
-    scalars.push(*r);
-    let mut bases = ck.powers_of_g[..v.len()].to_vec();
-    bases.push(ck.h);
+    let mut domain =
+    EvaluationDomain::from_coeffs(v.to_vec()).expect("Failed to creat
+e evaluation domain");
+
+    let worker = Worker::new();
+    domain.ifft(&worker, &mut None).expect("FFT failed");
+    let scalars = domain.into_coeffs();
+    let bases = ck.powers_of_g[..scalars.len()].to_vec();
     Commitment {
       comm: E::G1::vartime_multiscalar_mul(&scalars, &bases),
     }

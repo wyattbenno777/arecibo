@@ -76,6 +76,7 @@ impl Decider {
     let params = generate_random_parameters::<Bn256EngineKZG, _, _>(circuit, rng).unwrap();
 
     let pk = DeciderProverKey {
+      // TODO: Remove vk from pk (optimisation)
       groth16_pk: params.clone(),
       kzg_pk,
     };
@@ -203,12 +204,12 @@ impl Decider {
       return Err(NovaError::ProofVerifyError);
     }
 
-    // let kzg_U_cmW = UVKZGCommitment::<Bn256>::new(U_cmW.comm.to_affine());
-    // let kzg_U_cmE = UVKZGCommitment::<Bn256>::new(U_cmE.comm.to_affine());
+    let kzg_U_cmW = UVKZGCommitment::<Bn256>::new(U_cmW.comm.to_affine());
+    let kzg_U_cmE = UVKZGCommitment::<Bn256>::new(U_cmE.comm.to_affine());
 
     // 7.3 Verify KZG proofs
-    // self.kzg_proofs.0.verify(&kzg_vk, &kzg_U_cmW, self.kzg_challenges.0)?;
-    // self.kzg_proofs.1.verify(&kzg_vk, &kzg_U_cmE, self.kzg_challenges.1)?;
+    self.kzg_proofs.0.verify(&kzg_vk, &kzg_U_cmW, self.kzg_challenges.0)?;
+    self.kzg_proofs.1.verify(&kzg_vk, &kzg_U_cmE, self.kzg_challenges.1)?;
     Ok(())
   }
 }

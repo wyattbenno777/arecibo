@@ -10,19 +10,16 @@
 //!
 #![allow(non_snake_case)]
 use crate::{
-  errors::NovaError,
-  provider::{
+  errors::NovaError, frontend::gpu::GpuName, provider::{
     kzg_commitment::{KZGCommitmentEngine, KZGProverKey, KZGVerifierKey, UniversalKZGParam},
     pedersen::Commitment,
     traits::DlogGroup,
     util::iterators::IndexedParallelIteratorExt as _,
-  },
-  spartan::{math::Math, polys::univariate::UniPoly},
-  traits::{
+  }, spartan::{math::Math, polys::univariate::UniPoly}, traits::{
     commitment::{CommitmentEngineTrait, Len},
     evaluation::EvaluationEngineTrait,
     Engine as NovaEngine, Group, TranscriptEngineTrait, TranscriptReprTrait,
-  },
+  }
 };
 use core::marker::PhantomData;
 use ff::{Field, PrimeFieldBits};
@@ -71,7 +68,7 @@ where
   E::G1Affine: Serialize + DeserializeOwned,
   E::G1Affine: TranscriptReprTrait<E::G1>, // TODO: this bound on DlogGroup is really unusable!
   E::G2Affine: Serialize + DeserializeOwned,
-  E::Fr: PrimeFieldBits + TranscriptReprTrait<E::G1>,
+  E::Fr: PrimeFieldBits + GpuName + TranscriptReprTrait<E::G1>,
   <E::G1 as Group>::Base: TranscriptReprTrait<E::G1>,
 {
   fn compute_challenge(
@@ -181,7 +178,7 @@ where
   E::G2Affine: Serialize + DeserializeOwned,
   E::G1: DlogGroup<ScalarExt = E::Fr, AffineExt = E::G1Affine>,
   <E::G1 as Group>::Base: TranscriptReprTrait<E::G1>, // Note: due to the move of the bound TranscriptReprTrait<G> on G::Base from Group to Engine
-  E::Fr: PrimeFieldBits, // TODO due to use of gen_srs_for_testing, make optional
+  E::Fr: PrimeFieldBits + GpuName, // TODO due to use of gen_srs_for_testing, make optional
   E::Fr: TranscriptReprTrait<E::G1>,
   E::G1Affine: TranscriptReprTrait<E::G1>,
 {

@@ -15,10 +15,10 @@ mod tests {
       gadgets::{EvalGadget, FoldGadget, KZGChallengesGadget, KZGProof},
     }, provider::{
       hyperkzg::EvaluationEngine,
-      kzg_commitment::UVKZGCommitment,
+      kzg_commitment::{KZGCommitmentEngine, UVKZGCommitment},
       non_hiding_zeromorph::{UVKZGPoly, UVKZGPCS},
       Bn256EngineKZG, GrumpkinEngine,
-    }, r1cs::RelaxedR1CSInstance, traits::{evaluation::EvaluationEngineTrait, snark::RelaxedR1CSSNARKTrait, Dual, Engine}, Commitment
+    }, r1cs::{commitment_key, RelaxedR1CSInstance}, traits::{commitment::CommitmentEngineTrait, evaluation::EvaluationEngineTrait, snark::{default_ck_hint, RelaxedR1CSSNARKTrait}, Dual, Engine}, Commitment
   };
   use ff::Field;
   use group::Curve;
@@ -171,31 +171,6 @@ use rand::thread_rng;
     Ok(())
   }
 
-  #[test]
-  fn test_eval_proof_with_challenge() {
-    let circuit = TestChallengeCircuit::default();
-    let mut shape_cs = ShapeCS::new();
-    let _ = circuit.synthesize(&mut shape_cs);
-    let (r1cs_shape, ck) = shape_cs.r1cs_shape(&*S1::ck_floor());
-    let (kzg_pk, _) = EvaluationEngine::<Bn256, Bn256EngineKZG>::setup(Arc::new(ck.clone()));
-    let (relaxed_instance, relaxed_witness) =
-      r1cs_shape.sample_random_instance_witness(&ck).unwrap();
-
-    let (challenge_w, challenge_e) =
-      KZGChallengesGadget::get_challenges_native(relaxed_instance.clone());
-
-    let eval_w = EvalGadget::evaluate_native(relaxed_witness.clone().W, challenge_w);
-    let eval_e = EvalGadget::evaluate_native(relaxed_witness.clone().E, challenge_e);
-
-    let proof_w = KZGProof::prove(&kzg_pk, challenge_w, &relaxed_witness.W).unwrap();
-    // let poly_w = UVKZGPoly::new(relaxed_witness.W.clone());
-    // let (proof_w, p_eval_w) = UVKZGPCS::open(&kzg_pk, &poly_w, &challenge_w).unwrap();
-
-    let proof_e = KZGProof::prove(&kzg_pk, challenge_e, &relaxed_witness.E).unwrap();
-
-    assert_eq!(eval_w, proof_w.eval);
-    assert_eq!(eval_e, proof_e.eval);
-  }
 
   #[test]
   fn test_eval_gadget() {
@@ -219,14 +194,11 @@ use rand::thread_rng;
       .collect::<Vec<_>>();
     let point = Fr::random(&mut thread_rng());
     let alloc_point = AllocatedNum::alloc(cs.namespace(|| "alloc_point"), || Ok(point)).unwrap();
-    // let poly = UVKZGPoly::new(random_vec.clone());
-    // let ev = poly.evaluate(&point);
     let eval_native = EvalGadget::evaluate_native(random_vec, point);
     let eval_gadget =
       EvalGadget::evaluate_gadget::<_, Bn256EngineKZG>(&mut cs, random_allocated_vec, &alloc_point)
         .unwrap();
     assert!(cs.is_satisfied());
-    // assert_eq!(ev, eval_native);
     assert_eq!(eval_native, eval_gadget.get_value().unwrap());
   }
 
@@ -308,7 +280,7 @@ use rand::thread_rng;
     let rho = circuit.randomness;
     let nifs_proof = circuit.nifs_proof.clone();
 
-    let (U_cmW, U_cmE) = FoldGadget::fold_group_elements_native::<Bn256EngineKZG>(
+    let (U_i1_cmW, U_i1_cmE) = FoldGadget::fold_group_elements_native::<Bn256EngineKZG>(
       (rs.r_U_primary.comm_W, rs.r_U_primary.comm_E),
       rs.l_u_primary.comm_W,
       nifs_proof.nifs_primary.comm_T,
@@ -316,8 +288,8 @@ use rand::thread_rng;
     )
     .unwrap();
 
-    assert_eq!(circuit.U_i1.comm_W, U_cmW);
-    assert_eq!(circuit.U_i1.comm_E, U_cmE);
+    assert_eq!(circuit.U_i1.comm_W, U_i1_cmW);
+    assert_eq!(circuit.U_i1.comm_E, U_i1_cmE);
 
     let (kzg_challenges_w, kzg_challenges_e) = circuit.kzg_challenges.clone();
 
@@ -325,12 +297,33 @@ use rand::thread_rng;
       KZGProof::prove(&kzg_pk, kzg_challenges_w, &circuit.W_i1.W[..]).unwrap(),
       KZGProof::prove(&kzg_pk, kzg_challenges_e, &circuit.W_i1.E[..]).unwrap(),
     );
-    // let kzg_U_cmW = UVKZGCommitment::<Bn256>::new(U_cmW.comm.to_affine());
-    // let kzg_U_cmE = UVKZGCommitment::<Bn256>::new(U_cmE.comm.to_affine());
 
-    // // 7.3 Verify KZG proofs
-    // kzg_proof_w.verify(&kzg_vk, &kzg_U_cmW, kzg_challenges_w).unwrap();
-    // kzg_proof_e.verify(&kzg_vk, &kzg_U_cmE, kzg_challenges_e).unwrap();
+
+    let kzg_U_i1_cmW = UVKZGCommitment::<Bn256>::new(U_i1_cmW.comm.to_affine());
+    let kzg_U_i1_cmE = UVKZGCommitment::<Bn256>::new(U_i1_cmE.comm.to_affine());
+
+    // 7.3 Verify KZG proofs
+    kzg_proof_w.verify(&kzg_vk, &kzg_U_i1_cmW, kzg_challenges_w).unwrap();
+    kzg_proof_e.verify(&kzg_vk, &kzg_U_i1_cmE, kzg_challenges_e).unwrap();
+  }
+
+  #[test]
+  fn test_kzg_pairing() {
+    let W = vec![Fr::random(&mut thread_rng()); 10];
+    let num_vars = 30;
+    let S = crate::r1cs::tests::tiny_r1cs::<Bn256EngineKZG>(num_vars);
+    let r = Fr::random(&mut thread_rng());
+    let challenge = Fr::random(&mut thread_rng());
+
+    // generate generators and ro constants
+    let ck = commitment_key(&S, &*default_ck_hint());
+    let (kzg_pk, kzg_vk) = EvaluationEngine::<Bn256, Bn256EngineKZG>::setup(Arc::new(ck.clone()));
+    let comm_W = <KZGCommitmentEngine<Bn256> as CommitmentEngineTrait<Bn256EngineKZG>>::commit(&ck, &W, &r);
+    let proof = KZGProof::prove(&kzg_pk, challenge, &W[..]).unwrap();
+    proof.verify(
+      &kzg_vk, 
+      &UVKZGCommitment::<Bn256>::new(comm_W.comm.to_affine()), 
+      challenge).unwrap();
   }
 
   #[derive(Clone, Debug)]
@@ -423,7 +416,6 @@ use rand::thread_rng;
     if !verified {
       return Err(SynthesisError::MalformedProofs("".to_string()));
     }
-    Err(SynthesisError::Unsatisfiable)
-    // Ok(())
+    Ok(())
   }
 }

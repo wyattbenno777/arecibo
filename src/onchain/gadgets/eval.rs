@@ -14,7 +14,6 @@ pub struct EvalGadget {}
 
 impl EvalGadget {
   pub fn evaluate_native<F: PrimeField + GpuName>(v: Vec<F>, point: F) -> F {
-    // v.resize(v.len().next_power_of_two(), F::ZERO);
     let mut domain = EvaluationDomain::from_coeffs(v).expect("Failed to create evaluation domain");
 
     let worker = Worker::new(); 
