@@ -53,8 +53,7 @@ fn test_heapify() {
   // construct circuits and maintain memory
   let (circuits, ops_circuits) = heapify_circuits(&mut final_memory);
 
-  // Produce an IVC proof for the Heapify computation
-  // ////////////////////////////////////////////////
+  // --- Produce an IVC proof for the Heapify computation ---
   //
   // z_0 <- [ first_addr ]
   let z_0 = vec![F::from(((init_memory.len() - 4) / 2) as u64)];
@@ -71,7 +70,8 @@ fn test_heapify() {
   let (gamma, alpha) = gamma_alpha(&scan_pp, &init_memory, &final_memory, ic.0, batch_mem_size)
     .expect("transcript should squeeze gamma & alpha");
 
-  // Ops grand product
+  // --- Ops grand product ---
+  //
   // The ops initial input is [gamma, alpha, ts=0, h_RS=1, h_WS=1, multiset.size]
   let ops_z_0 = vec![
     gamma,
@@ -103,15 +103,14 @@ fn test_heapify() {
     .verify(&ops_pp, ops_circuits.len(), &ops_z_0, ops_ic)
     .unwrap();
 
-  // Scan grand product
-  // //////////////////
+  // --- Scan grand product ---
+  //
   // Get scan circuits
   let scan_circuits: Vec<ScanCircuit> = init_memory
     .chunks(batch_mem_size)
     .zip_eq(final_memory.chunks(batch_mem_size))
     .map(|(is_chunk, fs_chunk)| ScanCircuit::new(is_chunk.to_vec(), fs_chunk.to_vec()))
     .collect();
-  // //////////
   // scan_z_0 = [gamma, alpha, h_IS=1, h_FS=1, multiset.size]
   let scan_z_0 = vec![
     gamma,

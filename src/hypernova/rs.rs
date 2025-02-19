@@ -323,8 +323,8 @@ where
     z_0: &[E::Scalar],
     ic: IncrementalCommitment<E>,
   ) -> Result<Vec<E::Scalar>, NovaError> {
-    // Basic checks for IVC proof
-    // //////////////////////////
+    // --- Basic checks for IVC proof ---
+    //
     // number of steps cannot be zero
     let is_num_steps_zero = num_steps == 0;
     // check if the provided proof has executed num_steps
@@ -341,8 +341,8 @@ where
       return Err(NovaError::ProofVerifyError);
     }
 
-    // Hash check
-    // //////////
+    // --- Hash check ---
+    //
     // 1. Compute H(pp, i, z_0, z_i, r_U, prev_ic)
     let mut ro = <Dual<E> as Engine>::RO::new(pp.ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(pp.digest());
@@ -357,14 +357,12 @@ where
     ro.absorb(self.prev_ic.0);
     ro.absorb(self.prev_ic.1);
     let hash = ro.squeeze(NUM_HASH_BITS);
-    // //////////////////////////////////
     // 2. Compute H(pp, i, r_U_cyclefold)
     let mut ro = <Dual<E> as Engine>::RO::new(pp.ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(pp.digest());
     ro.absorb(E::Scalar::from(num_steps as u64));
     self.r_U_cyclefold.absorb_in_ro(&mut ro);
     let hash_cyclefold = ro.squeeze(NUM_HASH_BITS);
-    // ////////////////////////////////////////////
     // 3. Check if H(pp, i, z_0, z_i, r_U) = l_u.X[0] && H(pp, i, r_U_cyclefold) = l_u.X[1]
     if scalar_as_base::<Dual<E>>(hash) != self.l_u.aux.X[0]
       || scalar_as_base::<Dual<E>>(hash_cyclefold) != self.l_u.aux.X[1]

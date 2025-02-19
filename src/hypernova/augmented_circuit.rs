@@ -109,19 +109,16 @@ where
     let (pp_digest, i, z_0, z_i, nifs, U, u, W_new, U_cyclefold, pre_committed, prev_IC) =
       self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
 
-    // Base case: i = 0
-    // ////////////////
+    // --- Base case: i = 0 ---
     //
     // 1. Check if this is the base case
     let zero = alloc_zero(cs.namespace(|| "zero"));
     let is_base_case = alloc_num_equals(cs.namespace(|| "is base case"), &i, &zero)?;
-    // ////////////////////////////////////
     // 2. Get the default running instance.
     let (U_default, U_cyclefold_default) =
       self.synthesize_base_case(cs.namespace(|| "base case"))?;
 
-    // Non-base case: i > 0
-    // ////////////////////
+    // --- Non-base case: i > 0 ---
     //
     // 1. Compute Hash check
     // 2. U <- NIFS.V
@@ -142,7 +139,7 @@ where
         (&prev_IC.0, &prev_IC.1),
       )?;
 
-    // Check that u references U in the output of the prior iteration
+    // --- Check that u references U in the output of the prior iteration ---
     //
     // Hash check: u.X[0] = H(pp, i, z_0, z_i, U) && u.X[1] = H(pp, i, U_cyclefold)
     self.enforce_hash_check(
@@ -151,8 +148,7 @@ where
       &is_base_case,
     )?;
 
-    // Select the new running instances.
-    // /////////////////////////////////
+    // --- Select the new running instances. ---
     //
     // 1. Select the new U based on whether this is the base case
     // 2. Select the new U_cyclefold based on whether this is the base case
@@ -167,8 +163,7 @@ where
       &Boolean::from(is_base_case.clone()),
     )?;
 
-    // Synthesize the step circuit (F) and compute the next output.
-    // ///////////////////////////////////////////////////////////
+    // --- Synthesize the step circuit (F) and compute the next output. ---
     //
     // 1. Select the z input based on whether this is the base case
     // 2. Compute the next output z_next ← F(z_input)
@@ -181,14 +176,12 @@ where
     let z_next = self
       .step_circuit
       .synthesize(&mut cs.namespace(|| "F"), &z_input)?;
-    // //////////////////////////////////////////////////
     // Check step_circuit_i (F_i) conforms to structure F
     if z_next.len() != arity {
       return Err(SynthesisError::IncompatibleLengthVector(
         "z_next".to_string(),
       ));
     }
-    // ///////////
     // Compute i++
     let i_new = increment(cs.namespace(|| "i++"), &i)?;
 
@@ -200,8 +193,8 @@ where
       &is_base_case,
     )?;
 
-    // Output hash
-    // ///////////
+    // --- Output hash ---
+    //
     // u.X[0] = H(pp, i, z_0, z_i, U)
     let hash = self.calculate_hash(
       cs.namespace(|| "calculate_hash"),
@@ -213,7 +206,6 @@ where
       (&IC.0, &IC.1),
     )?;
     hash.inputize(cs.namespace(|| "u.x[0] = hash"))?;
-    // //////////////////////////////////////////////////////////////////
     // Calculate the second component of the public IO as the hash of the
     // calculated CycleFold running instance
     //

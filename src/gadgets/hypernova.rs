@@ -144,8 +144,7 @@ where
       ro.absorb(b);
     }
 
-    // Verify sumcheck proof
-    // /////////////////////
+    // --- Verify sum-check proof ---
     //
     // claim <- U.vs[0] + gamma * U.vs[1] + gamma^2 * U.vs[2]
     let claim = Self::claim(
@@ -155,8 +154,7 @@ where
       &U1.vs[1],
       &U1.vs[2],
     )?;
-    // ///////////////
-    // verify sumcheck
+    // verify sum-check
     let (sub_claim, rx_p) = self.sc.verify(
       cs.namespace(|| "verify sumcheck"),
       ro_consts,
