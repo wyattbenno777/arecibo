@@ -147,6 +147,7 @@ contract Groth16Verifier {
 
                 let success := staticcall(sub(gas(), 2000), 8, _pPairing, 768, _pPairing, 0x20)
 
+
                 isOk := and(success, mload(_pPairing))
             }
 

@@ -156,7 +156,7 @@ impl<'a> Evm<'a> {
                 (gas_used, output)
             }
             ExecutionResult::Revert { gas_used, output } => {
-                let error_message = str::from_utf8(&output[..]).expect("Invalid UTF-8");
+                let error_message = str::from_utf8(&output[68..]).expect("Invalid UTF-8");
                 println!("Revert: {:?}", error_message);
                 (gas_used, Output::Call(output))
             }

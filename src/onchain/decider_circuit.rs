@@ -234,18 +234,6 @@ where
       tmp.inputize(cs.namespace(|| format!("convert limb {i} of y to num")))?;
     }
 
-    let input_U_i1_cmW_id = cs.alloc_input(
-      || "input variable",
-      || U_i1_cmW_id.get_value().map(|x| E::Scalar::from(x as u64)).ok_or(SynthesisError::AssignmentMissing),
-    )?;
-
-    cs.enforce(
-      || "enforce input is correct",
-      |lc| lc + input_U_i1_cmW_id,
-      |lc| lc + CS::one(),
-      |lc| lc + U_i1_cmW_id.get_variable(),
-    );
-
     let (U_i1_cmE_x, U_i1_cmE_y, U_i1_cmE_id) = U_i1.comm_E.to_coordinates();
     for (i, limb )in U_i1_cmE_x.as_limbs().iter().enumerate() {
       let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of x to num")))?;
@@ -256,19 +244,6 @@ where
       let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of y to num")))?;
       tmp.inputize(cs.namespace(|| format!("convert limb {i} of y to num")))?;
     }
-
-    let input_U_i1_cmE_id = cs.alloc_input(
-      || "input variable",
-      || U_i1_cmE_id.get_value().map(|x| E::Scalar::from(x as u64)).ok_or(SynthesisError::AssignmentMissing),
-    )?;
-
-    cs.enforce(
-      || "enforce input is correct",
-      |lc| lc + input_U_i1_cmE_id,
-      |lc| lc + CS::one(),
-      |lc| lc + U_i1_cmE_id.get_variable(),
-    );
-
 
     // Step 1: Enforce U_{n+1} and W_{n+1} satisfy r1cs
     // Nova has no need for this, since we are checking if an r1cs relation
@@ -466,17 +441,13 @@ where
       tmp.inputize(cs.namespace(|| format!("convert limb {i} of y to num")))?;
     }
 
-    let input_cmT_id = cs.alloc_input(
-      || "input variable",
-      || cmT_id.get_value().map(|x| E::Scalar::from(x as u64)).ok_or(SynthesisError::AssignmentMissing),
-    )?;
-
     cs.enforce(
-      || "enforce input is correct",
-      |lc| lc + input_cmT_id,
-      |lc| lc + CS::one(),
+      || "dummy constraint",
       |lc| lc + cmT_id.get_variable(),
+      |lc| lc,
+      |lc| lc,
     );
+
 
     Ok(())
   }

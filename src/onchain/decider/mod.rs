@@ -182,15 +182,12 @@ impl Decider {
       &z_i[..],
       &U_cmW_x[..],
       &U_cmW_y[..],
-      &[U_cmW_id],
       &U_cmE_x[..],
       &U_cmE_y[..],
-      &[U_cmE_id],
       &[self.kzg_challenges.0, self.kzg_challenges.1],
       &[self.kzg_proofs.0.eval, self.kzg_proofs.1.eval],
       &cmT_x[..],
       &cmT_y[..],
-      &[cmT_id],
     ]
     .concat();
 
