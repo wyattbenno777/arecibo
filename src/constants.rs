@@ -21,7 +21,7 @@ pub(crate) const NUM_MATRICES: usize = 3;
 ///
 /// The total constraint count depends on the number of sumcheck rounds:
 ///
-/// - **0 rounds:** The circuit would have 4628 constraints.
+/// - **0 rounds:** The circuit would have 46967 constraints.
 /// - **Edge Case (0 → 1 round):** Transitioning from 0 rounds to 1 round increases the constraint count by 2295.
 /// - **Subsequent rounds:** Each additional round after the first increases the constraints by 1518.
 ///
@@ -30,7 +30,7 @@ pub(crate) const NUM_MATRICES: usize = 3;
 /// the first round increase and a regular round increase: (2295 - 1518) = 777.
 ///
 /// Therefore, the base constraint count is:
-///     BASE_CONSTRAINTS = 4628 (for 0 rounds) + 777 (extra for the edge case to 1 round)
+///     BASE_CONSTRAINTS = 46967 (for 0 rounds) + 777 (extra for the edge case to 1 round)
 pub(crate) const EDGE_CASE_CONSTRAINTS: usize = 777;
 pub(crate) const BASE_CONSTRAINTS: usize = 46967 + EDGE_CASE_CONSTRAINTS;
 
