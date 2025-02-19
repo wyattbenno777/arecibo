@@ -142,17 +142,11 @@ where
     // Check that u references U in the output of the prior iteration
     //
     // Hash check: u.X[0] = H(pp, i, z_0, z_i, U) && u.X[1] = H(pp, i, U_cyclefold)
-    let should_be_false = AllocatedBit::nor(
-      cs.namespace(|| "check_non_base_pass nor base_case"),
+    self.enforce_hash_check(
+      cs.namespace(|| "enforce_hash_check"),
       &check_non_base_pass,
       &is_base_case,
     )?;
-    cs.enforce(
-      || "check_non_base_pass nor base_case = false",
-      |lc| lc + should_be_false.get_variable(),
-      |lc| lc + CS::one(),
-      |lc| lc,
-    );
 
     // Select the new running instances.
     // /////////////////////////////////
@@ -191,6 +185,7 @@ where
         "z_next".to_string(),
       ));
     }
+    // ///////////
     // Compute i++
     let i_new = increment(cs.namespace(|| "i++"), &i)?;
 
@@ -469,6 +464,26 @@ where
       &hash,
     )?;
     Ok(hash_check)
+  }
+
+  pub fn enforce_hash_check<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+    check_non_base_pass: &AllocatedBit,
+    is_base_case: &AllocatedBit,
+  ) -> Result<(), SynthesisError> {
+    let should_be_false = AllocatedBit::nor(
+      cs.namespace(|| "check_non_base_pass nor base_case"),
+      check_non_base_pass,
+      is_base_case,
+    )?;
+    cs.enforce(
+      || "check_non_base_pass nor base_case = false",
+      |lc| lc + should_be_false.get_variable(),
+      |lc| lc + CS::one(),
+      |lc| lc,
+    );
+    Ok(())
   }
 
   pub fn calculate_hash<CS: ConstraintSystem<E::Scalar>>(
