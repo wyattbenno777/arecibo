@@ -7,7 +7,7 @@ use crate::{
     ConstraintSystem, SynthesisError,
   },
   gadgets::{
-    alloc_num_equals, alloc_zero, conditionally_select_vec,
+    alloc_num_equals, alloc_tuple, alloc_zero, conditionally_select, conditionally_select_vec,
     emulated::AllocatedEmulPoint,
     hypernova::{
       alloc_sized_vec, increment, AllocatedLR1CSInstance, AllocatedNIFS, AllocatedSplitR1CSInstance,
@@ -59,6 +59,7 @@ where
   U_cyclefold: Option<RelaxedR1CSInstance<Dual<E>>>,
   pre_committed0: Option<Commitment<E>>,
   pre_committed1: Option<Commitment<E>>,
+  prev_IC: Option<(E::Scalar, E::Scalar)>,
 }
 
 impl<E> AugmentedCircuitInputs<E>
@@ -77,6 +78,7 @@ where
     U_cyclefold: Option<RelaxedR1CSInstance<Dual<E>>>,
     pre_committed0: Option<Commitment<E>>,
     pre_committed1: Option<Commitment<E>>,
+    prev_IC: Option<(E::Scalar, E::Scalar)>,
   ) -> Self {
     Self {
       pp_digest,
@@ -90,6 +92,7 @@ where
       U_cyclefold,
       pre_committed0,
       pre_committed1,
+      prev_IC,
     }
   }
 }
@@ -105,8 +108,20 @@ where
   ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
     // Allocate the witness
     let arity = self.step_circuit.arity();
-    let (pp_digest, i, z_0, z_i, nifs, U, u, W_new, U_cyclefold, pre_committed0, pre_committed1) =
-      self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
+    let (
+      pp_digest,
+      i,
+      z_0,
+      z_i,
+      nifs,
+      U,
+      u,
+      W_new,
+      U_cyclefold,
+      pre_committed0,
+      pre_committed1,
+      prev_IC,
+    ) = self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
 
     // Base case: i = 0
     // ////////////////
@@ -139,6 +154,7 @@ where
         &U_cyclefold,
         pre_committed0,
         pre_committed1,
+        (&prev_IC.0, &prev_IC.1),
       )?;
 
     // Check that u references U in the output of the prior iteration
@@ -191,6 +207,14 @@ where
     // Compute i++
     let i_new = increment(cs.namespace(|| "i++"), &i)?;
 
+    //  If i = 0 then C_i ← ⊥, else C_i ← hash(C_i−1, C_ωi−1)
+    let IC = self.increment_ic(
+      cs.namespace(|| "increment IC"),
+      prev_IC,
+      (&u.pre_committed0, &u.pre_committed1),
+      &is_base_case,
+    )?;
+
     // Output hash
     // ///////////
     // u.X[0] = H(pp, i, z_0, z_i, U)
@@ -201,6 +225,7 @@ where
       &z_0,
       &z_next,
       &U_new,
+      (&IC.0, &IC.1),
     )?;
     hash.inputize(cs.namespace(|| "u.x[0] = hash"))?;
     // //////////////////////////////////////////////////////////////////
@@ -233,6 +258,7 @@ where
     U_cyclefold: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
     pre_committed0: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
     pre_committed1: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    prev_IC: (&AllocatedNum<E::Scalar>, &AllocatedNum<E::Scalar>),
   ) -> Result<
     (
       AllocatedLR1CSInstance<E>,
@@ -252,6 +278,7 @@ where
       U,
       u,
       U_cyclefold,
+      prev_IC,
     )?;
 
     // # NIFS.V
@@ -315,6 +342,7 @@ where
       AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>, // U_cyclefold
       AllocatedEmulPoint<<Dual<E> as Engine>::GE>,           // pre_committed0
       AllocatedEmulPoint<<Dual<E> as Engine>::GE>,           // pre_committed1
+      (AllocatedNum<E::Scalar>, AllocatedNum<E::Scalar>),    // prev_IC
     ),
     SynthesisError,
   > {
@@ -381,7 +409,10 @@ where
       self.params.limb_width,
       self.params.n_limbs,
     )?;
-
+    let prev_IC = alloc_tuple(
+      cs.namespace(|| "prev_IC"),
+      self.inputs.as_ref().and_then(|inputs| inputs.prev_IC),
+    )?;
     Ok((
       pp_digest,
       i,
@@ -394,6 +425,7 @@ where
       U_cyclefold,
       pre_committed0,
       pre_committed1,
+      prev_IC,
     ))
   }
 
@@ -407,10 +439,19 @@ where
     U: &AllocatedLR1CSInstance<E>,
     u: &AllocatedSplitR1CSInstance<E>,
     U_cyclefold: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+    prev_IC: (&AllocatedNum<E::Scalar>, &AllocatedNum<E::Scalar>),
   ) -> Result<AllocatedBit, SynthesisError> {
     // Hash check: u.X[0] = H(pp, i, z_0, z_i, U)
-    let hash_check =
-      self.hash_check(cs.namespace(|| "hash_check"), pp_digest, i, z_0, z_i, U, u)?;
+    let hash_check = self.hash_check(
+      cs.namespace(|| "hash_check"),
+      pp_digest,
+      i,
+      z_0,
+      z_i,
+      U,
+      u,
+      prev_IC,
+    )?;
 
     // Hash check: u.X[1] = H(pp, i, U_cyclefold)
     let hash_check_cyclefold = self.hash_check_cyclefold(
@@ -439,8 +480,17 @@ where
     z_i: &[AllocatedNum<E::Scalar>],
     U: &AllocatedLR1CSInstance<E>,
     u: &AllocatedSplitR1CSInstance<E>,
+    prev_IC: (&AllocatedNum<E::Scalar>, &AllocatedNum<E::Scalar>),
   ) -> Result<AllocatedBit, SynthesisError> {
-    let hash = self.calculate_hash(cs.namespace(|| "calculate_hash"), pp_digest, i, z_0, z_i, U)?;
+    let hash = self.calculate_hash(
+      cs.namespace(|| "calculate_hash"),
+      pp_digest,
+      i,
+      z_0,
+      z_i,
+      U,
+      prev_IC,
+    )?;
     let hash_check = alloc_num_equals(
       cs.namespace(|| "u.X[0] = H(params, i, z_0, z_i, U)"),
       &u.x0,
@@ -494,6 +544,7 @@ where
     z_0: &[AllocatedNum<E::Scalar>],
     z_i: &[AllocatedNum<E::Scalar>],
     U: &AllocatedLR1CSInstance<E>,
+    IC: (&AllocatedNum<E::Scalar>, &AllocatedNum<E::Scalar>),
   ) -> Result<AllocatedNum<E::Scalar>, SynthesisError> {
     let mut ro = <Dual<E> as Engine>::ROCircuit::new(self.ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(pp_digest);
@@ -505,6 +556,8 @@ where
       ro.absorb(e)
     }
     U.absorb_in_ro(cs.namespace(|| "absorb U"), &mut ro)?;
+    ro.absorb(IC.0);
+    ro.absorb(IC.1);
     let hash_bits = ro.squeeze(cs.namespace(|| "primary hash bits"), NUM_HASH_BITS)?;
     let hash = le_bits_to_num(cs.namespace(|| "primary hash"), &hash_bits)?;
     Ok(hash)
@@ -524,6 +577,54 @@ where
     let hash_bits = ro.squeeze(cs.namespace(|| "primary hash bits"), NUM_HASH_BITS)?;
     let hash = le_bits_to_num(cs.namespace(|| "primary hash"), &hash_bits)?;
     Ok(hash)
+  }
+
+  pub fn increment_ic<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+    prev_IC: (AllocatedNum<E::Scalar>, AllocatedNum<E::Scalar>),
+    comm_advice: (
+      &AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+      &AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    ),
+    is_base_case: &AllocatedBit,
+  ) -> Result<(AllocatedNum<E::Scalar>, AllocatedNum<E::Scalar>), SynthesisError> {
+    Ok((
+      self.increment_ic_sole(
+        cs.namespace(|| "increment IC0"),
+        prev_IC.0,
+        comm_advice.0,
+        is_base_case,
+      )?,
+      self.increment_ic_sole(
+        cs.namespace(|| "increment IC1"),
+        prev_IC.1,
+        comm_advice.1,
+        is_base_case,
+      )?,
+    ))
+  }
+
+  pub fn increment_ic_sole<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+    prev_IC: AllocatedNum<E::Scalar>,
+    comm_advice: &AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    is_base_case: &AllocatedBit,
+  ) -> Result<AllocatedNum<E::Scalar>, SynthesisError> {
+    let IC = {
+      let mut ro = <Dual<E> as Engine>::ROCircuit::new(self.ro_consts.clone(), DEFAULT_ABSORBS);
+      ro.absorb(&prev_IC);
+      comm_advice.absorb_in_ro(cs.namespace(|| "absorb pre_committed0"), &mut ro)?;
+      let IC_bits = ro.squeeze(cs.namespace(|| "IC_bits_IS"), NUM_HASH_BITS)?;
+      le_bits_to_num(cs.namespace(|| "IC"), &IC_bits)?
+    };
+    conditionally_select(
+      cs.namespace(|| "select IC"),
+      &prev_IC,
+      &IC,
+      &Boolean::from(is_base_case.clone()),
+    )
   }
 
   pub const fn new(

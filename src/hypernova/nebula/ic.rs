@@ -46,6 +46,8 @@ fn increment_sole_ic<E>(
 where
   E: CurveCycleEquipped,
 {
+  // TODO: add blind.
+  //       We have not added blinding yet because for sharding we need the incremental comms to be deterministic
   let comm_advice = E::CE::commit(ck, advice, &E::Scalar::ZERO);
   increment_sole_comm::<E>(ro_consts, prev_ic, comm_advice)
 }

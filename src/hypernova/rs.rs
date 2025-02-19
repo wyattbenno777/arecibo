@@ -210,6 +210,7 @@ where
       None,
       None,
       None,
+      None,
     );
     let circuit = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
@@ -285,6 +286,7 @@ where
       Some(self.r_U_cyclefold.clone()),
       Some(r_U.pre_committed.0),
       Some(r_U.pre_committed.1),
+      Some(self.prev_ic),
     );
     let circuit = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
@@ -343,7 +345,7 @@ where
 
     // Hash check
     // //////////
-    // 1. Compute H(pp, i, z_0, z_i, r_U)
+    // 1. Compute H(pp, i, z_0, z_i, r_U, prev_ic)
     let mut ro = <Dual<E> as Engine>::RO::new(pp.ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(pp.digest());
     ro.absorb(E::Scalar::from(num_steps as u64));
@@ -354,6 +356,8 @@ where
       ro.absorb(*e);
     }
     self.r_U.absorb_in_ro(&mut ro);
+    ro.absorb(self.prev_ic.0);
+    ro.absorb(self.prev_ic.1);
     let hash = ro.squeeze(NUM_HASH_BITS);
     // //////////////////////////////////
     // 2. Compute H(pp, i, r_U_cyclefold)

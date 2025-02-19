@@ -469,3 +469,17 @@ macro_rules! and_then_field {
     $inst.as_ref().and_then(|i| i.$field.as_ref())
   };
 }
+
+pub fn alloc_tuple<CS, F>(
+  mut cs: CS,
+  tuple: Option<(F, F)>,
+) -> Result<(AllocatedNum<F>, AllocatedNum<F>), SynthesisError>
+where
+  F: PrimeField,
+  CS: ConstraintSystem<F>,
+{
+  let (a, b) = tuple.unwrap_or((F::ZERO, F::ZERO));
+  let a = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(a))?;
+  let b = AllocatedNum::alloc(cs.namespace(|| "b"), || Ok(b))?;
+  Ok((a, b))
+}
