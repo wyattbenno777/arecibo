@@ -325,13 +325,13 @@ where
   ) -> Result<Vec<E::Scalar>, NovaError> {
     // --- Basic checks for IVC proof ---
     //
-    // number of steps cannot be zero
+    // 1. number of steps cannot be zero
     let is_num_steps_zero = num_steps == 0;
-    // check if the provided proof has executed num_steps
+    // 2. check if the provided proof has executed num_steps
     let is_num_steps_not_match = self.i != num_steps;
-    // check if the initial inputs match
+    // 3. check if the initial inputs match
     let is_inputs_not_match = self.z_0 != z_0;
-    // check if the (relaxed) R1CS instances have two public outputs
+    // 4. check if the (relaxed) R1CS instances have two public outputs
     let is_instance_has_two_outputs = self.r_U.X.len() != 2;
     if is_num_steps_zero
       || is_num_steps_not_match

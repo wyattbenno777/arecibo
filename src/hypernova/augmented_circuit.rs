@@ -120,8 +120,7 @@ where
 
     // --- Non-base case: i > 0 ---
     //
-    // 1. Compute Hash check
-    // 2. U <- NIFS.V
+    // Compute Hash check and U <- NIFS.V
     let (U_non_base_case, U_cyclefold_non_base_case, check_non_base_pass) = self
       .synthesize_non_base_case(
         cs.namespace(|| "non base case"),
@@ -151,12 +150,12 @@ where
     // --- Select the new running instances. ---
     //
     // 1. Select the new U based on whether this is the base case
-    // 2. Select the new U_cyclefold based on whether this is the base case
     let U_new = U_default.conditionally_select(
       cs.namespace(|| "compute U_new"),
       &U_non_base_case,
       &Boolean::from(is_base_case.clone()),
     )?;
+    // 2. Select the new U_cyclefold based on whether this is the base case
     let U_new_cyclefold = U_cyclefold_default.conditionally_select(
       cs.namespace(|| "compute U_new_cyclefold"),
       &U_cyclefold_non_base_case,
@@ -165,27 +164,27 @@ where
 
     // --- Synthesize the step circuit (F) and compute the next output. ---
     //
-    // 1. Select the z input based on whether this is the base case
-    // 2. Compute the next output z_next ← F(z_input)
+    // 1.  Select the z input based on whether this is the base case
     let z_input = conditionally_select_vec(
       cs.namespace(|| "select input to F"),
       &z_0,
       &z_i,
       &Boolean::from(is_base_case.clone()),
     )?;
+    // 2. Compute the next output z_next ← F(z_input)
     let z_next = self
       .step_circuit
       .synthesize(&mut cs.namespace(|| "F"), &z_input)?;
-    // Check step_circuit_i (F_i) conforms to structure F
+    // 3. Check step_circuit_i (F_i) conforms to structure F
     if z_next.len() != arity {
       return Err(SynthesisError::IncompatibleLengthVector(
         "z_next".to_string(),
       ));
     }
-    // Compute i++
+    // 4. Compute i++
     let i_new = increment(cs.namespace(|| "i++"), &i)?;
 
-    //  If i = 0 then C_i ← ⊥, else C_i ← hash(C_i−1, C_ωi−1)
+    // If i = 0 then C_i ← ⊥, else C_i ← hash(C_i−1, C_ωi−1)
     let IC = self.increment_ic(
       cs.namespace(|| "increment IC"),
       prev_IC,
@@ -195,7 +194,7 @@ where
 
     // --- Output hash ---
     //
-    // u.X[0] = H(pp, i, z_0, z_i, U)
+    // 1. u.X[0] = H(pp, i, z_0, z_i, U)
     let hash = self.calculate_hash(
       cs.namespace(|| "calculate_hash"),
       &pp_digest,
@@ -206,10 +205,10 @@ where
       (&IC.0, &IC.1),
     )?;
     hash.inputize(cs.namespace(|| "u.x[0] = hash"))?;
-    // Calculate the second component of the public IO as the hash of the
-    // calculated CycleFold running instance
+    // 2. Calculate the second component of the public IO as the hash of the
+    //    calculated CycleFold running instance
     //
-    // u.X[1] = H(pp, i, U_cyclefold)
+    //    u.X[1] = H(pp, i, U_cyclefold)
     let hash_cyclefold = self.calculate_hash_cyclefold(
       cs.namespace(|| "calculate_hash_cyclefold"),
       &pp_digest,
