@@ -1,13 +1,12 @@
 //! This module implements various low-level gadgets
 use super::nonnative::bignat::{nat_to_limbs, BigNat};
-use crate::traits::commitment::CommitmentTrait;
 use crate::{
   frontend::{
     gadgets::Assignment, num::AllocatedNum, AllocatedBit, Boolean, ConstraintSystem,
     LinearCombination, SynthesisError,
   },
   gadgets::emulated::AllocatedEmulPoint,
-  traits::{CurveCycleEquipped, Dual, Engine},
+  traits::{commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine},
   Commitment,
 };
 use ff::{Field, PrimeField, PrimeFieldBits};
