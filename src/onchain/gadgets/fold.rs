@@ -15,14 +15,12 @@ pub struct FoldGadget {}
 
 impl FoldGadget {
   pub fn fold_group_elements_native<E: CurveCycleEquipped>(
-    U_commitments: (Commitment<E>, Commitment<E>),
+    U_cmW: Commitment<E>,
+    U_cmE: Commitment<E>,
     u_cmW: Commitment<E>,
     cmT: Commitment<E>,
     r: E::Scalar,
   ) -> Result<(Commitment<E>, Commitment<E>), SynthesisError> {
-    let U_cmW = U_commitments.0;
-    let U_cmE = U_commitments.1;
-
     let cmW = U_cmW + u_cmW * r;
     let cmE = U_cmE + cmT * r;
     Ok((cmW, cmE))

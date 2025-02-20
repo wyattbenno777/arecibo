@@ -61,6 +61,12 @@ pub struct Decider {
   kzg_challenges: (Fr, Fr),
   kzg_proofs: (KZGProof<Bn256>, KZGProof<Bn256>),
   nifs_proof: NIFS<Bn256EngineKZG>,
+  U_cmW: Commitment<Bn256EngineKZG>,
+  U_cmE: Commitment<Bn256EngineKZG>,
+  u_cmW: Commitment<Bn256EngineKZG>,
+  num_steps: Fr,
+  z_0: Vec<Fr>,
+  z_i: Vec<Fr>,
 }
 
 impl Decider {
@@ -128,6 +134,12 @@ impl Decider {
       kzg_challenges,
       kzg_proofs,
       nifs_proof,
+      U_cmW: rs.r_U_primary.comm_W,
+      U_cmE: rs.r_U_primary.comm_E,
+      u_cmW: rs.l_u_primary.comm_W,
+      z_0: rs.z0.clone(),
+      z_i: rs.zi.clone(),
+      num_steps: Fr::from(rs.i as u64),
     })
   }
 
@@ -135,11 +147,6 @@ impl Decider {
   pub fn verify(
     &self,
     vk: DeciderVerifierKey,
-    i: Fr,
-    z_0: Vec<Fr>,
-    z_i: Vec<Fr>,
-    U_commitments: (Commitment<Bn256EngineKZG>, Commitment<Bn256EngineKZG>),
-    u_commitments: Commitment<Bn256EngineKZG>,
   ) -> Result<(), NovaError> {
     let DeciderVerifierKey {
       groth16_vk,
@@ -151,14 +158,15 @@ impl Decider {
 
     // 6.2. Fold the commitments
     let (U_cmW, U_cmE) = FoldGadget::fold_group_elements_native::<Bn256EngineKZG>(
-      U_commitments,
-      u_commitments,
+      self.U_cmW,
+      self.U_cmE,
+      self.u_cmW,
       self.nifs_proof.nifs_primary.comm_T,
       self.rho,
     )?;
 
     // TODO: Refactor
-    let (U_cmW_x, U_cmW_y, U_cmW_id) = {
+    let (U_cmW_x, U_cmW_y, _U_cmW_id) = {
       let (x, y, id) = U_cmW.to_coordinates();
       let x_bignat = BigInt::from_bytes_le(Sign::Plus, &x.to_repr());
       let x_limbs = nat_to_limbs(&x_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
@@ -168,7 +176,7 @@ impl Decider {
       (x_limbs, y_limbs, id_fr)
     };
 
-    let (U_cmE_x, U_cmE_y, U_cmE_id) = {
+    let (U_cmE_x, U_cmE_y, _U_cmE_id) = {
       let (x, y, id) = U_cmE.to_coordinates();
       let x_bignat = BigInt::from_bytes_le(Sign::Plus, &x.to_repr());
       let x_limbs = nat_to_limbs(&x_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
@@ -178,7 +186,7 @@ impl Decider {
       (x_limbs, y_limbs, id_fr)
     };
 
-    let (cmT_x, cmT_y, cmT_id) = {
+    let (cmT_x, cmT_y, _cmT_id) = {
       let (x, y, id) = self.nifs_proof.nifs_primary.comm_T.to_coordinates();
       let x_bignat = BigInt::from_bytes_le(Sign::Plus, &x.to_repr());
       let x_limbs = nat_to_limbs(&x_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
@@ -190,9 +198,9 @@ impl Decider {
 
     let public_inputs = [
       &[pp_hash],
-      &[i],
-      &z_0[..],
-      &z_i[..],
+      &[self.num_steps],
+      &self.z_0[..],
+      &self.z_i[..],
       &U_cmW_x[..],
       &U_cmW_y[..],
       &U_cmE_x[..],
@@ -234,22 +242,17 @@ impl Decider {
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_calldata(
   function_signature_check: [u8; 4],
-  i: Fr,
-  z_0: &Vec<Fr>,
-  z_i: &Vec<Fr>,
-  running_instance: &RelaxedR1CSInstance<Bn256EngineKZG>,
-  incoming_instance: &R1CSInstance<Bn256EngineKZG>,
   proof: &Decider,
 ) -> Result<Vec<u8>, NovaError> {
   Ok(
     [
       function_signature_check.to_eth(),
-      i.to_eth(),   // i
-      z_0.to_eth(), // z_0
-      z_i.to_eth(), // z_i
-      running_instance.comm_W.to_eth(),
-      running_instance.comm_E.to_eth(),
-      incoming_instance.comm_W.to_eth(),
+      proof.num_steps.to_eth(),   // i
+      proof.z_0.to_eth(), // z_0
+      proof.z_i.to_eth(), // z_i
+      proof.U_cmW.to_eth(),
+      proof.U_cmE.to_eth(),
+      proof.u_cmW.to_eth(),
       proof.nifs_proof.nifs_primary.comm_T.to_eth(), // cmT
       proof.rho.to_eth(),                            // r
       proof.groth16_proof.to_eth(),                  // pA, pB, pC
