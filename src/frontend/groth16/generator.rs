@@ -495,17 +495,6 @@ where
         &worker,
     );
 
-    // Count and log positions of identity elements in l_affine
-    let mut identity_positions = Vec::new();
-    let mut identity_count = 0;
-    for (i, e) in l_affine.iter().enumerate() {
-        if e.is_identity().into() {
-            identity_positions.push(i);
-            identity_count += 1;
-        }
-    }
-
-    println!("identity_count: {}", identity_count);
     for e in l_affine.iter() {
         if e.is_identity().into() {
             return Err(SynthesisError::UnconstrainedVariable);

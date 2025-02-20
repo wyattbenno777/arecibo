@@ -20,10 +20,15 @@ use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
 use memmap_uses::*;
+use serde::{Deserialize, Serialize};
 
 use super::VerifyingKey;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+  serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",
+  deserialize = "E::G1Affine: Deserialize<'de>, E::G2Affine: Deserialize<'de>"
+))]
 pub struct Parameters<E>
 where
     E: MultiMillerLoop,

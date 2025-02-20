@@ -5,35 +5,48 @@ use super::{
   gadgets::{FoldGadget, KZGProof},
 };
 use crate::{
-  constants::{BN_LIMB_WIDTH, BN_N_LIMBS}, errors::NovaError, frontend::groth16::{
+  constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
+  errors::NovaError,
+  frontend::groth16::{
     self, create_random_proof, generate_random_parameters, verify_proof, Parameters,
     Proof as Groth16Proof,
-  }, gadgets::{nat_to_limbs, scalar_as_base, BigNat}, nebula::{
+  },
+  gadgets::{nat_to_limbs, scalar_as_base, BigNat},
+  nebula::{
     nifs::NIFS,
     rs::{PublicParams, RecursiveSNARK},
-  }, onchain::eth::ToEth, provider::{
-    hyperkzg::EvaluationEngine, kzg_commitment::{KZGProverKey, KZGVerifierKey, UVKZGCommitment}, traits::DlogGroup, Bn256EngineKZG
-  }, r1cs::{R1CSInstance, RelaxedR1CSInstance}, traits::{evaluation::EvaluationEngineTrait, Dual, Engine, ROConstants}, Commitment
+  },
+  onchain::eth::ToEth,
+  provider::{
+    hyperkzg::EvaluationEngine,
+    kzg_commitment::{KZGProverKey, KZGVerifierKey, UVKZGCommitment},
+    traits::DlogGroup,
+    Bn256EngineKZG,
+  },
+  r1cs::{R1CSInstance, RelaxedR1CSInstance},
+  traits::{
+    commitment::CommitmentTrait, evaluation::EvaluationEngineTrait, Dual, Engine, ROConstants,
+  },
+  Commitment,
 };
+use ff::PrimeField;
+use group::Curve;
 use halo2curves::bn256::{Bn256, Fr};
 use num_bigint::{BigInt, Sign};
 use rand::RngCore;
-use group::Curve;
-use ff::PrimeField;
-use crate::traits::commitment::CommitmentTrait;
+use serde::{Deserialize, Serialize};
 
 pub mod test;
 
-
 /// A type that holds the prover key for [`Decider`]
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DeciderProverKey {
   pub groth16_pk: Parameters<Bn256EngineKZG>,
   pub kzg_pk: KZGProverKey<Bn256>,
 }
 
 /// A type that holds the verifier key for [`Decider`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeciderVerifierKey {
   pub groth16_vk: groth16::VerifyingKey<Bn256EngineKZG>,
   pub pp_hash: <Bn256EngineKZG as Engine>::Scalar,
@@ -41,7 +54,7 @@ pub struct DeciderVerifierKey {
 }
 
 /// A SNARK that proves the knowledge of a valid  proof
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Decider {
   groth16_proof: Groth16Proof<Bn256EngineKZG>,
   rho: Fr,
@@ -205,8 +218,14 @@ impl Decider {
     let kzg_U_cmE = UVKZGCommitment::<Bn256>::new(U_cmE.comm.to_affine());
 
     // 7.3 Verify KZG proofs
-    self.kzg_proofs.0.verify(&kzg_vk, &kzg_U_cmW, self.kzg_challenges.0)?;
-    self.kzg_proofs.1.verify(&kzg_vk, &kzg_U_cmE, self.kzg_challenges.1)?;
+    self
+      .kzg_proofs
+      .0
+      .verify(&kzg_vk, &kzg_U_cmW, self.kzg_challenges.0)?;
+    self
+      .kzg_proofs
+      .1
+      .verify(&kzg_vk, &kzg_U_cmE, self.kzg_challenges.1)?;
     Ok(())
   }
 }
@@ -222,24 +241,6 @@ pub fn prepare_calldata(
   incoming_instance: &R1CSInstance<Bn256EngineKZG>,
   proof: &Decider,
 ) -> Result<Vec<u8>, NovaError> {
-  println!("function_signature_check: {:?}", function_signature_check.to_eth());
-  println!("i: {:?}", i.to_eth());
-  println!("z_0: {:?}", z_0.to_eth());
-  println!("z_i: {:?}", z_i.to_eth());
-  println!("running_instance.comm_W: {:?}", running_instance.comm_W.to_eth());
-  println!("running_instance.comm_E: {:?}", running_instance.comm_E.to_eth());
-  println!("incoming_instance.comm_W: {:?}", incoming_instance.comm_W.to_eth());
-  println!("proof.nifs_proof.nifs_primary.comm_T: {:?}", proof.nifs_proof.nifs_primary.comm_T.to_eth());
-  println!("proof.rho: {:?}", proof.rho.to_eth());
-  println!("proof.groth16_proof a: {:?}", proof.groth16_proof.a.to_eth());
-  println!("proof.groth16_proof b: {:?}", proof.groth16_proof.b.to_eth());
-  println!("proof.groth16_proof c: {:?}", proof.groth16_proof.c.to_eth());
-  println!("proof.kzg_challenges.0: {:?}", proof.kzg_challenges.0.to_eth());
-  println!("proof.kzg_challenges.1: {:?}", proof.kzg_challenges.1.to_eth());
-  println!("proof.kzg_proofs.0.eval: {:?}", proof.kzg_proofs.0.eval.to_eth());
-  println!("proof.kzg_proofs.1.eval: {:?}", proof.kzg_proofs.1.eval.to_eth());
-  println!("proof.kzg_proofs.0.proof: {:?}", proof.kzg_proofs.0.proof.to_eth());
-  println!("proof.kzg_proofs.1.proof: {:?}", proof.kzg_proofs.1.proof.to_eth());
   Ok(
     [
       function_signature_check.to_eth(),
@@ -249,15 +250,15 @@ pub fn prepare_calldata(
       running_instance.comm_W.to_eth(),
       running_instance.comm_E.to_eth(),
       incoming_instance.comm_W.to_eth(),
-      proof.nifs_proof.nifs_primary.comm_T.to_eth(),  // cmT
-      proof.rho.to_eth(),              // r
-      proof.groth16_proof.to_eth(),    // pA, pB, pC
-      proof.kzg_challenges.0.to_eth(), // challenge_W
-      proof.kzg_challenges.1.to_eth(), // challenge_E
-      proof.kzg_proofs.0.eval.to_eth(),  // eval W
-      proof.kzg_proofs.1.eval.to_eth(),  // eval E
-      proof.kzg_proofs.0.proof.to_eth(), // W kzg_proof
-      proof.kzg_proofs.1.proof.to_eth(), // E kzg_proof
+      proof.nifs_proof.nifs_primary.comm_T.to_eth(), // cmT
+      proof.rho.to_eth(),                            // r
+      proof.groth16_proof.to_eth(),                  // pA, pB, pC
+      proof.kzg_challenges.0.to_eth(),               // challenge_W
+      proof.kzg_challenges.1.to_eth(),               // challenge_E
+      proof.kzg_proofs.0.eval.to_eth(),              // eval W
+      proof.kzg_proofs.1.eval.to_eth(),              // eval E
+      proof.kzg_proofs.0.proof.to_eth(),             // W kzg_proof
+      proof.kzg_proofs.1.proof.to_eth(),             // E kzg_proof
     ]
     .concat(),
   )
