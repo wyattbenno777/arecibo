@@ -57,26 +57,8 @@ where
     NovaError,
   > {
     // squeeze rho, gamma, beta
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    ro.absorb(*pp_digest);
-    absorb_split_instance::<E>(U2, &mut ro);
-    let rho = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    ro.absorb(rho);
-    let gamma = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    ro.absorb(gamma);
-    let s = S.num_cons.next_power_of_two().log_2();
-    let beta = {
-      ro.squeeze_vec(NUM_CHALLENGE_BITS, s)
-        .iter()
-        .map(|b| scalar_as_base::<Dual<E>>(*b))
-        .collect::<Vec<_>>()
-    };
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    for b in beta.iter() {
-      ro.absorb(*b);
-    }
+    let num_rounds = S.num_cons.next_power_of_two().log_2();
+    let ((rho, gamma, beta), ro) = Self::challenges(ro_consts, pp_digest, U2, num_rounds);
 
     // Helper function for resizing polynomials
     let pad_poly = |mut vec: Vec<E::Scalar>| {
@@ -84,8 +66,7 @@ where
       vec
     };
 
-    // Compute L_j's
-    //
+    // --- Compute L_j's ---
     // where L_j = eq(rx, y) • H_j(y)
     let z1 = [W1.W().as_slice(), [U1.u].as_slice(), U1.X.as_slice()].concat();
     let mut poly_ABC = {
@@ -124,7 +105,9 @@ where
       (a * b - c) * eq * gamma_cubed
     };
 
-    // HyperNova's sum-check.
+    // --- HyperNova's sum-check ---
+    // The sum-check instance uses poseidon as the transcript, enabling the
+    // implementation of the verifier circuit
     let comb_func =
       |L_abc: E::Scalar,
        L_eq: E::Scalar,
@@ -136,7 +119,7 @@ where
     let claim = U1.vs[0] + gamma * U1.vs[1] + gamma * gamma * U1.vs[2];
     let (sc, rx_p, _) = ROSumcheckProof::<E>::prove_cubic_hypernova(
       claim,
-      s,
+      num_rounds,
       &mut poly_ABC,
       &mut eq_rx,
       &mut poly_Az,
@@ -222,27 +205,9 @@ where
     U1_cyclefold: &RelaxedR1CSInstance<Dual<E>>,
   ) -> Result<(LR1CSInstance<E>, RelaxedR1CSInstance<Dual<E>>), NovaError> {
     // squeeze rho, gamma, beta
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    ro.absorb(*pp_digest);
-    absorb_split_instance::<E>(U2, &mut ro);
-    let rho = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    ro.absorb(rho);
-    let gamma = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    ro.absorb(gamma);
-    let beta = {
-      ro.squeeze_vec(NUM_CHALLENGE_BITS, num_rounds)
-        .iter()
-        .map(|b| scalar_as_base::<Dual<E>>(*b))
-        .collect::<Vec<_>>()
-    };
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    for b in beta.iter() {
-      ro.absorb(*b);
-    }
+    let ((rho, gamma, beta), ro) = Self::challenges(ro_consts, pp_digest, U2, num_rounds);
 
-    // Verify sumcheck proof
+    // Verify sum-check proof
     let claim = U1.vs[0] + gamma * U1.vs[1] + gamma * gamma * U1.vs[2];
     let (sub_claim, rx_p) = self.sc.verify(claim, num_rounds, 3, ro, ro_consts)?;
 
@@ -264,6 +229,38 @@ where
       .cyclefold_nifs_2
       .verify(ro_consts, &U_cyclefold_temp_1)?;
     Ok((U, U_cyclefold))
+  }
+
+  fn challenges(
+    ro_consts: &ROConstants<Dual<E>>,
+    pp_digest: &E::Scalar,
+    U2: &SplitR1CSInstance<E>,
+    num_rounds: usize,
+  ) -> (
+    (E::Scalar, E::Scalar, Vec<E::Scalar>),
+    <Dual<E> as Engine>::RO,
+  ) {
+    // squeeze rho, gamma, beta
+    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
+    ro.absorb(*pp_digest);
+    absorb_split_instance::<E>(U2, &mut ro);
+    let rho = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
+    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
+    ro.absorb(rho);
+    let gamma = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
+    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
+    ro.absorb(gamma);
+    let beta = {
+      ro.squeeze_vec(NUM_CHALLENGE_BITS, num_rounds)
+        .iter()
+        .map(|b| scalar_as_base::<Dual<E>>(*b))
+        .collect::<Vec<_>>()
+    };
+    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
+    for b in beta.iter() {
+      ro.absorb(*b);
+    }
+    ((rho, gamma, beta), ro)
   }
 }
 
