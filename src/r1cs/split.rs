@@ -10,7 +10,7 @@ use crate::{
     commitment::CommitmentEngineTrait, CurveCycleEquipped, Dual, Engine, ROTrait,
     TranscriptReprTrait,
   },
-  zip_with, Commitment, CommitmentKey, NovaError, CE,
+  zip_with, Commitment, CommitmentKey, DerandKey, NovaError, CE,
 };
 use ff::Field;
 use itertools::Itertools;
@@ -87,6 +87,18 @@ where
       vs,
       u,
     })
+  }
+
+  /// Derandomizes the `LR1CSInstance` using a `DerandKey`
+  pub(crate) fn derandomize(&self, dk: &DerandKey<E>, r_W: &E::Scalar) -> Self {
+    Self {
+      comm_W: CE::<E>::derandomize(dk, &self.comm_W, r_W),
+      X: self.X.clone(),
+      u: self.u,
+      pre_committed: self.pre_committed,
+      rx: self.rx.clone(),
+      vs: self.vs.clone(),
+    }
   }
 
   pub(crate) fn absorb_in_ro(&self, ro: &mut <Dual<E> as Engine>::RO)
@@ -191,6 +203,25 @@ where
       &self.pre_committed.1,
     ]
     .concat()
+  }
+
+  /// Pads the provided witness to the correct length
+  pub(crate) fn padded_W(&self, S: &R1CSShape<E>) -> Vec<E::Scalar> {
+    let mut W = self.W();
+    W.extend(vec![E::Scalar::ZERO; S.num_vars() - W.len()]);
+    W
+  }
+
+  /// Derandomizes the `R1CSWitness`
+  pub(crate) fn derandomize(&self) -> (Self, E::Scalar) {
+    let (aux, r_W) = self.aux.derandomize();
+    (
+      Self {
+        aux,
+        pre_committed: self.pre_committed.clone(),
+      },
+      r_W,
+    )
   }
 }
 
