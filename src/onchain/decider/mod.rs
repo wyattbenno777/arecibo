@@ -56,17 +56,17 @@ pub struct DeciderVerifierKey {
 /// A SNARK that proves the knowledge of a valid  proof
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Decider {
-  groth16_proof: Groth16Proof<Bn256EngineKZG>,
-  rho: Fr,
-  kzg_challenges: (Fr, Fr),
-  kzg_proofs: (KZGProof<Bn256>, KZGProof<Bn256>),
-  nifs_proof: NIFS<Bn256EngineKZG>,
-  U_cmW: Commitment<Bn256EngineKZG>,
-  U_cmE: Commitment<Bn256EngineKZG>,
-  u_cmW: Commitment<Bn256EngineKZG>,
-  num_steps: Fr,
-  z_0: Vec<Fr>,
-  z_i: Vec<Fr>,
+  pub groth16_proof: Groth16Proof<Bn256EngineKZG>,
+  pub rho: Fr,
+  pub kzg_challenges: (Fr, Fr),
+  pub kzg_proofs: (KZGProof<Bn256>, KZGProof<Bn256>),
+  pub nifs_proof: NIFS<Bn256EngineKZG>,
+  pub u_cmW: Commitment<Bn256EngineKZG>,
+  pub U_cmW: Commitment<Bn256EngineKZG>,
+  pub U_cmE: Commitment<Bn256EngineKZG>,
+  pub num_steps: Fr,
+  pub z_0: Vec<Fr>,
+  pub z_i: Vec<Fr>,
 }
 
 impl Decider {
