@@ -363,23 +363,15 @@ impl<E: Engine> R1CSShape<E> {
 
     let (Az, Bz, Cz) = self.multiply_witness(&W.W(), &U.u, &U.X)?;
 
-    // Helper function for resizing polynomials
-    let pad_poly = |mut vec: Vec<E::Scalar>| {
+    // Helper functions for resizing polynomials and evaluating them
+    let eval_padded_poly = |mut vec: Vec<E::Scalar>| {
       vec.resize(self.num_cons.next_power_of_two(), E::Scalar::ZERO);
-      vec
+      MultilinearPolynomial::new(vec).evaluate(&U.rx)
     };
-    assert_eq!(
-      U.vs[0],
-      MultilinearPolynomial::new(pad_poly(Az)).evaluate(&U.rx)
-    );
-    assert_eq!(
-      U.vs[1],
-      MultilinearPolynomial::new(pad_poly(Bz)).evaluate(&U.rx)
-    );
-    assert_eq!(
-      U.vs[2],
-      MultilinearPolynomial::new(pad_poly(Cz)).evaluate(&U.rx)
-    );
+
+    assert_eq!(U.vs[0], eval_padded_poly(Az));
+    assert_eq!(U.vs[1], eval_padded_poly(Bz));
+    assert_eq!(U.vs[2], eval_padded_poly(Cz));
 
     // verify if comm_W is a commitment to W
     if U.comm_W != CE::<E>::commit(ck, &W.aux.W, &W.aux.r_W)
