@@ -6,7 +6,10 @@ use crate::{
   cyclefold::util::absorb_primary_commitment,
   hypernova::error::HyperNovaError,
   spartan::math::Math,
-  traits::{commitment::CommitmentEngineTrait, CurveCycleEquipped, Dual, Engine, ROTrait},
+  traits::{
+    commitment::CommitmentEngineTrait, CurveCycleEquipped, Dual, Engine, ROTrait,
+    TranscriptReprTrait,
+  },
   zip_with, Commitment, CommitmentKey, NovaError, CE,
 };
 use ff::Field;
@@ -103,6 +106,21 @@ where
     }
     absorb_primary_commitment::<E, Dual<E>>(&self.pre_committed.0, ro);
     absorb_primary_commitment::<E, Dual<E>>(&self.pre_committed.1, ro);
+  }
+}
+
+impl<E: Engine> TranscriptReprTrait<E::GE> for LR1CSInstance<E> {
+  fn to_transcript_bytes(&self) -> Vec<u8> {
+    [
+      self.comm_W.to_transcript_bytes(),
+      self.pre_committed.0.to_transcript_bytes(),
+      self.pre_committed.1.to_transcript_bytes(),
+      self.u.to_transcript_bytes(),
+      self.X.as_slice().to_transcript_bytes(),
+      self.rx.as_slice().to_transcript_bytes(),
+      self.vs.as_slice().to_transcript_bytes(),
+    ]
+    .concat()
   }
 }
 
