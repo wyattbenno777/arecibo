@@ -10,6 +10,7 @@ pub mod batched;
 pub mod batched_ppsnark;
 #[macro_use]
 mod macros;
+pub mod lin_snark;
 pub(crate) mod math;
 pub mod polys;
 pub mod ppsnark;
@@ -171,15 +172,15 @@ impl<E: Engine> PolyEvalInstance<E> {
 /// Binds "row" variables of (A, B, C) matrices viewed as 2d multilinear polynomials
 pub fn compute_eval_table_sparse<E: Engine>(
   S: &R1CSShape<E>,
-  rx: &[E::Scalar],
+  eq_rx_evals: &[E::Scalar],
 ) -> (Vec<E::Scalar>, Vec<E::Scalar>, Vec<E::Scalar>) {
-  assert_eq!(rx.len(), S.num_cons);
+  assert_eq!(eq_rx_evals.len(), S.num_cons);
 
   let inner = |M: &SparseMatrix<E::Scalar>, M_evals: &mut Vec<E::Scalar>| {
     for (row_idx, row) in M.iter_rows().enumerate() {
       for (val, col_idx) in M.get_row(row) {
         // TODO(@winston-h-zhang): Parallelize? Will need more complicated locking
-        M_evals[*col_idx] += rx[row_idx] * val;
+        M_evals[*col_idx] += eq_rx_evals[row_idx] * val;
       }
     }
   };
