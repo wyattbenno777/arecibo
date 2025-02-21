@@ -160,11 +160,15 @@ impl<E: Engine> R1CSShape<E> {
     })
   }
 
+  pub(crate) fn num_vars(&self) -> usize {
+    self.num_vars + self.num_precommitted.0 + self.num_precommitted.1
+  }
+
   // Checks regularity conditions on the R1CSShape, required in Spartan-class SNARKs
   // Returns false if num_cons or num_vars are not powers of two, or if num_io > num_vars
   #[inline]
   pub(crate) fn is_regular_shape(&self) -> bool {
-    let num_vars = self.num_vars + self.num_precommitted.0 + self.num_precommitted.1;
+    let num_vars = self.num_vars();
     let cons_valid = self.num_cons.next_power_of_two() == self.num_cons;
     let vars_valid = num_vars.next_power_of_two() == num_vars;
     let io_lt_vars = self.num_io < num_vars;
@@ -360,7 +364,6 @@ impl<E: Engine> R1CSShape<E> {
     let num_vars = self.num_vars + self.num_precommitted.0 + self.num_precommitted.1;
     assert_eq!(W.W().len(), num_vars);
     assert_eq!(U.X.len(), self.num_io);
-
     let (Az, Bz, Cz) = self.multiply_witness(&W.W(), &U.u, &U.X)?;
 
     // Helper functions for resizing polynomials and evaluating them
@@ -368,7 +371,6 @@ impl<E: Engine> R1CSShape<E> {
       vec.resize(self.num_cons.next_power_of_two(), E::Scalar::ZERO);
       MultilinearPolynomial::new(vec).evaluate(&U.rx)
     };
-
     assert_eq!(U.vs[0], eval_padded_poly(Az));
     assert_eq!(U.vs[1], eval_padded_poly(Bz));
     assert_eq!(U.vs[2], eval_padded_poly(Cz));
@@ -383,7 +385,6 @@ impl<E: Engine> R1CSShape<E> {
     {
       return Err(NovaError::UnSat);
     }
-
     Ok(())
   }
 
@@ -482,7 +483,7 @@ impl<E: Engine> R1CSShape<E> {
   /// Pads the `R1CSShape` so that the shape passes `is_regular_shape`
   /// Renumbers variables to accommodate padded variables
   pub(crate) fn pad(&self) -> Self {
-    let num_vars = self.num_vars + self.num_precommitted.0 + self.num_precommitted.1;
+    let num_vars = self.num_vars();
     // check if the provided R1CSShape is already as required
     if self.is_regular_shape() {
       return self.clone();
@@ -604,6 +605,17 @@ impl<E: Engine> R1CSWitness<E> {
         r_W: E::Scalar::random(&mut OsRng),
       })
     }
+  }
+
+  /// Derandomizes the `R1CSWitness` using a `DerandKey`
+  pub(crate) fn derandomize(&self) -> (Self, E::Scalar) {
+    (
+      R1CSWitness {
+        W: self.W.clone(),
+        r_W: E::Scalar::ZERO,
+      },
+      self.r_W,
+    )
   }
 
   /// Commits to the witness using the supplied generators
