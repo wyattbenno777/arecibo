@@ -159,16 +159,16 @@ pub struct RecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
 {
-  r_U: LR1CSInstance<E>,
-  r_W: SplitR1CSWitness<E>,
-  l_u: SplitR1CSInstance<E>,
-  l_w: SplitR1CSWitness<E>,
-  r_U_cyclefold: RelaxedR1CSInstance<Dual<E>>,
-  r_W_cyclefold: RelaxedR1CSWitness<Dual<E>>,
-  z_0: Vec<E::Scalar>,
-  i: usize,
-  z_i: Vec<E::Scalar>,
-  prev_ic: IncrementalCommitment<E>,
+  pub(crate) r_U: LR1CSInstance<E>,
+  pub(crate) r_W: SplitR1CSWitness<E>,
+  pub(crate) l_u: SplitR1CSInstance<E>,
+  pub(crate) l_w: SplitR1CSWitness<E>,
+  pub(crate) r_U_cyclefold: RelaxedR1CSInstance<Dual<E>>,
+  pub(crate) r_W_cyclefold: RelaxedR1CSWitness<Dual<E>>,
+  pub(crate) z_0: Vec<E::Scalar>,
+  pub(crate) i: usize,
+  pub(crate) z_i: Vec<E::Scalar>,
+  pub(crate) prev_ic: IncrementalCommitment<E>,
 }
 
 impl<E> RecursiveSNARK<E>
@@ -220,7 +220,6 @@ where
     );
     let z_i = circuit.synthesize(&mut cs)?;
     let (l_u, l_w) = cs.split_r1cs_instance_and_witness(r1cs, &pp.ck)?;
-
     // Get z_i values out of the constraint system
     let z_i = z_i
       .iter()
@@ -522,7 +521,13 @@ mod tests {
     for i in 0..10 {
       recursive_snark.prove_step(&pp, c, ic)?;
       let (advice_0, advice_1) = c.advice();
-      ic = increment_ic::<E>(&pp.ck, &pp.ro_consts, ic, (&advice_0, &advice_1));
+      ic = increment_ic::<E>(
+        &pp.ck,
+        &pp.ro_consts,
+        ic,
+        (&advice_0, &advice_1),
+        &pp.circuit_shape.r1cs_shape,
+      );
       recursive_snark.verify(&pp, i + 1, &z_0, ic)?;
     }
     Ok(())
