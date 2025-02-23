@@ -62,7 +62,13 @@ fn test_heapify() {
   for (i, circuit) in circuits.iter().enumerate() {
     rs.prove_step(&pp, circuit, ic).unwrap();
     let (advice_0, advice_1) = circuit.advice();
-    ic = increment_ic::<E>(&pp.ck, &pp.ro_consts, ic, (&advice_0, &advice_1));
+    ic = increment_ic::<E>(
+      &pp.ck,
+      &pp.ro_consts,
+      ic,
+      (&advice_0, &advice_1),
+      &pp.circuit_shape.r1cs_shape,
+    );
     rs.verify(&pp, i + 1, &z_0, ic).unwrap();
   }
 
@@ -94,6 +100,7 @@ fn test_heapify() {
       &ops_pp.ro_consts,
       ops_ic,
       (&advice_0, &advice_1),
+      &ops_pp.circuit_shape.r1cs_shape,
     );
     ops_rs
       .verify(&ops_pp, i + 1, &ops_z_0, ops_ic)
@@ -129,12 +136,17 @@ fn test_heapify() {
       &scan_pp.ro_consts,
       scan_ic,
       (&advice_0, &advice_1),
+      &scan_pp.circuit_shape.r1cs_shape,
     );
     scan_rs.verify(&scan_pp, i + 1, &scan_z_0, scan_ic).unwrap();
   }
   let scan_z_i = scan_rs
     .verify(&scan_pp, scan_circuits.len(), &scan_z_0, scan_ic)
     .unwrap();
+
+  // --- check C_n′ = C_n ---
+  // commitments carried in both Π_ops and Π_F are the same
+  assert_eq!(ic, ops_ic);
 
   // check h_IS' · h_WS' = h_RS' · h_FS'.
   let (h_is, h_rs, h_ws, h_fs) = { (scan_z_i[2], ops_z_i[3], ops_z_i[4], scan_z_i[3]) };
@@ -161,6 +173,7 @@ where
         &convert_advice_separate(IS_chunk),
         &convert_advice_separate(FS_chunk),
       ),
+      &pp.circuit_shape.r1cs_shape,
     );
   }
   let mut keccak = E::TE::new(b"compute MCC challenges");

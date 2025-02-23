@@ -245,15 +245,17 @@ where
     UniversalKZGParam::gen_srs_for_testing(rng, n.next_power_of_two())
   }
 
-  fn commit(
+  fn commit_at(
     ck: &Self::CommitmentKey,
     v: &[<E::G1 as Group>::Scalar],
     r: &<E::G1 as Group>::Scalar,
+    idx: usize,
   ) -> Self::Commitment {
-    assert!(ck.length() >= v.len());
+    assert!(ck.length() > idx);
+    assert!(ck.length() - idx >= v.len());
     let mut scalars = v.to_vec();
     scalars.push(*r);
-    let mut bases = ck.powers_of_g[..v.len()].to_vec();
+    let mut bases = ck.powers_of_g[idx..idx + v.len()].to_vec();
     bases.push(ck.h);
     Commitment {
       comm: E::G1::vartime_multiscalar_mul(&scalars, &bases),

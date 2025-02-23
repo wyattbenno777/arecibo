@@ -56,16 +56,16 @@ impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
 
   fn split_r1cs_instance_and_witness(
     &self,
-    shape: &R1CSShape<E>,
+    S: &R1CSShape<E>,
     ck: &CommitmentKey<E>,
   ) -> Result<(SplitR1CSInstance<E>, SplitR1CSWitness<E>), NovaError> {
-    let (aux_U, aux_W) = self.r1cs_instance_and_witness(shape, ck)?;
+    let (aux_U, aux_W) = self.r1cs_instance_and_witness(S, ck)?;
     let pre_committed_witness = (
       self.precommitted_assignment().to_vec(),
       self.precommitted1_assignment().to_vec(),
     );
     let W = SplitR1CSWitness::new(aux_W, pre_committed_witness);
-    let pre_commits = W.commit(ck);
+    let pre_commits = W.commit(ck, S);
     let instance = SplitR1CSInstance::new(aux_U, pre_commits);
     Ok((instance, W))
   }

@@ -187,19 +187,19 @@ pub fn compute_eval_table_sparse<E: Engine>(
 
   let (A_evals, (B_evals, C_evals)) = rayon::join(
     || {
-      let mut A_evals: Vec<E::Scalar> = vec![E::Scalar::ZERO; 2 * S.num_vars];
+      let mut A_evals: Vec<E::Scalar> = vec![E::Scalar::ZERO; 2 * S.total_num_vars()];
       inner(&S.A, &mut A_evals);
       A_evals
     },
     || {
       rayon::join(
         || {
-          let mut B_evals: Vec<E::Scalar> = vec![E::Scalar::ZERO; 2 * S.num_vars];
+          let mut B_evals: Vec<E::Scalar> = vec![E::Scalar::ZERO; 2 * S.total_num_vars()];
           inner(&S.B, &mut B_evals);
           B_evals
         },
         || {
-          let mut C_evals: Vec<E::Scalar> = vec![E::Scalar::ZERO; 2 * S.num_vars];
+          let mut C_evals: Vec<E::Scalar> = vec![E::Scalar::ZERO; 2 * S.total_num_vars()];
           inner(&S.C, &mut C_evals);
           C_evals
         },

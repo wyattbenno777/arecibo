@@ -93,7 +93,17 @@ pub trait CommitmentEngineTrait<E: Engine>: Clone + Send + Sync {
   fn derand_key(ck: &Self::CommitmentKey) -> Self::DerandKey;
 
   /// Commits to the provided vector using the provided generators
-  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment;
+  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment {
+    Self::commit_at(ck, v, r, 0)
+  }
+
+  /// Commits to the provided vector using the provided generators
+  fn commit_at(
+    ck: &Self::CommitmentKey,
+    v: &[E::Scalar],
+    r: &E::Scalar,
+    idx: usize,
+  ) -> Self::Commitment;
 
   /// Remove given blind from commitment
   fn derandomize(

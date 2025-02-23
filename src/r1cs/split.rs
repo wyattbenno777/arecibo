@@ -178,10 +178,15 @@ where
   }
 
   /// Get the precommitted commitments
-  pub fn commit(&self, ck: &CommitmentKey<E>) -> (Commitment<E>, Commitment<E>) {
+  pub fn commit(&self, ck: &CommitmentKey<E>, S: &R1CSShape<E>) -> (Commitment<E>, Commitment<E>) {
     (
-      CE::<E>::commit(ck, &self.pre_committed.0, &E::Scalar::ZERO),
-      CE::<E>::commit(ck, &self.pre_committed.1, &E::Scalar::ZERO),
+      CE::<E>::commit_at(ck, &self.pre_committed.0, &E::Scalar::ZERO, S.num_vars),
+      CE::<E>::commit_at(
+        ck,
+        &self.pre_committed.1,
+        &E::Scalar::ZERO,
+        S.num_vars + S.num_precommitted.0,
+      ),
     )
   }
 
@@ -208,7 +213,7 @@ where
   /// Pads the provided witness to the correct length
   pub(crate) fn padded_W(&self, S: &R1CSShape<E>) -> Vec<E::Scalar> {
     let mut W = self.W();
-    W.extend(vec![E::Scalar::ZERO; S.num_vars() - W.len()]);
+    W.extend(vec![E::Scalar::ZERO; S.total_num_vars() - W.len()]);
     W
   }
 

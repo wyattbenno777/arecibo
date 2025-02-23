@@ -111,7 +111,7 @@ pub(crate) fn commitment_key_size<E: Engine>(
   ck_floor: &CommitmentKeyHint<E>,
 ) -> usize {
   let num_cons = S.num_cons;
-  let num_vars = S.num_vars;
+  let num_vars = S.total_num_vars();
   let ck_hint = ck_floor(S);
   max(max(num_cons, num_vars), ck_hint)
 }
@@ -160,7 +160,8 @@ impl<E: Engine> R1CSShape<E> {
     })
   }
 
-  pub(crate) fn num_vars(&self) -> usize {
+  /// Get the total number of variables in the R1CS instance
+  pub(crate) fn total_num_vars(&self) -> usize {
     self.num_vars + self.num_precommitted.0 + self.num_precommitted.1
   }
 
@@ -168,7 +169,7 @@ impl<E: Engine> R1CSShape<E> {
   // Returns false if num_cons or num_vars are not powers of two, or if num_io > num_vars
   #[inline]
   pub(crate) fn is_regular_shape(&self) -> bool {
-    let num_vars = self.num_vars();
+    let num_vars = self.total_num_vars();
     let cons_valid = self.num_cons.next_power_of_two() == self.num_cons;
     let vars_valid = num_vars.next_power_of_two() == num_vars;
     let io_lt_vars = self.num_io < num_vars;
@@ -345,8 +346,13 @@ impl<E: Engine> R1CSShape<E> {
     if U.aux.comm_W != CE::<E>::commit(ck, &W.aux.W, &W.aux.r_W)
       || U.pre_committed
         != (
-          CE::<E>::commit(ck, &W.pre_committed.0, &E::Scalar::ZERO),
-          CE::<E>::commit(ck, &W.pre_committed.1, &E::Scalar::ZERO),
+          CE::<E>::commit_at(ck, &W.pre_committed.0, &E::Scalar::ZERO, self.num_vars),
+          CE::<E>::commit_at(
+            ck,
+            &W.pre_committed.1,
+            &E::Scalar::ZERO,
+            self.num_vars + self.num_precommitted.0,
+          ),
         )
     {
       return Err(NovaError::UnSat);
@@ -379,8 +385,13 @@ impl<E: Engine> R1CSShape<E> {
     if U.comm_W != CE::<E>::commit(ck, &W.aux.W, &W.aux.r_W)
       || U.pre_committed
         != (
-          CE::<E>::commit(ck, &W.pre_committed.0, &E::Scalar::ZERO),
-          CE::<E>::commit(ck, &W.pre_committed.1, &E::Scalar::ZERO),
+          CE::<E>::commit_at(ck, &W.pre_committed.0, &E::Scalar::ZERO, self.num_vars),
+          CE::<E>::commit_at(
+            ck,
+            &W.pre_committed.1,
+            &E::Scalar::ZERO,
+            self.num_vars + self.num_precommitted.0,
+          ),
         )
     {
       return Err(NovaError::UnSat);
@@ -483,7 +494,7 @@ impl<E: Engine> R1CSShape<E> {
   /// Pads the `R1CSShape` so that the shape passes `is_regular_shape`
   /// Renumbers variables to accommodate padded variables
   pub(crate) fn pad(&self) -> Self {
-    let num_vars = self.num_vars();
+    let num_vars = self.total_num_vars();
     // check if the provided R1CSShape is already as required
     if self.is_regular_shape() {
       return self.clone();
@@ -513,7 +524,7 @@ impl<E: Engine> R1CSShape<E> {
 
     let apply_pad = |mut M: SparseMatrix<E::Scalar>| -> SparseMatrix<E::Scalar> {
       M.indices.par_iter_mut().for_each(|c| {
-        if *c >= self.num_vars {
+        if *c >= self.total_num_vars() {
           *c += num_vars_padded - num_vars
         }
       });
