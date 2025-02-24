@@ -5,6 +5,10 @@ use std::marker::PhantomData;
 use super::rs::{PublicParams, RecursiveSNARK};
 use crate::{
   hypernova::nifs::PartialNIFS,
+  r1cs::{
+    split::{LR1CSInstance, SplitR1CSWitness},
+    RelaxedR1CSInstance, RelaxedR1CSWitness,
+  },
   traits::{
     commitment::CommitmentEngineTrait,
     snark::{LinearizedR1CSSNARKTrait, RelaxedR1CSSNARKTrait},
@@ -83,6 +87,51 @@ where
     pk: &ProverKey<E, S1, S2>,
     rs: &RecursiveSNARK<E>,
   ) -> Result<Self, NovaError> {
+    // Fold r_U and l_u & derand the commitments to the witness
+    let (nifs, (U, W), (U_cyclefold, W_cyclefold)) = Self::derand_nifs(pp, rs)?;
+
+    // Apply Spartan on primary and secondary curve for instance witness pairs
+    // (new_U, new_W) & (r_U_cyclefold, r_W_cyclefold)
+    let (snark, snark_cyclefold) = rayon::join(
+      || S1::prove(&pp.ck, &pk.primary, &pp.circuit_shape.r1cs_shape, &U, &W),
+      || {
+        S2::prove(
+          &pp.ck_cyclefold,
+          &pk.secondary,
+          &pp.circuit_shape_cyclefold.r1cs_shape,
+          &U_cyclefold,
+          &W_cyclefold,
+        )
+      },
+    );
+    Ok(Self {
+      snark: snark?,
+      snark_cyclefold: snark_cyclefold?,
+      nifs,
+    })
+  }
+  fn verify(&self, vk: &VerifierKey<E, S1, S2>) -> Result<(), NovaError> {
+    Ok(())
+  }
+}
+
+impl<E, S1, S2> CompressedSNARK<E, S1, S2>
+where
+  E: CurveCycleEquipped,
+  S1: LinearizedR1CSSNARKTrait<E>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E>>,
+{
+  fn derand_nifs(
+    pp: &PublicParams<E>,
+    rs: &RecursiveSNARK<E>,
+  ) -> Result<
+    (
+      PartialNIFS<E>,
+      (LR1CSInstance<E>, SplitR1CSWitness<E>),
+      (RelaxedR1CSInstance<Dual<E>>, RelaxedR1CSWitness<Dual<E>>),
+    ),
+    NovaError,
+  > {
     // Fold r_U and l_u
     let (nifs, (U, W), _) = PartialNIFS::prove(
       &pp.circuit_shape.r1cs_shape,
@@ -104,37 +153,11 @@ where
       &wit_blind_cyclefold,
       &err_blind_cyclefold,
     );
-
-    // Apply Spartan on primary and secondary curve for instance witness pairs
-    // (new_U, new_W) & (r_U_cyclefold, r_W_cyclefold)
-    let (snark, snark_cyclefold) = rayon::join(
-      || {
-        S1::prove(
-          &pp.ck,
-          &pk.primary,
-          &pp.circuit_shape.r1cs_shape,
-          &derand_U,
-          &derand_W,
-        )
-      },
-      || {
-        S2::prove(
-          &pp.ck_cyclefold,
-          &pk.secondary,
-          &pp.circuit_shape_cyclefold.r1cs_shape,
-          &derand_U_cyclefold,
-          &derand_W_cyclefold,
-        )
-      },
-    );
-    Ok(Self {
-      snark: snark?,
-      snark_cyclefold: snark_cyclefold?,
+    Ok((
       nifs,
-    })
-  }
-  fn verify(&self, vk: &VerifierKey<E, S1, S2>) -> Result<(), NovaError> {
-    Ok(())
+      (derand_U, derand_W),
+      (derand_U_cyclefold, derand_W_cyclefold),
+    ))
   }
 }
 

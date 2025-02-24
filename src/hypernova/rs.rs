@@ -189,48 +189,20 @@ where
       return Err(NovaError::InvalidInitialInputLength);
     }
 
+    // --- Get running instance, witness ---
     // Get default running primary instance and witness pair
     let r1cs = &pp.circuit_shape.r1cs_shape;
     let r_U = LR1CSInstance::default(r1cs);
     let r_W = SplitR1CSWitness::default(r1cs);
-
-    // Base case for F'
-    //
-    // Get the new instance-witness pair to be folded into running instance
-    let mut cs = SatisfyingAssignment::<E>::new();
-    let inputs: AugmentedCircuitInputs<E> = AugmentedCircuitInputs::new(
-      pp.digest(),
-      E::Scalar::ZERO,
-      z_0.to_vec(),
-      None,
-      None,
-      None,
-      None,
-      None,
-      None,
-      None,
-      None,
-    );
-    let circuit = AugmentedCircuit::new(
-      &pp.augmented_circuit_params,
-      pp.ro_consts_circuit.clone(),
-      Some(inputs),
-      step_circuit,
-      pp.num_rounds,
-    );
-    let z_i = circuit.synthesize(&mut cs)?;
-    let (l_u, l_w) = cs.split_r1cs_instance_and_witness(r1cs, &pp.ck)?;
-    // Get z_i values out of the constraint system
-    let z_i = z_i
-      .iter()
-      .map(|v| v.get_value().ok_or(SynthesisError::AssignmentMissing))
-      .collect::<Result<Vec<_>, _>>()?;
-
     // Get the running CycleFold instance and witness pair
     let r1cs_cyclefold = &pp.circuit_shape_cyclefold.r1cs_shape;
     let r_U_cyclefold = RelaxedR1CSInstance::default(&*pp.ck_cyclefold, r1cs_cyclefold);
     let r_W_cyclefold = RelaxedR1CSWitness::default(r1cs_cyclefold);
 
+    // Base case for F'
+    //
+    // Get the new instance-witness pair to be folded into running instance
+    let ((l_u, l_w), z_i) = Self::synthesize_aug_circuit_base_case(pp, z_0, step_circuit)?;
     Ok(Self {
       r_W,
       r_U,
@@ -271,29 +243,7 @@ where
     let (nifs, (r_U, r_W), (r_U_cyclefold, r_W_cyclefold)) = self.nifs(pp)?;
 
     // Compute (u_i+1, w_i+1) ← trace(F', (vk, Ui, ui, (i, z_0, z_i), ωi)),
-    let mut cs = SatisfyingAssignment::<E>::new();
-    let inputs: AugmentedCircuitInputs<E> = AugmentedCircuitInputs::new(
-      pp.digest(),
-      E::Scalar::from(self.i as u64),
-      self.z_0.to_vec(),
-      Some(self.z_i.clone()),
-      Some(nifs),
-      Some(self.r_U.clone()),
-      Some(self.l_u.clone()),
-      Some(r_U.comm_W),
-      Some(self.r_U_cyclefold.clone()),
-      Some(r_U.pre_committed),
-      Some(self.prev_ic),
-    );
-    let circuit = AugmentedCircuit::new(
-      &pp.augmented_circuit_params,
-      pp.ro_consts_circuit.clone(),
-      Some(inputs),
-      step_circuit,
-      pp.num_rounds,
-    );
-    let z_i = circuit.synthesize(&mut cs)?;
-    let (l_u, l_w) = cs.split_r1cs_instance_and_witness(&pp.circuit_shape.r1cs_shape, &pp.ck)?;
+    let ((l_u, l_w), z_i) = self.synthesize_aug_circuit(pp, nifs, &r_U, step_circuit)?;
 
     // 3. output Πi+1 ← ((Ui+1, Wi+1), (ui+1, wi+1)).
     self.r_U = r_U;
@@ -304,10 +254,7 @@ where
     self.r_W_cyclefold = r_W_cyclefold;
 
     // Update statement being proven
-    self.z_i = z_i
-      .iter()
-      .map(|v| v.get_value().ok_or(SynthesisError::AssignmentMissing))
-      .collect::<Result<Vec<_>, _>>()?;
+    self.z_i = z_i;
     self.i += 1;
     self.prev_ic = ic;
     Ok(())
@@ -439,6 +386,72 @@ where
       (&self.l_u, &self.l_w),
       (&self.r_U_cyclefold, &self.r_W_cyclefold),
     )
+  }
+
+  fn synthesize_aug_circuit_with_inputs(
+    pp: &PublicParams<E>,
+    inputs: AugmentedCircuitInputs<E>,
+    step_circuit: &impl StepCircuit<E::Scalar>,
+  ) -> Result<((SplitR1CSInstance<E>, SplitR1CSWitness<E>), Vec<E::Scalar>), NovaError> {
+    let mut cs = SatisfyingAssignment::<E>::new();
+    let circuit = AugmentedCircuit::new(
+      &pp.augmented_circuit_params,
+      pp.ro_consts_circuit.clone(),
+      Some(inputs),
+      step_circuit,
+      pp.num_rounds,
+    );
+    let z_i = circuit.synthesize(&mut cs)?;
+    let z_i = z_i
+      .iter()
+      .map(|v| v.get_value().ok_or(SynthesisError::AssignmentMissing))
+      .collect::<Result<Vec<_>, _>>()?;
+    let (u, w) = cs.split_r1cs_instance_and_witness(&pp.circuit_shape.r1cs_shape, &pp.ck)?;
+    Ok(((u, w), z_i))
+  }
+
+  fn synthesize_aug_circuit(
+    &self,
+    pp: &PublicParams<E>,
+    nifs: NIFS<E>,
+    r_U: &LR1CSInstance<E>,
+    step_circuit: &impl StepCircuit<E::Scalar>,
+  ) -> Result<((SplitR1CSInstance<E>, SplitR1CSWitness<E>), Vec<E::Scalar>), NovaError> {
+    let inputs: AugmentedCircuitInputs<E> = AugmentedCircuitInputs::new(
+      pp.digest(),
+      E::Scalar::from(self.i as u64),
+      self.z_0.to_vec(),
+      Some(self.z_i.clone()),
+      Some(nifs),
+      Some(self.r_U.clone()),
+      Some(self.l_u.clone()),
+      Some(r_U.comm_W),
+      Some(self.r_U_cyclefold.clone()),
+      Some(r_U.pre_committed),
+      Some(self.prev_ic),
+    );
+    Self::synthesize_aug_circuit_with_inputs(pp, inputs, step_circuit)
+  }
+
+  fn synthesize_aug_circuit_base_case(
+    pp: &PublicParams<E>,
+    z_0: &[E::Scalar],
+    step_circuit: &impl StepCircuit<E::Scalar>,
+  ) -> Result<((SplitR1CSInstance<E>, SplitR1CSWitness<E>), Vec<E::Scalar>), NovaError> {
+    let inputs: AugmentedCircuitInputs<E> = AugmentedCircuitInputs::new(
+      pp.digest(),
+      E::Scalar::ZERO,
+      z_0.to_vec(),
+      None,
+      None,
+      None,
+      None,
+      None,
+      None,
+      None,
+      None,
+    );
+    Self::synthesize_aug_circuit_with_inputs(pp, inputs, step_circuit)
   }
 }
 
