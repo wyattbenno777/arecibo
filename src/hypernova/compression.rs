@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 
 use super::rs::{PublicParams, RecursiveSNARK};
 use crate::{
+  hypernova::nifs::PartialNIFS,
   traits::{
     commitment::CommitmentEngineTrait,
     snark::{LinearizedR1CSSNARKTrait, RelaxedR1CSSNARKTrait},
@@ -47,7 +48,7 @@ where
 {
   snark: S1,
   snark_cyclefold: S2,
-  _engine: PhantomData<E>,
+  nifs: PartialNIFS<E>,
 }
 
 impl<E, S1, S2> CompressedSNARK<E, S1, S2>
@@ -82,10 +83,55 @@ where
     pk: &ProverKey<E, S1, S2>,
     rs: &RecursiveSNARK<E>,
   ) -> Result<Self, NovaError> {
-    // --- Fold r_U and l_u ---
+    // Fold r_U and l_u
+    let (nifs, (U, W), _) = PartialNIFS::prove(
+      &pp.circuit_shape.r1cs_shape,
+      &pp.ro_consts,
+      &pp.digest(),
+      (&rs.r_U, &rs.r_W),
+      (&rs.l_u, &rs.l_w),
+    )?;
+
     // --- Derand the commitments to the witness ---
-    // --- Apply Spartan on primary and secondary curve for instance witness pairs (new_r_U, new_r_W) & (r_U_cyclefold, r_W_cyclefold) ---
-    todo!()
+    // (U, W)
+    let (derand_W, wit_blind) = W.derandomize();
+    let derand_U = U.derandomize(&E::CE::derand_key(&pp.ck), &wit_blind);
+    // (U_cyclefold, W_cyclefold)
+    let (derand_W_cyclefold, wit_blind_cyclefold, err_blind_cyclefold) =
+      rs.r_W_cyclefold.derandomize();
+    let derand_U_cyclefold = rs.r_U_cyclefold.derandomize(
+      &<Dual<E> as Engine>::CE::derand_key(&pp.ck_cyclefold),
+      &wit_blind_cyclefold,
+      &err_blind_cyclefold,
+    );
+
+    // Apply Spartan on primary and secondary curve for instance witness pairs
+    // (new_U, new_W) & (r_U_cyclefold, r_W_cyclefold)
+    let (snark, snark_cyclefold) = rayon::join(
+      || {
+        S1::prove(
+          &pp.ck,
+          &pk.primary,
+          &pp.circuit_shape.r1cs_shape,
+          &derand_U,
+          &derand_W,
+        )
+      },
+      || {
+        S2::prove(
+          &pp.ck_cyclefold,
+          &pk.secondary,
+          &pp.circuit_shape_cyclefold.r1cs_shape,
+          &derand_U_cyclefold,
+          &derand_W_cyclefold,
+        )
+      },
+    );
+    Ok(Self {
+      snark: snark?,
+      snark_cyclefold: snark_cyclefold?,
+      nifs,
+    })
   }
   fn verify(&self, vk: &VerifierKey<E, S1, S2>) -> Result<(), NovaError> {
     Ok(())
