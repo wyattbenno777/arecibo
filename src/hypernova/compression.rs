@@ -271,7 +271,6 @@ mod tests {
     S1: LinearizedR1CSSNARKTrait<E>,
     S2: RelaxedR1CSSNARKTrait<Dual<E>>,
   {
-    println!("producing pp..");
     let pp = PublicParams::<E>::setup(c, &*default_ck_hint(), &*default_ck_hint());
     let z_0 = vec![
       E::Scalar::from(2u64),
@@ -281,7 +280,6 @@ mod tests {
     let mut ic = IncrementalCommitment::<E>::default();
     let mut recursive_snark = RecursiveSNARK::new(&pp, c, &z_0)?;
     for i in 0..3 {
-      println!("proving step {}", i);
       recursive_snark.prove_step(&pp, c, ic)?;
       let (advice_0, advice_1) = c.advice();
       ic = increment_ic::<E>(
@@ -293,11 +291,8 @@ mod tests {
       );
       recursive_snark.verify(&pp, i + 1, &z_0, ic)?;
     }
-    println!("snark setup..");
     let (pk, vk) = CompressedSNARK::<E, S1, S2>::setup(&pp)?;
-    println!("snark prove..");
     let snark = CompressedSNARK::<E, S1, S2>::prove(&pp, &pk, &recursive_snark)?;
-    println!("snark verify..");
     snark.verify(&vk)?;
     Ok(())
   }
