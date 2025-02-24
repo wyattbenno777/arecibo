@@ -21,6 +21,7 @@ use crate::{
 };
 use ff::Field;
 use serde::{Deserialize, Serialize};
+
 /// A type that holds the prover key for [`CompressedSNARK`]
 #[derive(Debug, Clone)]
 pub struct ProverKey<E, S1, S2>

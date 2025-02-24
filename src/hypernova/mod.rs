@@ -8,6 +8,7 @@ mod augmented_circuit;
 mod utils;
 
 // public modules
+pub mod compression;
 pub mod error;
 pub mod nebula;
 pub mod nifs;
