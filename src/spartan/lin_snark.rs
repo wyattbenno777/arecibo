@@ -257,16 +257,17 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> LinearizedR1CSSNARKTrait<E>
 
 #[cfg(test)]
 mod tests {
-  use crate::frontend::Split;
-  use crate::hypernova::rs::{IncrementalCommitment, PublicParams, RecursiveSNARK};
-  use crate::provider::ipa_pc;
-  use crate::traits::commitment::CommitmentEngineTrait;
-  use crate::traits::evaluation::EvaluationEngineTrait;
   use crate::{
-    frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
-    hypernova::{nebula::ic::increment_ic, rs::StepCircuit},
-    provider::Bn256EngineIPA,
-    traits::{snark::default_ck_hint, CurveCycleEquipped, Engine},
+    frontend::{num::AllocatedNum, ConstraintSystem, Split, SynthesisError},
+    hypernova::{
+      nebula::ic::increment_ic,
+      rs::{IncrementalCommitment, PublicParams, RecursiveSNARK, StepCircuit},
+    },
+    provider::{ipa_pc, Bn256EngineIPA},
+    traits::{
+      commitment::CommitmentEngineTrait, evaluation::EvaluationEngineTrait, snark::default_ck_hint,
+      CurveCycleEquipped, Engine,
+    },
     NovaError,
   };
   use ff::PrimeField;

@@ -3,9 +3,9 @@
 use std::marker::PhantomData;
 
 use super::rs::{PublicParams, RecursiveSNARK};
-use crate::traits::commitment::CommitmentEngineTrait;
 use crate::{
   traits::{
+    commitment::CommitmentEngineTrait,
     snark::{LinearizedR1CSSNARKTrait, RelaxedR1CSSNARKTrait},
     CurveCycleEquipped, Dual, Engine,
   },

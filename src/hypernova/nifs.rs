@@ -125,38 +125,6 @@ where
       .verify(ro_consts, &U_cyclefold_temp_1)?;
     Ok((U, U_cyclefold))
   }
-
-  fn challenges(
-    ro_consts: &ROConstants<Dual<E>>,
-    pp_digest: &E::Scalar,
-    U2: &SplitR1CSInstance<E>,
-    num_rounds: usize,
-  ) -> (
-    (E::Scalar, E::Scalar, Vec<E::Scalar>),
-    <Dual<E> as Engine>::RO,
-  ) {
-    // squeeze rho, gamma, beta
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    ro.absorb(*pp_digest);
-    absorb_split_instance::<E>(U2, &mut ro);
-    let rho = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    ro.absorb(rho);
-    let gamma = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    ro.absorb(gamma);
-    let beta = {
-      ro.squeeze_vec(NUM_CHALLENGE_BITS, num_rounds)
-        .iter()
-        .map(|b| scalar_as_base::<Dual<E>>(*b))
-        .collect::<Vec<_>>()
-    };
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    for b in beta.iter() {
-      ro.absorb(*b);
-    }
-    ((rho, gamma, beta), ro)
-  }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
