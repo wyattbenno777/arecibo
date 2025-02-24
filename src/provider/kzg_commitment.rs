@@ -53,7 +53,11 @@ impl<E: Engine> Len for UniversalKZGParam<E> {
 }
 
 /// `UnivariateProverKey` is used to generate a proof
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(bound(
+  serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",
+  deserialize = "E::G1Affine: Deserialize<'de>, E::G2Affine: Deserialize<'de>"
+))]
 pub struct KZGProverKey<E: Engine> {
   /// generators from the universal parameters
   uv_params: Arc<UniversalKZGParam<E>>,
@@ -90,7 +94,7 @@ impl<E: Engine> KZGProverKey<E> {
 
 /// `UVKZGVerifierKey` is used to check evaluation proofs for a given
 /// commitment.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(bound(serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",))]
 pub struct KZGVerifierKey<E: Engine> {
   /// The generator of G1.

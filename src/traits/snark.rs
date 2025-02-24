@@ -26,10 +26,10 @@ pub trait RelaxedR1CSSNARKTrait<E: Engine>:
   Send + Sync + Serialize + for<'de> Deserialize<'de>
 {
   /// A type that represents the prover's key
-  type ProverKey: Send + Sync;
+  type ProverKey: Send + Sync + Serialize + for<'de> Deserialize<'de>;
 
   /// A type that represents the verifier's key
-  type VerifierKey: Send + Sync + Serialize;
+  type VerifierKey: Send + Sync + Serialize + for<'de> Deserialize<'de>;
 
   /// This associated function (not a method) provides a hint that offers
   /// a minimum sizing cue for the commitment key used by this SNARK
@@ -110,10 +110,10 @@ pub trait LinearizedR1CSSNARKTrait<E: Engine>:
   Send + Sync + Serialize + for<'de> Deserialize<'de>
 {
   /// A type that represents the prover's key
-  type ProverKey: Send + Sync;
+  type ProverKey: Send + Sync + Serialize + for<'de> Deserialize<'de>;
 
   /// A type that represents the verifier's key
-  type VerifierKey: Send + Sync + Serialize;
+  type VerifierKey: Send + Sync + Serialize + for<'de> Deserialize<'de>;
 
   /// This associated function (not a method) provides a hint that offers
   /// a minimum sizing cue for the commitment key used by this SNARK

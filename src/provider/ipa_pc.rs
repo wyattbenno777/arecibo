@@ -22,7 +22,8 @@ use serde::{Deserialize, Serialize};
 use std::{marker::PhantomData, sync::Arc};
 
 /// Provides an implementation of the prover key
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct ProverKey<E: Engine> {
   ck_s: CommitmentKey<E>,
 }

@@ -1,5 +1,7 @@
 //! This module provides the components needed to compress the HyperNova IVC proofs with Spartan.
 
+use serde::{Deserialize, Serialize};
+
 use super::rs::{PublicParams, RecursiveSNARK};
 use crate::{
   hypernova::nifs::PartialNIFS,
@@ -16,7 +18,8 @@ use crate::{
 };
 
 /// A type that holds the prover key for [`CompressedSNARK`]
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct ProverKey<E, S1, S2>
 where
   E: CurveCycleEquipped,
@@ -28,7 +31,8 @@ where
 }
 
 /// A type that holds the prover key for [`CompressedSNARK`]
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct VerifierKey<E, S1, S2>
 where
   E: CurveCycleEquipped,
@@ -45,6 +49,8 @@ where
 }
 
 /// A SNARK that proves the knowledge of a valid HyperNova [`RecursiveSNARK`]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct CompressedSNARK<E, S1, S2>
 where
   E: CurveCycleEquipped,
@@ -209,6 +215,8 @@ where
   }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 struct CompressedSNARKData<E>
 where
   E: CurveCycleEquipped,
@@ -262,10 +270,13 @@ mod tests {
     S1: LinearizedR1CSSNARKTrait<E>,
     S2: RelaxedR1CSSNARKTrait<Dual<E>>,
   {
-    run_circuit::<E, S1, S2>(circuit)
+    run_circuit::<E, S1, S2>(circuit, true)
   }
 
-  fn run_circuit<E, S1, S2>(c: &impl StepCircuit<E::Scalar>) -> Result<(), NovaError>
+  fn run_circuit<E, S1, S2>(
+    c: &impl StepCircuit<E::Scalar>,
+    check_proof_size: bool,
+  ) -> Result<(), NovaError>
   where
     E: CurveCycleEquipped,
     S1: LinearizedR1CSSNARKTrait<E>,
@@ -294,6 +305,16 @@ mod tests {
     let (pk, vk) = CompressedSNARK::<E, S1, S2>::setup(&pp)?;
     let snark = CompressedSNARK::<E, S1, S2>::prove(&pp, &pk, &recursive_snark)?;
     snark.verify(&vk)?;
+    if check_proof_size {
+      let rs_str = serde_json::to_string(&recursive_snark).unwrap();
+      println!("recursive snark: {} MB", rs_str.len() / 1024 / 1024);
+      let snark_str = serde_json::to_string(&snark).unwrap();
+      println!("compressed snark: {} KB", snark_str.len() / 1024);
+      // sanity check deserialized snark
+      let snark_deserialized: CompressedSNARK<E, S1, S2> =
+        serde_json::from_str(&snark_str).unwrap();
+      snark_deserialized.verify(&vk)?;
+    }
     Ok(())
   }
 
