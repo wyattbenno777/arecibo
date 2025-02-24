@@ -2,6 +2,7 @@
 //!
 //! This module implements a SNARK that proves the correct execution of an incremental computation.
 
+use super::nebula::ic::increment_comm;
 use crate::{
   constants::{
     BASE_CONSTRAINTS, BN_LIMB_WIDTH, BN_N_LIMBS, DEFAULT_ABSORBS,
@@ -34,8 +35,6 @@ use ff::{Field, PrimeField};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-
-use super::nebula::ic::increment_comm;
 
 /// A type that represents the carried commitments for this commitment-carrying HyperNova IVC scheme.
 pub type IncrementalCommitment<E> = (<E as Engine>::Scalar, <E as Engine>::Scalar);
@@ -189,7 +188,7 @@ where
       return Err(NovaError::InvalidInitialInputLength);
     }
 
-    // --- Get running instance, witness ---
+    // --- Get running instance, witness pairs ---
     // 1. Get default running primary instance and witness pair
     let r1cs = &pp.circuit_shape.r1cs_shape;
     let r_U = LR1CSInstance::default(r1cs);
