@@ -7,7 +7,7 @@ pub mod gadgets;
 mod constraint_system;
 mod lc;
 
-pub use constraint_system::{Circuit, ConstraintSystem, Namespace, SynthesisError};
+pub use constraint_system::{Circuit, ConstraintSystem, Namespace, Split, SynthesisError};
 pub use gadgets::{
   boolean::{AllocatedBit, Boolean},
   num,

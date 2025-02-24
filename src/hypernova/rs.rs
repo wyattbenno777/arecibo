@@ -1,13 +1,13 @@
 //! IVC scheme with Hypernova
 //!
-//! This module implements a SNARK that proves the correct execution of an incremental computation
-use crate::traits::AbsorbInROTrait;
+//! This module implements a SNARK that proves the correct execution of an incremental computation.
+
 use crate::{
   constants::{
     BASE_CONSTRAINTS, BN_LIMB_WIDTH, BN_N_LIMBS, DEFAULT_ABSORBS,
     MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT, MAX_CONSTRAINTS_PER_SUMCHECK_ROUND, NUM_HASH_BITS,
   },
-  cyclefold::{circuit::CycleFoldCircuit, util::FoldingData},
+  cyclefold::circuit::CycleFoldCircuit,
   digest::SimpleDigestible,
   errors::NovaError,
   frontend::{
@@ -24,10 +24,10 @@ use crate::{
     nifs::NIFS,
   },
   r1cs::{
-    CommitmentKeyHint, LR1CSInstance, R1CSInstance, R1CSWitness, RelaxedR1CSInstance,
-    RelaxedR1CSWitness,
+    split::{LR1CSInstance, SplitR1CSInstance, SplitR1CSWitness},
+    CommitmentKeyHint, RelaxedR1CSInstance, RelaxedR1CSWitness,
   },
-  traits::{CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},
+  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},
   AugmentedCircuitParams, CommitmentKey, DigestComputer, R1CSWithArity, ROConstants,
 };
 use ff::{Field, PrimeField};
@@ -35,7 +35,12 @@ use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-/// The public parameters used in the CycleFold recursive SNARK proof and verification
+use super::nebula::ic::increment_comm;
+
+/// A type that represents the carried commitments for this commitment-carrying HyperNova IVC scheme.
+pub type IncrementalCommitment<E> = (<E as Engine>::Scalar, <E as Engine>::Scalar);
+
+/// The public parameters used in the HyperNova recursiveSNARK proving and verification
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct PublicParams<E>
@@ -43,24 +48,26 @@ where
   E: CurveCycleEquipped,
 {
   /// The arity of the step circuit
-  F_arity: usize,
+  pub F_arity: usize,
   /// RO constants for primary circuit
-  ro_consts: ROConstants<Dual<E>>,
+  pub ro_consts: ROConstants<Dual<E>>,
   /// RO constants for primary circuit
-  ro_consts_circuit: ROConstantsCircuit<Dual<E>>,
+  pub ro_consts_circuit: ROConstantsCircuit<Dual<E>>,
   /// Commitment key for primary circuit
-  ck: Arc<CommitmentKey<E>>,
+  pub ck: Arc<CommitmentKey<E>>,
   /// R1CS shape we are arguing about
-  circuit_shape: R1CSWithArity<E>,
+  pub circuit_shape: R1CSWithArity<E>,
   /// Parameters of big nats in circuit
-  augmented_circuit_params: AugmentedCircuitParams,
+  pub augmented_circuit_params: AugmentedCircuitParams,
   /// secondary commitment key
-  ck_cyclefold: Arc<CommitmentKey<Dual<E>>>,
+  pub ck_cyclefold: Arc<CommitmentKey<Dual<E>>>,
   /// R1CS shape of cyclefold circuit
-  circuit_shape_cyclefold: R1CSWithArity<Dual<E>>,
+  pub circuit_shape_cyclefold: R1CSWithArity<Dual<E>>,
+  /// Digest of the public parameters
   #[serde(skip, default = "OnceCell::new")]
-  digest: OnceCell<E::Scalar>,
-  num_rounds: usize,
+  pub digest: OnceCell<E::Scalar>,
+  /// Number of sumcheck rounds used in the NIFS for the augmented circuit
+  pub num_rounds: usize,
 }
 
 impl<E> PublicParams<E>
@@ -138,11 +145,14 @@ where
 
 impl<E> SimpleDigestible for PublicParams<E> where E: CurveCycleEquipped {}
 
-/// A SNARK that proves the correct execution of an incremental computation in the CycleFold folding
-/// scheme.
+/// A SNARK that proves the correct execution of an incremental computation. HyperNova IVC scheme (with CycleFold).
 ///
-/// (U, W, u, w) -> IVC Proof
-/// (i, z0, zi) -> Statement being proven
+/// * (U, W, u, w) -> IVC Proof
+/// * (i, z_0, z_i) -> Statement being proven
+///
+/// # Note
+///
+/// * Carries two commitments
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct RecursiveSNARK<E>
@@ -150,14 +160,15 @@ where
   E: CurveCycleEquipped,
 {
   r_U: LR1CSInstance<E>,
-  r_W: R1CSWitness<E>,
-  l_u: R1CSInstance<E>,
-  l_w: R1CSWitness<E>,
+  r_W: SplitR1CSWitness<E>,
+  l_u: SplitR1CSInstance<E>,
+  l_w: SplitR1CSWitness<E>,
   r_U_cyclefold: RelaxedR1CSInstance<Dual<E>>,
   r_W_cyclefold: RelaxedR1CSWitness<Dual<E>>,
-  z0: Vec<E::Scalar>,
+  z_0: Vec<E::Scalar>,
   i: usize,
-  zi: Vec<E::Scalar>,
+  z_i: Vec<E::Scalar>,
+  prev_ic: IncrementalCommitment<E>,
 }
 
 impl<E> RecursiveSNARK<E>
@@ -166,18 +177,22 @@ where
 {
   /// Create a new instance of [`RecursiveSNARK`]
   #[tracing::instrument(skip_all, name = "HyperNova::RecursiveSNARK::new")]
-  pub fn new<C>(pp: &PublicParams<E>, step_circuit: &C, z0: &[E::Scalar]) -> Result<Self, NovaError>
+  pub fn new<C>(
+    pp: &PublicParams<E>,
+    step_circuit: &C,
+    z_0: &[E::Scalar],
+  ) -> Result<Self, NovaError>
   where
     C: StepCircuit<E::Scalar>,
   {
-    if z0.len() != pp.F_arity {
+    if z_0.len() != pp.F_arity {
       return Err(NovaError::InvalidInitialInputLength);
     }
 
     // Get default running primary instance and witness pair
     let r1cs = &pp.circuit_shape.r1cs_shape;
     let r_U = LR1CSInstance::default(r1cs);
-    let r_W = R1CSWitness::default(r1cs);
+    let r_W = SplitR1CSWitness::default(r1cs);
 
     // Base case for F'
     //
@@ -186,7 +201,9 @@ where
     let inputs: AugmentedCircuitInputs<E> = AugmentedCircuitInputs::new(
       pp.digest(),
       E::Scalar::ZERO,
-      z0.to_vec(),
+      z_0.to_vec(),
+      None,
+      None,
       None,
       None,
       None,
@@ -201,11 +218,11 @@ where
       step_circuit,
       pp.num_rounds,
     );
-    let zi = circuit.synthesize(&mut cs)?;
-    let (l_u, l_w) = cs.r1cs_instance_and_witness(r1cs, &pp.ck)?;
+    let z_i = circuit.synthesize(&mut cs)?;
+    let (l_u, l_w) = cs.split_r1cs_instance_and_witness(r1cs, &pp.ck)?;
 
     // Get z_i values out of the constraint system
-    let zi = zi
+    let z_i = z_i
       .iter()
       .map(|v| v.get_value().ok_or(SynthesisError::AssignmentMissing))
       .collect::<Result<Vec<_>, _>>()?;
@@ -222,16 +239,22 @@ where
       l_u,
       r_W_cyclefold,
       r_U_cyclefold,
-      z0: z0.to_vec(),
+      z_0: z_0.to_vec(),
       i: 0,
-      zi,
+      z_i,
+      prev_ic: (E::Scalar::ZERO, E::Scalar::ZERO),
     })
   }
 
   /// Create a new [`RecursiveSNARK`] (or updates the provided [`RecursiveSNARK`])
   /// by executing a step of the incremental computation
   #[tracing::instrument(skip_all, name = "HyperNova::RecursiveSNARK::prove_step")]
-  pub fn prove_step<C>(&mut self, pp: &PublicParams<E>, step_circuit: &C) -> Result<(), NovaError>
+  pub fn prove_step<C>(
+    &mut self,
+    pp: &PublicParams<E>,
+    step_circuit: &C,
+    ic: IncrementalCommitment<E>,
+  ) -> Result<(), NovaError>
   where
     C: StepCircuit<E::Scalar>,
   {
@@ -240,39 +263,28 @@ where
       return Ok(());
     }
 
-    // Parse Πi (self) as ((Ui, Wi), (ui, wi)) and then:
-    //
-    // 1. compute (Ui+1,Wi+1,T) ← NIFS.P(pk,(Ui,Wi),(ui,wi)),
-    let (nifs, (r_U, r_W), (r_U_cyclefold, r_W_cyclefold)) = NIFS::prove(
-      (
-        &pp.circuit_shape.r1cs_shape,
-        &pp.circuit_shape_cyclefold.r1cs_shape,
-      ),
-      &pp.ck_cyclefold,
-      &pp.ro_consts,
-      &pp.digest(),
-      (&self.r_U, &self.r_W),
-      (&self.l_u, &self.l_w),
-      (&self.r_U_cyclefold, &self.r_W_cyclefold),
-    )?;
+    // 1. Parse u_i.C_W as (C_ωi−1 , C_aux_i−1).
+    // 2. Abort if C_i != hash(C_i−1, C_ωi−1)
+    self.ic_check(pp, ic)?;
 
-    // 2. compute (ui+1, wi+1) ← trace(F ′, (vk, Ui, ui, (i, z0, zi), ωi, T )),
+    // 1. Parse Π_i (self) as ((U_i, W_i), (u_i, w_i)).
+    // 2. compute (U_i+1,W_i+1) ← NIFS.P(pk, (U_i, W_i), (u_i, w_i)),
+    let (nifs, (r_U, r_W), (r_U_cyclefold, r_W_cyclefold)) = self.nifs(pp)?;
+
+    // Compute (u_i+1, w_i+1) ← trace(F', (vk, Ui, ui, (i, z_0, z_i), ωi)),
     let mut cs = SatisfyingAssignment::<E>::new();
-    let cyclefold_data = FoldingData::new(
-      self.r_U_cyclefold.clone(),
-      nifs.cyclefold_nifs.l_u.clone(),
-      nifs.cyclefold_nifs.comm_T,
-    );
     let inputs: AugmentedCircuitInputs<E> = AugmentedCircuitInputs::new(
       pp.digest(),
       E::Scalar::from(self.i as u64),
-      self.z0.to_vec(),
-      Some(self.zi.clone()),
+      self.z_0.to_vec(),
+      Some(self.z_i.clone()),
       Some(nifs),
       Some(self.r_U.clone()),
       Some(self.l_u.clone()),
       Some(r_U.comm_W),
-      Some(cyclefold_data),
+      Some(self.r_U_cyclefold.clone()),
+      Some(r_U.pre_committed),
+      Some(self.prev_ic),
     );
     let circuit = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
@@ -281,8 +293,8 @@ where
       step_circuit,
       pp.num_rounds,
     );
-    let zi = circuit.synthesize(&mut cs)?;
-    let (l_u, l_w) = cs.r1cs_instance_and_witness(&pp.circuit_shape.r1cs_shape, &pp.ck)?;
+    let z_i = circuit.synthesize(&mut cs)?;
+    let (l_u, l_w) = cs.split_r1cs_instance_and_witness(&pp.circuit_shape.r1cs_shape, &pp.ck)?;
 
     // 3. output Πi+1 ← ((Ui+1, Wi+1), (ui+1, wi+1)).
     self.r_U = r_U;
@@ -293,11 +305,12 @@ where
     self.r_W_cyclefold = r_W_cyclefold;
 
     // Update statement being proven
-    self.zi = zi
+    self.z_i = z_i
       .iter()
       .map(|v| v.get_value().ok_or(SynthesisError::AssignmentMissing))
       .collect::<Result<Vec<_>, _>>()?;
     self.i += 1;
+    self.prev_ic = ic;
     Ok(())
   }
 
@@ -307,17 +320,18 @@ where
     &self,
     pp: &PublicParams<E>,
     num_steps: usize,
-    z0: &[E::Scalar],
+    z_0: &[E::Scalar],
+    ic: IncrementalCommitment<E>,
   ) -> Result<Vec<E::Scalar>, NovaError> {
-    // Basic checks for IVC proof
-    // //////
-    // number of steps cannot be zero
+    // --- Basic checks for IVC proof ---
+    //
+    // 1. number of steps cannot be zero
     let is_num_steps_zero = num_steps == 0;
-    // check if the provided proof has executed num_steps
+    // 2. check if the provided proof has executed num_steps
     let is_num_steps_not_match = self.i != num_steps;
-    // check if the initial inputs match
-    let is_inputs_not_match = self.z0 != z0;
-    // check if the (relaxed) R1CS instances have two public outputs
+    // 3. check if the initial inputs match
+    let is_inputs_not_match = self.z_0 != z_0;
+    // 4. check if the (relaxed) R1CS instances have two public outputs
     let is_instance_has_two_outputs = self.r_U.X.len() != 2;
     if is_num_steps_zero
       || is_num_steps_not_match
@@ -327,31 +341,31 @@ where
       return Err(NovaError::ProofVerifyError);
     }
 
-    // Hash check
-    // ////////////////////////////////
-    // 1. Compute H(pp, i, z0, zi, r_U)
+    // --- Hash check ---
+    //
+    // 1. Compute H(pp, i, z_0, z_i, r_U, prev_ic)
     let mut ro = <Dual<E> as Engine>::RO::new(pp.ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(pp.digest());
     ro.absorb(E::Scalar::from(num_steps as u64));
-    for e in z0 {
+    for e in z_0 {
       ro.absorb(*e);
     }
-    for e in &self.zi {
+    for e in &self.z_i {
       ro.absorb(*e);
     }
     self.r_U.absorb_in_ro(&mut ro);
+    ro.absorb(self.prev_ic.0);
+    ro.absorb(self.prev_ic.1);
     let hash = ro.squeeze(NUM_HASH_BITS);
-    // //////////////////////////////////
     // 2. Compute H(pp, i, r_U_cyclefold)
     let mut ro = <Dual<E> as Engine>::RO::new(pp.ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(pp.digest());
     ro.absorb(E::Scalar::from(num_steps as u64));
     self.r_U_cyclefold.absorb_in_ro(&mut ro);
     let hash_cyclefold = ro.squeeze(NUM_HASH_BITS);
-    // ////////////////////////////////////////////
-    // 3. Check if H(pp, i, z0, zi, r_U) = l_u.X[0] && H(pp, i, r_U_cyclefold) = l_u.X[1]
-    if scalar_as_base::<Dual<E>>(hash) != self.l_u.X[0]
-      || scalar_as_base::<Dual<E>>(hash_cyclefold) != self.l_u.X[1]
+    // 3. Check if H(pp, i, z_0, z_i, r_U) = l_u.X[0] && H(pp, i, r_U_cyclefold) = l_u.X[1]
+    if scalar_as_base::<Dual<E>>(hash) != self.l_u.aux.X[0]
+      || scalar_as_base::<Dual<E>>(hash_cyclefold) != self.l_u.aux.X[1]
     {
       return Err(NovaError::ProofVerifyError);
     }
@@ -368,7 +382,7 @@ where
           || {
             pp.circuit_shape
               .r1cs_shape
-              .is_sat(&pp.ck, &self.l_u, &self.l_w)
+              .is_sat_split(&pp.ck, &self.l_u, &self.l_w)
           },
           || {
             pp.circuit_shape_cyclefold.r1cs_shape.is_sat_relaxed(
@@ -383,7 +397,49 @@ where
     res_r_U?;
     res_l_u?;
     res_r_U_cyclefold?;
-    Ok(self.zi.to_vec())
+
+    // 1. Parse u_i.C_W as (C_ωi−1 , C_aux_i−1 ).
+    // 2. Then check that C_i = hash(C_i−1 , C_ωi−1)
+    self.ic_check(pp, ic)?;
+    Ok(self.z_i.to_vec())
+  }
+}
+
+impl<E> RecursiveSNARK<E>
+where
+  E: CurveCycleEquipped,
+{
+  fn ic_check(&self, pp: &PublicParams<E>, ic: IncrementalCommitment<E>) -> Result<(), NovaError> {
+    let expected_ic = increment_comm::<E>(&pp.ro_consts, self.prev_ic, self.l_u.pre_committed);
+    if expected_ic != ic {
+      return Err(NovaError::InvalidIC);
+    }
+    Ok(())
+  }
+
+  fn nifs(
+    &self,
+    pp: &PublicParams<E>,
+  ) -> Result<
+    (
+      NIFS<E>,
+      (LR1CSInstance<E>, SplitR1CSWitness<E>),
+      (RelaxedR1CSInstance<Dual<E>>, RelaxedR1CSWitness<Dual<E>>),
+    ),
+    NovaError,
+  > {
+    NIFS::prove(
+      (
+        &pp.circuit_shape.r1cs_shape,
+        &pp.circuit_shape_cyclefold.r1cs_shape,
+      ),
+      &pp.ck_cyclefold,
+      &pp.ro_consts,
+      &pp.digest(),
+      (&self.r_U, &self.r_W),
+      (&self.l_u, &self.l_w),
+      (&self.r_U_cyclefold, &self.r_W_cyclefold),
+    )
   }
 }
 
@@ -400,6 +456,11 @@ pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
   ) -> Result<Vec<AllocatedNum<F>>, SynthesisError>
   where
     CS: ConstraintSystem<F>;
+
+  /// Get non-deterministic advice for the circuit
+  fn advice(&self) -> (Vec<F>, Vec<F>) {
+    (vec![], vec![])
+  }
 }
 
 #[allow(dead_code)]
@@ -420,52 +481,54 @@ where
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
+  use super::{IncrementalCommitment, RecursiveSNARK};
   use crate::{
     frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
-    hypernova::rs::StepCircuit,
+    hypernova::{nebula::ic::increment_ic, rs::StepCircuit},
     provider::Bn256EngineIPA,
-    traits::{snark::default_ck_hint, CurveCycleEquipped},
+    traits::{snark::default_ck_hint, CurveCycleEquipped, Engine},
     NovaError,
   };
   use ff::PrimeField;
   use std::marker::PhantomData;
 
-  use super::RecursiveSNARK;
-
-  fn test_rs_with<E: CurveCycleEquipped>() -> Result<(), NovaError> {
-    let circuit = SquareCircuit::<E::Scalar> { _p: PhantomData };
-    run_circuit::<E>(&circuit)
-  }
+  type E = Bn256EngineIPA;
+  type F = <E as Engine>::Scalar;
 
   #[test]
   fn test_rs() -> Result<(), NovaError> {
-    test_rs_with::<Bn256EngineIPA>()
+    let circuit = SquareCircuit::<F>::default();
+    test_rs_with::<E>(&circuit)
   }
 
-  fn test_rs_pow_with<E: CurveCycleEquipped>() -> Result<(), NovaError> {
-    let circuit = PowCircuit::<E::Scalar> {
-      _field: PhantomData,
-    };
-    run_circuit::<E>(&circuit)
-  }
   #[test]
-  fn test_rs_pow() -> Result<(), NovaError> {
-    test_rs_pow_with::<Bn256EngineIPA>()
+  fn test_pow_rs() -> Result<(), NovaError> {
+    let circuit = PowCircuit::<F>::default();
+    test_rs_with::<E>(&circuit)
+  }
+
+  fn test_rs_with<E: CurveCycleEquipped>(
+    circuit: &impl StepCircuit<E::Scalar>,
+  ) -> Result<(), NovaError> {
+    run_circuit::<E>(circuit)
   }
 
   fn run_circuit<E: CurveCycleEquipped>(c: &impl StepCircuit<E::Scalar>) -> Result<(), NovaError> {
     let pp = super::PublicParams::<E>::setup(c, &*default_ck_hint(), &*default_ck_hint());
-    let z0 = vec![E::Scalar::from(2u64)];
-    let mut recursive_snark = RecursiveSNARK::new(&pp, c, &z0).unwrap();
-    for i in 0..100 {
-      recursive_snark.prove_step(&pp, c)?;
-      recursive_snark.verify(&pp, i + 1, &z0).unwrap();
+    let z_0 = vec![E::Scalar::from(2u64)];
+    let mut ic = IncrementalCommitment::<E>::default();
+    let mut recursive_snark = RecursiveSNARK::new(&pp, c, &z_0)?;
+    for i in 0..10 {
+      recursive_snark.prove_step(&pp, c, ic)?;
+      let (advice_0, advice_1) = c.advice();
+      ic = increment_ic::<E>(&pp.ck, &pp.ro_consts, ic, (&advice_0, &advice_1));
+      recursive_snark.verify(&pp, i + 1, &z_0, ic)?;
     }
     Ok(())
   }
 
-  #[derive(Clone)]
+  #[derive(Clone, Default)]
   struct SquareCircuit<F> {
     _p: PhantomData<F>,
   }
