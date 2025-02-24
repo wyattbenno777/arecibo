@@ -54,17 +54,17 @@ where
   {
     let sc = AllocatedSumcheckProof::alloc(
       cs.namespace(|| "sumcheck proof"),
-      map_field!(inst, sc),
+      map_field!(inst, partial_nifs.sc),
       num_rounds,
     )?;
     let sigmas = alloc_sized_vec(
       cs.namespace(|| "sigmas"),
-      map_field!(inst, sigmas),
+      map_field!(inst, partial_nifs.sigmas),
       NUM_MATRICES,
     )?;
     let thetas = alloc_sized_vec(
       cs.namespace(|| "thetas"),
-      map_field!(inst, thetas),
+      map_field!(inst, partial_nifs.thetas),
       NUM_MATRICES,
     )?;
     let cyclefold_nifs = AllocatedCycleFoldNIFS::alloc(
@@ -322,7 +322,8 @@ where
   {
     let comm_T = AllocatedPoint::alloc(
       cs.namespace(|| "allocate T"),
-      inst.map(|inst| inst.comm_T.to_coordinates()),
+      // inst.map(|inst| inst.comm_T.to_coordinates()),
+      map_field!(inst, comm_T.to_coordinates()),
     )?;
     let l_u = AllocatedCycleFoldInstance::alloc(
       cs.namespace(|| "l_u"),
@@ -439,7 +440,7 @@ where
         .map(|i| {
           AllocatedUniPoly::alloc(
             cs.namespace(|| format!("poly_{i}")),
-            inst.map(|inst| &inst.polys[i]),
+            map_field!(inst, polys[i]),
           )
         })
         .try_collect()?,
@@ -832,8 +833,8 @@ where
   {
     let (comm_W, x0, x1, pre_committed) = alloc_instance_witness::<_, E>(
       cs.namespace(|| "allocate instance witness"),
-      inst.map(|inst| inst.aux.comm_W),
-      inst.map(|inst| &inst.aux.X),
+      map_field!(inst, aux.comm_W).copied(),
+      map_field!(inst, aux.X),
       map_field!(inst, pre_committed).copied(),
       limb_width,
       n_limbs,

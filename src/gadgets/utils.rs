@@ -453,14 +453,23 @@ pub fn conditionally_select_vec<F: PrimeField, CS: ConstraintSystem<F>>(
 macro_rules! map_field {
   // This arm is used when you already have an Option<&T>
   // Usage: opt_field!(opt_instance, field_name)
-  ($inst:expr, $field:ident) => {
-    $inst.map(|i| &i.$field)
+  ($inst:expr, $($field:ident).+) => {
+    $inst.map(|i| &i$(.$field)+)
   };
   // This arm is used when you have an Option<T> (not already a reference)
   // and you want to call as_ref() first.
   // Usage: opt_field!(opt_instance, ref, field_name)
-  ($opt:expr, ref, $field:ident) => {
-    $opt.as_ref().map(|inst| &inst.$field)
+  ($opt:expr, ref, $($field:ident).+) => {
+    $opt.as_ref().map(|inst| &inst$(.$field)+)
+  };
+  // Arm for index notation (e.g. map_field!(inst, field1[i]))
+  ($inst:expr, $field:ident [$index:expr]) => {
+    $inst.map(|i| &i.$field[$index])
+  };
+  // Arm for method calls (non-reference)
+  // Example: map_field!(inst, field1.some_method())
+  ($inst:expr, $field:ident . $method:ident ( $($args:tt)* )) => {
+    $inst.map(|i| i.$field.$method($($args)*))
   };
 }
 
