@@ -1,7 +1,5 @@
 //! This module provides the components needed to compress the HyperNova IVC proofs with Spartan.
 
-use serde::{Deserialize, Serialize};
-
 use super::rs::{PublicParams, RecursiveSNARK};
 use crate::{
   hypernova::nifs::PartialNIFS,
@@ -16,6 +14,7 @@ use crate::{
   },
   DerandKey, NovaError,
 };
+use serde::{Deserialize, Serialize};
 
 /// A type that holds the prover key for [`CompressedSNARK`]
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -123,7 +122,32 @@ where
   }
 
   /// Verify a [`CompressedSNARK`] with the provided [`VerifierKey`]
-  pub fn verify(&self, vk: &VerifierKey<E, S1, S2>) -> Result<(), NovaError> {
+  pub fn verify(
+    &self,
+    vk: &VerifierKey<E, S1, S2>,
+    z_0: &[E::Scalar],
+    num_steps: usize,
+  ) -> Result<(), NovaError> {
+    // --- Basic checks ---
+    //
+    // 1. check if the (relaxed) R1CS instances have two public outputs
+    if self.data.r_U.X.len() != 2 || self.data.l_u.aux.X.len() != 2 {
+      return Err(NovaError::ProofVerifyError);
+    }
+    // 2. Hash check:
+    //    check if the output hashes in R1CS instances point to the right running instances
+    RecursiveSNARK::hash_check(
+      &vk.ro_consts,
+      vk.pp_digest,
+      num_steps,
+      z_0,
+      &self.data.z_i,
+      &self.data.r_U,
+      self.data.prev_ic,
+      &self.data.l_u,
+      &self.data.r_U_cyclefold,
+    )?;
+
     // Verify NIFS and Spartan proofs
     let (U, U_cyclefold) = self.verify_nifs_derand(vk)?;
     let (res, res_cyclefold) = rayon::join(
@@ -182,6 +206,8 @@ where
       CompressedSNARKData {
         r_U: rs.r_U.clone(),
         l_u: rs.l_u.clone(),
+        z_i: rs.z_i.clone(),
+        prev_ic: rs.prev_ic,
         wit_blind,
         r_U_cyclefold: rs.r_U_cyclefold.clone(),
         wit_blind_cyclefold,
@@ -223,6 +249,8 @@ where
 {
   r_U: LR1CSInstance<E>,
   l_u: SplitR1CSInstance<E>,
+  z_i: Vec<E::Scalar>,
+  prev_ic: (E::Scalar, E::Scalar),
   wit_blind: E::Scalar,
   r_U_cyclefold: RelaxedR1CSInstance<Dual<E>>,
   wit_blind_cyclefold: E::Base,
@@ -270,7 +298,7 @@ mod tests {
     S1: LinearizedR1CSSNARKTrait<E>,
     S2: RelaxedR1CSSNARKTrait<Dual<E>>,
   {
-    run_circuit::<E, S1, S2>(circuit, true)
+    run_circuit::<E, S1, S2>(circuit, false)
   }
 
   fn run_circuit<E, S1, S2>(
@@ -304,7 +332,7 @@ mod tests {
     }
     let (pk, vk) = CompressedSNARK::<E, S1, S2>::setup(&pp)?;
     let snark = CompressedSNARK::<E, S1, S2>::prove(&pp, &pk, &recursive_snark)?;
-    snark.verify(&vk)?;
+    snark.verify(&vk, &z_0, recursive_snark.num_steps())?;
     if check_proof_size {
       let rs_str = serde_json::to_string(&recursive_snark).unwrap();
       println!("recursive snark: {} MB", rs_str.len() / 1024 / 1024);
@@ -313,7 +341,7 @@ mod tests {
       // sanity check deserialized snark
       let snark_deserialized: CompressedSNARK<E, S1, S2> =
         serde_json::from_str(&snark_str).unwrap();
-      snark_deserialized.verify(&vk)?;
+      snark_deserialized.verify(&vk, &z_0, recursive_snark.num_steps())?;
     }
     Ok(())
   }

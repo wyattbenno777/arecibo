@@ -189,6 +189,7 @@ where
     }
 
     // --- Get running instance, witness pairs ---
+    //
     // 1. Get default running primary instance and witness pair
     let r1cs = &pp.circuit_shape.r1cs_shape;
     let r_U = LR1CSInstance::default(r1cs);
@@ -199,6 +200,7 @@ where
     let r_W_cyclefold = RelaxedR1CSWitness::default(r1cs_cyclefold);
 
     // --- Base case for F' ---
+    //
     // Get the new instance-witness pair to be folded into running instance
     let ((l_u, l_w), z_i) = Self::synthesize_aug_circuit_base_case(pp, z_0, step_circuit)?;
     Ok(Self {
@@ -288,31 +290,18 @@ where
     // --- Hash check ---
     //
     // 1. Compute H(pp, i, z_0, z_i, r_U, prev_ic)
-    let mut ro = <Dual<E> as Engine>::RO::new(pp.ro_consts.clone(), DEFAULT_ABSORBS);
-    ro.absorb(pp.digest());
-    ro.absorb(E::Scalar::from(num_steps as u64));
-    for e in z_0 {
-      ro.absorb(*e);
-    }
-    for e in &self.z_i {
-      ro.absorb(*e);
-    }
-    self.r_U.absorb_in_ro(&mut ro);
-    ro.absorb(self.prev_ic.0);
-    ro.absorb(self.prev_ic.1);
-    let hash = ro.squeeze(NUM_HASH_BITS);
     // 2. Compute H(pp, i, r_U_cyclefold)
-    let mut ro = <Dual<E> as Engine>::RO::new(pp.ro_consts.clone(), DEFAULT_ABSORBS);
-    ro.absorb(pp.digest());
-    ro.absorb(E::Scalar::from(num_steps as u64));
-    self.r_U_cyclefold.absorb_in_ro(&mut ro);
-    let hash_cyclefold = ro.squeeze(NUM_HASH_BITS);
-    // 3. Check if H(pp, i, z_0, z_i, r_U) = l_u.X[0] && H(pp, i, r_U_cyclefold) = l_u.X[1]
-    if scalar_as_base::<Dual<E>>(hash) != self.l_u.aux.X[0]
-      || scalar_as_base::<Dual<E>>(hash_cyclefold) != self.l_u.aux.X[1]
-    {
-      return Err(NovaError::ProofVerifyError);
-    }
+    Self::hash_check(
+      &pp.ro_consts,
+      pp.digest(),
+      num_steps,
+      z_0,
+      &self.z_i,
+      &self.r_U,
+      self.prev_ic,
+      &self.l_u,
+      &self.r_U_cyclefold,
+    )?;
 
     // Verify the satisfiability of running relaxed instances, and the final primary instance.
     let (res_r_U, (res_l_u, res_r_U_cyclefold)) = rayon::join(
@@ -450,6 +439,53 @@ where
       None,
     );
     Self::synthesize_aug_circuit_with_inputs(pp, inputs, step_circuit)
+  }
+
+  pub(crate) fn hash_check(
+    ro_consts: &ROConstants<Dual<E>>,
+    pp_digest: E::Scalar,
+    num_steps: usize,
+    z_0: &[E::Scalar],
+    z_i: &[E::Scalar],
+    r_U: &LR1CSInstance<E>,
+    prev_ic: IncrementalCommitment<E>,
+    l_u: &SplitR1CSInstance<E>,
+    r_U_cyclefold: &RelaxedR1CSInstance<Dual<E>>,
+  ) -> Result<(), NovaError> {
+    // --- Hash check ---
+    //
+    // 1. Compute H(pp, i, z_0, z_i, r_U, prev_ic)
+    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
+    ro.absorb(pp_digest);
+    ro.absorb(E::Scalar::from(num_steps as u64));
+    for e in z_0 {
+      ro.absorb(*e);
+    }
+    for e in z_i {
+      ro.absorb(*e);
+    }
+    r_U.absorb_in_ro(&mut ro);
+    ro.absorb(prev_ic.0);
+    ro.absorb(prev_ic.1);
+    let hash = ro.squeeze(NUM_HASH_BITS);
+    // 2. Compute H(pp, i, r_U_cyclefold)
+    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
+    ro.absorb(pp_digest);
+    ro.absorb(E::Scalar::from(num_steps as u64));
+    r_U_cyclefold.absorb_in_ro(&mut ro);
+    let hash_cyclefold = ro.squeeze(NUM_HASH_BITS);
+    // 3. Check if H(pp, i, z_0, z_i, r_U) = l_u.X[0] && H(pp, i, r_U_cyclefold) = l_u.X[1]
+    if scalar_as_base::<Dual<E>>(hash) != l_u.aux.X[0]
+      || scalar_as_base::<Dual<E>>(hash_cyclefold) != l_u.aux.X[1]
+    {
+      return Err(NovaError::ProofVerifyError);
+    }
+    Ok(())
+  }
+
+  /// Get the number of steps executed by the recursiveSNARK
+  pub fn num_steps(&self) -> usize {
+    self.i
   }
 }
 
