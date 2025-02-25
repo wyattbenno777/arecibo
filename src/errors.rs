@@ -96,6 +96,9 @@ pub enum NovaError {
   /// HyperNovaError
   #[error("HyperNovaError")]
   HyperNovaError(#[from] HyperNovaError),
+  /// returned when circuit for proving is not found
+  #[error("NoCircuit")]
+  NoCircuit,
 }
 
 /// Errors specific to the Polynomial commitment scheme

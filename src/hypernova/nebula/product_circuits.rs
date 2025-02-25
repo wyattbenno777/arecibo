@@ -282,6 +282,58 @@ impl ScanCircuit {
   }
 }
 
+#[derive(Clone, Debug)]
+/// BatchedWasmTransitionCircuit
+pub struct BatchedOpsCircuit {
+  circuits: Vec<OpsCircuit>,
+}
+
+impl<F> StepCircuit<F> for BatchedOpsCircuit
+where
+  F: PrimeField + PartialOrd,
+{
+  fn arity(&self) -> usize {
+    6
+  }
+
+  fn synthesize<CS: ConstraintSystem<F>>(
+    &self,
+    cs: &mut CS,
+    z: &[AllocatedNum<F>],
+  ) -> Result<Vec<AllocatedNum<F>>, SynthesisError> {
+    let mut z = z.to_vec();
+
+    for circuit in self.circuits.iter() {
+      z = circuit.synthesize(cs, &z)?;
+    }
+
+    Ok(z)
+  }
+
+  fn advice(&self) -> (Vec<F>, Vec<F>) {
+    let advice0 = self
+      .circuits
+      .iter()
+      .flat_map(|circuit| circuit.advice().0)
+      .collect_vec();
+    (advice0, vec![])
+  }
+}
+
+impl BatchedOpsCircuit {
+  /// Create an empty instance of [`BatchedOpsCircuit`]
+  pub fn empty(step_size: usize) -> Self {
+    Self {
+      circuits: vec![OpsCircuit::empty(); step_size],
+    }
+  }
+
+  /// Create a new instance of [`BatchedOpsCircuit`]
+  pub fn new(circuits: Vec<OpsCircuit>) -> Self {
+    Self { circuits }
+  }
+}
+
 /// Converts two of (addr, val, ts) tuples to a `Vec<Scalar>`. Alternating between the two multisets
 pub fn convert_advice<F>(
   multiset_a: &[(usize, u64, u64)],
