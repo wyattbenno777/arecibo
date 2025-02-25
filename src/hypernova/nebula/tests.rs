@@ -31,27 +31,31 @@ fn test_heapify() {
   // Calculate testing memory (heap) size. We keep the test simple and ensure
   // memory size is a power of two
   let size_log = 5;
-  let (init_memory, mut final_memory) = heap_memory(size_log);
 
-  // construct circuits and maintain memory
+  // Get IS, FS, RS, & WS
+  let (init_memory, mut final_memory) = heap_memory(size_log);
   let (read_ops, write_ops) = memory_ops_trace(&mut final_memory);
 
+  // Custom zkVM engine for heapify
   let heapify_engine = HeapifyEngine {
     read_ops: read_ops.clone(),
     write_ops: write_ops.clone(),
     start_addr: ((init_memory.len() - 4) / 2),
   };
 
+  let err_msg = "Multisets should be valid and input circuit should be sat";
+
+  // Prove vm execution and memory consistency
   let (nebula_snark, U) = NebulaSNARK::prove(
     &pp,
     step_size,
     (init_memory, final_memory, read_ops, write_ops),
     heapify_engine,
   )
-  .expect("Multisets should be valid and input circuit should be sat");
-  nebula_snark
-    .verify(&pp, &U)
-    .expect("Multisets should be valid and input circuit should be sat");
+  .expect(err_msg);
+
+  // Verify vm execution and memory consistency
+  nebula_snark.verify(&pp, &U).expect(err_msg);
 }
 
 struct HeapifyEngine {

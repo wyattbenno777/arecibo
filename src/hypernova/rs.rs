@@ -46,27 +46,27 @@ pub struct PublicParams<E>
 where
   E: CurveCycleEquipped,
 {
+  /// R1CS shape we are arguing about
+  pub circuit_shape: R1CSWithArity<E>,
   /// The arity of the step circuit
   pub F_arity: usize,
+  /// Digest of the public parameters
+  #[serde(skip, default = "OnceCell::new")]
+  pub digest: OnceCell<E::Scalar>,
+  /// Number of sumcheck rounds used in the NIFS for the augmented circuit
+  pub num_rounds: usize,
   /// RO constants for primary circuit
   pub ro_consts: ROConstants<Dual<E>>,
   /// RO constants for primary circuit
   pub ro_consts_circuit: ROConstantsCircuit<Dual<E>>,
   /// Commitment key for primary circuit
   pub ck: Arc<CommitmentKey<E>>,
-  /// R1CS shape we are arguing about
-  pub circuit_shape: R1CSWithArity<E>,
   /// Parameters of big nats in circuit
   pub augmented_circuit_params: AugmentedCircuitParams,
   /// secondary commitment key
   pub ck_cyclefold: Arc<CommitmentKey<Dual<E>>>,
   /// R1CS shape of cyclefold circuit
   pub circuit_shape_cyclefold: R1CSWithArity<Dual<E>>,
-  /// Digest of the public parameters
-  #[serde(skip, default = "OnceCell::new")]
-  pub digest: OnceCell<E::Scalar>,
-  /// Number of sumcheck rounds used in the NIFS for the augmented circuit
-  pub num_rounds: usize,
 }
 
 impl<E> PublicParams<E>
