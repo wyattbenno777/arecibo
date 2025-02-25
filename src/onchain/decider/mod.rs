@@ -2,7 +2,7 @@
 
 use super::{
   decider_circuit::DeciderCircuit,
-  gadgets::{FoldGadget, KZGProof},
+  gadgets::{FoldGadget, KZGProof}, utils::to_scalar_coordinates,
 };
 use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
@@ -36,7 +36,6 @@ use num_bigint::{BigInt, Sign};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
-pub mod test;
 
 /// A type that holds the prover key for [`Decider`]
 #[derive(Clone, Serialize, Deserialize)]
@@ -52,6 +51,8 @@ pub struct DeciderVerifierKey {
   pub pp_hash: <Bn256EngineKZG as Engine>::Scalar,
   pub kzg_vk: KZGVerifierKey<Bn256>,
 }
+
+
 
 /// A SNARK that proves the knowledge of a valid  proof
 #[derive(Debug, Deserialize, Serialize)]
@@ -165,36 +166,9 @@ impl Decider {
       self.rho,
     )?;
 
-    // TODO: Refactor
-    let (U_cmW_x, U_cmW_y, _U_cmW_id) = {
-      let (x, y, id) = U_cmW.to_coordinates();
-      let x_bignat = BigInt::from_bytes_le(Sign::Plus, &x.to_repr());
-      let x_limbs = nat_to_limbs(&x_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
-      let y_bignat = BigInt::from_bytes_le(Sign::Plus, &y.to_repr());
-      let y_limbs = nat_to_limbs(&y_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
-      let id_fr = Fr::from(id);
-      (x_limbs, y_limbs, id_fr)
-    };
-
-    let (U_cmE_x, U_cmE_y, _U_cmE_id) = {
-      let (x, y, id) = U_cmE.to_coordinates();
-      let x_bignat = BigInt::from_bytes_le(Sign::Plus, &x.to_repr());
-      let x_limbs = nat_to_limbs(&x_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
-      let y_bignat = BigInt::from_bytes_le(Sign::Plus, &y.to_repr());
-      let y_limbs = nat_to_limbs(&y_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
-      let id_fr = Fr::from(id);
-      (x_limbs, y_limbs, id_fr)
-    };
-
-    let (cmT_x, cmT_y, _cmT_id) = {
-      let (x, y, id) = self.nifs_proof.nifs_primary.comm_T.to_coordinates();
-      let x_bignat = BigInt::from_bytes_le(Sign::Plus, &x.to_repr());
-      let x_limbs = nat_to_limbs(&x_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
-      let y_bignat = BigInt::from_bytes_le(Sign::Plus, &y.to_repr());
-      let y_limbs = nat_to_limbs(&y_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
-      let id_fr = Fr::from(id);
-      (x_limbs, y_limbs, id_fr)
-    };
+    let (U_cmW_x, U_cmW_y, _U_cmW_id) = to_scalar_coordinates(&U_cmW)?;
+    let (U_cmE_x, U_cmE_y, _U_cmE_id) = to_scalar_coordinates(&U_cmE)?;
+    let (cmT_x, cmT_y, _cmT_id) = to_scalar_coordinates(&self.nifs_proof.nifs_primary.comm_T)?;
 
     let public_inputs = [
       &[pp_hash],

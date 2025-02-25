@@ -100,10 +100,7 @@ pub trait CommitmentEngineTrait<E: Engine>: Clone + Send + Sync {
 
   /// Commits to the provided vector using the provided generators in circuit
   // TODO: Maybe pass AllocatedRelaxedR1CSInstance instead of v and r
-  fn commit_gadget<CS: ConstraintSystem<E::Base>>(cs: &mut CS, _ck: &Self::CommitmentKey, _v: &[E::Scalar], _r: &E::Scalar) -> Result<AllocatedPoint<E::GE>, SynthesisError> {
-    // TODO: Implement this method in all commitment engines
-    Ok(AllocatedPoint::<E::GE>::default(cs))
-  }
+  fn commit_gadget<CS: ConstraintSystem<E::Base>>(cs: &mut CS, _ck: &Self::CommitmentKey, _v: &[E::Scalar], _r: &E::Scalar) -> Result<AllocatedPoint<E::GE>, SynthesisError>;
 
   /// Remove given blind from commitment
   fn derandomize(

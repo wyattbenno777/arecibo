@@ -84,6 +84,7 @@ portable = ["grumpkin-msm/portable"]
 cuda = ["grumpkin-msm/cuda"]
 flamegraph = ["pprof/flamegraph", "pprof/criterion"]
 opencl = []
+light_onchain_prover = []
 
 [profile.dev-ci]
 inherits = "dev"

@@ -5,3 +5,4 @@ pub mod utils;
 pub mod decider;
 pub mod decider_circuit;
 pub mod gadgets;
+pub mod test;

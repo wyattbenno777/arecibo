@@ -1,8 +1,9 @@
 //! Utility functions for onchain verification
-use crate::onchain::verifiers::{GPL3_SDPX_IDENTIFIER, PRAGMA_GROTH16_VERIFIER};
+use crate::{constants::{BN_LIMB_WIDTH, BN_N_LIMBS}, gadgets::nat_to_limbs, onchain::verifiers::{GPL3_SDPX_IDENTIFIER, PRAGMA_GROTH16_VERIFIER}, provider::Bn256EngineKZG, traits::commitment::CommitmentTrait, Commitment, NovaError};
 use askama::Template;
+use halo2curves::bn256::Fr;
 // use sha3::{Digest, Keccak256};
-use num_bigint::BigUint;
+use num_bigint::{BigInt, BigUint, Sign};
 use ff::PrimeField;
 use crypto::{digest::Digest, sha3::Sha3};
 pub mod encoding;
@@ -133,3 +134,13 @@ pub fn nth_root_of_unity<F: PrimeField>(n: usize) -> Option<F> {
 
     Some(root)
 }
+
+pub fn to_scalar_coordinates(comm: &Commitment<Bn256EngineKZG>) -> Result<(Vec<Fr>, Vec<Fr>, Fr), NovaError> {
+    let (x, y, id) = comm.to_coordinates();
+    let x_bignat = BigInt::from_bytes_le(Sign::Plus, &x.to_repr());
+    let x_limbs = nat_to_limbs(&x_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
+    let y_bignat = BigInt::from_bytes_le(Sign::Plus, &y.to_repr());
+    let y_limbs = nat_to_limbs(&y_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
+    let id_fr = Fr::from(id);
+    Ok((x_limbs, y_limbs, id_fr))
+  }

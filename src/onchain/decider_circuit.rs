@@ -26,7 +26,9 @@ use crate::{
   provider::traits::DlogGroup,
   r1cs::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{
-    commitment::{CommitmentEngineTrait, CommitmentTrait}, CurveCycleEquipped, Dual, Engine, Group, ROCircuitTrait, ROConstants, ROConstantsCircuit, ROTrait
+    commitment::{CommitmentEngineTrait, CommitmentTrait},
+    CurveCycleEquipped, Dual, Engine, Group, ROCircuitTrait, ROConstants, ROConstantsCircuit,
+    ROTrait,
   },
   CommitmentKey,
 };
@@ -109,8 +111,14 @@ where
       cf_U_i: RelaxedR1CSInstance::default(ck_secondary, cf_arith),
       cf_W_i: RelaxedR1CSWitness::default(cf_arith),
       cf_ck: ck_secondary.clone().into(),
-      kzg_challenges: (<E as Engine>::Scalar::from(0), <E as Engine>::Scalar::from(0)),
-      kzg_evaluations: (<E as Engine>::Scalar::from(0), <E as Engine>::Scalar::from(0)),
+      kzg_challenges: (
+        <E as Engine>::Scalar::from(0),
+        <E as Engine>::Scalar::from(0),
+      ),
+      kzg_evaluations: (
+        <E as Engine>::Scalar::from(0),
+        <E as Engine>::Scalar::from(0),
+      ),
     }
   }
 
@@ -170,8 +178,6 @@ where
   E::Scalar: GpuName,
 {
   fn synthesize<CS: ConstraintSystem<E::Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
-    // let arith = AllocatedR1CSInstance::alloc(cs, Some(self.arith))?;
-
     let pp_hash = AllocatedNum::alloc(cs.namespace(|| "get pp_hash"), || Ok(self.pp_hash))?;
     pp_hash.inputize(cs.namespace(|| "pp_hash"))?;
 
@@ -224,39 +230,43 @@ where
 
     let (U_i1_cmW_x, U_i1_cmW_y, U_i1_cmW_id) = U_i1.comm_W.to_coordinates();
 
-    for (i, limb )in U_i1_cmW_x.as_limbs().iter().enumerate() {
-          let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of x to num")))?;
-          tmp.inputize(cs.namespace(|| format!("convert limb {i} of x to num")))?;
+    for (i, limb) in U_i1_cmW_x.as_limbs().iter().enumerate() {
+      let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of x to num")))?;
+      tmp.inputize(cs.namespace(|| format!("convert limb {i} of x to num")))?;
     }
 
-    for (i, limb )in U_i1_cmW_y.as_limbs().iter().enumerate() {
+    for (i, limb) in U_i1_cmW_y.as_limbs().iter().enumerate() {
       let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of y to num")))?;
       tmp.inputize(cs.namespace(|| format!("convert limb {i} of y to num")))?;
     }
 
     let (U_i1_cmE_x, U_i1_cmE_y, U_i1_cmE_id) = U_i1.comm_E.to_coordinates();
-    for (i, limb )in U_i1_cmE_x.as_limbs().iter().enumerate() {
+    for (i, limb) in U_i1_cmE_x.as_limbs().iter().enumerate() {
       let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of x to num")))?;
       tmp.inputize(cs.namespace(|| format!("convert limb {i} of x to num")))?;
     }
 
-    for (i, limb )in U_i1_cmE_y.as_limbs().iter().enumerate() {
+    for (i, limb) in U_i1_cmE_y.as_limbs().iter().enumerate() {
       let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of y to num")))?;
       tmp.inputize(cs.namespace(|| format!("convert limb {i} of y to num")))?;
     }
 
+    // --------------------------------------------------------------------------------------------
     // Step 1: Enforce U_{n+1} and W_{n+1} satisfy r1cs
+    // --------------------------------------------------------------------------------------------
     // Nova has no need for this, since we are checking if an r1cs relation
     // is sat inside r1cs thus creating another r1cs relation you would have to check is sat.
-    // In any case lets say you could do this what are you eventually going to use to prove the circuit with,
-    // since you could just use that proving mechanism on the original r1cs instance, witness pair.
 
+    // --------------------------------------------------------------------------------------------
     // Step 2: Check that u_n.E == 0 and un u_n.u == 1.
-    // Trivial
+    // --------------------------------------------------------------------------------------------
+    // Trivial, since we are using a r1cs relation.
 
+    // --------------------------------------------------------------------------------------------
     // Step 3: Verify the hash conditions:
-    //         un.x0 == H(n, z0, zn, Un) and un.x1 == H(U_EC,n).
-
+    //         un.x0 == H(n, z0, zn, Un)  
+    //         un.x1 == H(U_EC,n).
+    // --------------------------------------------------------------------------------------------
     let U_i_hash = hash_U_i::<E, CS>(cs, &U_i, &pp_hash, &i, &z_0, &z_i, &prev_IC, &r_i)?;
 
     cs.enforce(
@@ -266,7 +276,6 @@ where
       |lc| lc + u_i_x0.get_variable() - U_i_hash.get_variable(),
     );
 
-    // TODO: Maybe use cs.alloc instead
     let u_i_x1 = AllocatedNum::alloc(cs.namespace(|| "allocate x1"), || Ok(self.u_i.X[1]))?;
     let cf_U_i: AllocatedRelaxedR1CSInstance<Dual<E>, BN_N_LIMBS> =
       AllocatedRelaxedR1CSInstance::alloc(
@@ -285,30 +294,30 @@ where
       |lc| lc + u_i_x1.get_variable() - cf_U_i_hash.get_variable(),
     );
 
+    // --------------------------------------------------------------------------------------------
     // Step 4: Commitments verification for U_{EC,n}.{E, W} with respect to W_{EC,n}.{E, W}.
-    // TODO: Add a flag for testing
-    // let cf_W_i_commit = <Dual<E> as Engine>::CE::commit_gadget(
-    //   cs,
-    //   &*self.cf_ck,
-    //   &self.cf_W_i.W[..],
-    //   &self.cf_W_i.r_W,
-    // )?;
+    // --------------------------------------------------------------------------------------------
+    #[cfg(not(feature = "light_onchain_prover"))]
+    {
+      let cf_W_i_commit = <Dual<E> as Engine>::CE::commit_gadget(
+        cs,
+        &*self.cf_ck,
+        &self.cf_W_i.W[..],
+        &self.cf_W_i.r_W,
+      )?;
 
-    // // Check that Commit(cf_W_i.W) == cf_U_i.cmW
-    // cf_W_i_commit.check_equal(
-    //   cs.namespace(|| "check that cf_W_i.W == cf_U_i.cmW"),
-    //   &cf_U_i.W,
-    // )?;
+      // Check that Commit(cf_W_i.W) == cf_U_i.cmW
+      cf_W_i_commit.check_equal(
+        cs.namespace(|| "check that cf_W_i.W == cf_U_i.cmW"),
+        &cf_U_i.W,
+      )?;
+    }
 
-    // Step 5: Enforce U_{EC,n} and W_{EC,n} satisfy r1cs_{EC},
-    //         the Relaxed R1CS relation of the CycleFoldCircuit.
-    //         - This involves non-native operations because W_{EC,n}.{E, W} ∈ Fq.
-    //         - With naive sparse matrix-vector product, this increases the number of constraints.
-    // TODO: Do we need to do this?
+    // -------------------------------------------------------------------------------------------- 
+    // Step 5: Enforce U_{EC,n} and W_{EC,n} satisfy r1cs_{EC}, the Relaxed R1CS relation of the CycleFoldCircuit.
+    // --------------------------------------------------------------------------------------------
 
     // Step 6.1: Partially enforce that U_{n+1} is the correct folding of U_n and un.
-    //           - Only field elements in U_{n+1} are checked, while group elements (commitments) are not.
-    //           - Group elements are in E1 and are expensive non-native operations.
     let u_i = AllocatedEmulR1CSInstance::alloc(
       cs.namespace(|| "u_i"),
       Some(&self.u_i),
@@ -318,7 +327,7 @@ where
 
     let r = AllocatedNum::alloc(cs.namespace(|| "get r"), || Ok(self.randomness))?;
     let alloc_fold_U_i1 = FoldGadget::fold_field_elements_gadget::<_, E>(
-      cs, 
+      cs,
       pp_hash,
       U_i,
       u_i,
@@ -347,8 +356,10 @@ where
       |lc| lc + U_i1.x1.get_variable() - alloc_fold_U_i1.x1.get_variable(),
     );
 
-    // Step 7.1: Check correct computation of the KZG challenges.
-    //           - cE ≡ H(E.{x, y}), cW ≡ H(W.{x, y}).
+    // --------------------------------------------------------------------------------------------
+    // Step 7.1: Check correct computation of the KZG challenges:
+    //           cE ≡ H(E.{x, y}), cW ≡ H(W.{x, y}).
+    // --------------------------------------------------------------------------------------------
     let kzg_alloc_rw = AllocatedNum::alloc(cs.namespace(|| "get kzg_challenges rw"), || {
       Ok(self.kzg_challenges.0)
     })?;
@@ -374,7 +385,9 @@ where
       |lc| lc + kzg_alloc_re.get_variable() - alloc_re.get_variable(),
     );
 
+    // --------------------------------------------------------------------------------------------
     // Step 7.2: Verify that the KZG evaluations are correct
+    // --------------------------------------------------------------------------------------------
     let kzg_alloc_rw_eval = AllocatedNum::alloc(cs.namespace(|| "get kzg_evaluations"), || {
       Ok(self.kzg_evaluations.0)
     })?;
@@ -391,20 +404,12 @@ where
       .map(|x| AllocatedNum::alloc(cs.namespace(|| "allocate W_i1.W"), || Ok(*x)))
       .collect::<Result<Vec<_>, _>>()?;
 
-    for x in &W_i1_W {
-      cs.enforce(|| "W_i1.W", |lc| lc + x.get_variable(), |lc| lc, |lc| lc);
-    }
-
     let W_i1_E = self
       .W_i1
       .E
       .iter()
       .map(|x| AllocatedNum::alloc(cs.namespace(|| "allocate W_i1.E"), || Ok(*x)))
       .collect::<Result<Vec<_>, _>>()?;
-
-    for x in &W_i1_E {
-      cs.enforce(|| "W_i1.E", |lc| lc + x.get_variable(), |lc| lc, |lc| lc);
-    }
 
     let alloc_rw_eval = EvalGadget::evaluate_gadget::<&mut CS, E>(cs, W_i1_W, &kzg_alloc_rw)?;
     cs.enforce(
@@ -423,6 +428,8 @@ where
     );
 
     // ------------------------------
+    // Inputize the cross term cmT
+    // ------------------------------
 
     let alloc_cmT: AllocatedEmulPoint<<Dual<E> as Engine>::GE> = AllocatedEmulPoint::alloc(
       cs.namespace(|| "alloc_cmT"),
@@ -431,12 +438,12 @@ where
       BN_N_LIMBS,
     )?;
     let (cmT_x, cmT_y, cmT_id) = alloc_cmT.to_coordinates();
-    for (i, limb )in cmT_x.as_limbs().iter().enumerate() {
+    for (i, limb) in cmT_x.as_limbs().iter().enumerate() {
       let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of x to num")))?;
       tmp.inputize(cs.namespace(|| format!("convert limb {i} of x to num")))?;
     }
 
-    for (i, limb )in cmT_y.as_limbs().iter().enumerate() {
+    for (i, limb) in cmT_y.as_limbs().iter().enumerate() {
       let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of y to num")))?;
       tmp.inputize(cs.namespace(|| format!("convert limb {i} of y to num")))?;
     }
@@ -448,8 +455,6 @@ where
       |lc| lc,
     );
 
-
     Ok(())
   }
 }
-

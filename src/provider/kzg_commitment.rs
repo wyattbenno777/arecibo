@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::{
-  digest::SimpleDigestible, frontend::{domain::EvaluationDomain, gpu::GpuName}, provider::{pedersen::Commitment, traits::DlogGroup, util::fb_msm}, traits::{
+  digest::SimpleDigestible, frontend::{domain::EvaluationDomain, gpu::GpuName, ConstraintSystem, SynthesisError}, gadgets::AllocatedPoint, provider::{pedersen::Commitment, traits::DlogGroup, util::fb_msm}, traits::{
     commitment::{CommitmentEngineTrait, Len},
     Engine as NovaEngine, Group, TranscriptReprTrait,
   } 
@@ -275,6 +275,14 @@ e evaluation domain");
     Commitment {
       comm: E::G1::vartime_multiscalar_mul(&scalars, &bases),
     }
+  }
+
+  fn commit_gadget<CS: ConstraintSystem<NE::Base>> (
+    _cs: &mut CS, 
+    _ck: &Self::CommitmentKey, 
+    _v: &[NE::Scalar], 
+    _r: &NE::Scalar) -> Result<AllocatedPoint<NE::GE>, SynthesisError> {
+    unimplemented!()
   }
 
   fn derand_key(ck: &Self::CommitmentKey) -> Self::DerandKey {
