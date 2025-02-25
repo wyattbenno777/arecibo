@@ -1,32 +1,45 @@
+pub mod full_flow;
+
 #[cfg(test)]
 mod tests {
   use std::sync::Arc;
 
   use crate::{
-    constants::{BN_LIMB_WIDTH, BN_N_LIMBS}, cyclefold::gadgets::emulated::{AllocatedEmulPoint, AllocatedEmulRelaxedR1CSInstance}, frontend::{
+    constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
+    cyclefold::gadgets::emulated::{AllocatedEmulPoint, AllocatedEmulRelaxedR1CSInstance},
+    frontend::{
       groth16::{self, create_random_proof, generate_random_parameters, verify_proof},
       num::AllocatedNum,
       r1cs::NovaShape,
       shape_cs::ShapeCS,
       test_cs::TestConstraintSystem,
       Circuit, ConstraintSystem, SynthesisError,
-    }, gadgets::nat_to_limbs, nebula::rs::{PublicParams, RecursiveSNARK, StepCircuit}, onchain::{
+    },
+    gadgets::nat_to_limbs,
+    nebula::rs::{PublicParams, RecursiveSNARK, StepCircuit},
+    onchain::{
       decider_circuit::DeciderCircuit,
       gadgets::{EvalGadget, FoldGadget, KZGChallengesGadget, KZGProof},
-    }, provider::{
+    },
+    provider::{
       hyperkzg::EvaluationEngine,
       kzg_commitment::{KZGCommitmentEngine, UVKZGCommitment},
-      non_hiding_zeromorph::{UVKZGPoly, UVKZGPCS},
       Bn256EngineKZG, GrumpkinEngine,
-    }, r1cs::{commitment_key, RelaxedR1CSInstance}, traits::{commitment::CommitmentEngineTrait, evaluation::EvaluationEngineTrait, snark::{default_ck_hint, RelaxedR1CSSNARKTrait}, Dual, Engine}, Commitment
+    },
+    r1cs::{commitment_key, RelaxedR1CSInstance},
+    traits::{
+      commitment::{CommitmentEngineTrait, CommitmentTrait},
+      evaluation::EvaluationEngineTrait,
+      snark::{default_ck_hint, RelaxedR1CSSNARKTrait},
+      Dual, Engine,
+    },
+    Commitment,
   };
-  use ff::Field;
+  use ff::{Field, PrimeField};
   use group::Curve;
   use halo2curves::bn256::{Bn256, Fr};
   use num_bigint::{BigInt, Sign};
-use rand::thread_rng;
-  use crate::traits::commitment::CommitmentTrait;
-  use ff::PrimeField;
+  use rand::thread_rng;
 
   type E1 = Bn256EngineKZG;
   type E2 = GrumpkinEngine;
@@ -34,6 +47,7 @@ use rand::thread_rng;
   type EE2 = crate::provider::ipa_pc::EvaluationEngine<E2>;
   type S1 = crate::spartan::snark::RelaxedR1CSSNARK<E1, EE1>; // non-preprocessing SNARK
   type S2 = crate::spartan::snark::RelaxedR1CSSNARK<E2, EE2>; // non-preprocessing SNARK
+
   /// Test circuit to be folded
   #[derive(Clone, Debug)]
   pub struct TestChallengeCircuit {
@@ -171,7 +185,6 @@ use rand::thread_rng;
     Ok(())
   }
 
-
   #[test]
   fn test_eval_gadget() {
     let circuit = TrivialCircuit {
@@ -281,7 +294,8 @@ use rand::thread_rng;
     let nifs_proof = circuit.nifs_proof.clone();
 
     let (U_i1_cmW, U_i1_cmE) = FoldGadget::fold_group_elements_native::<Bn256EngineKZG>(
-      (rs.r_U_primary.comm_W, rs.r_U_primary.comm_E),
+      rs.r_U_primary.comm_W,
+      rs.r_U_primary.comm_E,
       rs.l_u_primary.comm_W,
       nifs_proof.nifs_primary.comm_T,
       rho,
@@ -298,13 +312,16 @@ use rand::thread_rng;
       KZGProof::prove(&kzg_pk, kzg_challenges_e, &circuit.W_i1.E[..]).unwrap(),
     );
 
-
     let kzg_U_i1_cmW = UVKZGCommitment::<Bn256>::new(U_i1_cmW.comm.to_affine());
     let kzg_U_i1_cmE = UVKZGCommitment::<Bn256>::new(U_i1_cmE.comm.to_affine());
 
     // 7.3 Verify KZG proofs
-    kzg_proof_w.verify(&kzg_vk, &kzg_U_i1_cmW, kzg_challenges_w).unwrap();
-    kzg_proof_e.verify(&kzg_vk, &kzg_U_i1_cmE, kzg_challenges_e).unwrap();
+    kzg_proof_w
+      .verify(&kzg_vk, &kzg_U_i1_cmW, kzg_challenges_w)
+      .unwrap();
+    kzg_proof_e
+      .verify(&kzg_vk, &kzg_U_i1_cmE, kzg_challenges_e)
+      .unwrap();
   }
 
   #[test]
@@ -318,12 +335,16 @@ use rand::thread_rng;
     // generate generators and ro constants
     let ck = commitment_key(&S, &*default_ck_hint());
     let (kzg_pk, kzg_vk) = EvaluationEngine::<Bn256, Bn256EngineKZG>::setup(Arc::new(ck.clone()));
-    let comm_W = <KZGCommitmentEngine<Bn256> as CommitmentEngineTrait<Bn256EngineKZG>>::commit(&ck, &W, &r);
+    let comm_W =
+      <KZGCommitmentEngine<Bn256> as CommitmentEngineTrait<Bn256EngineKZG>>::commit(&ck, &W, &r);
     let proof = KZGProof::prove(&kzg_pk, challenge, &W[..]).unwrap();
-    proof.verify(
-      &kzg_vk, 
-      &UVKZGCommitment::<Bn256>::new(comm_W.comm.to_affine()), 
-      challenge).unwrap();
+    proof
+      .verify(
+        &kzg_vk,
+        &UVKZGCommitment::<Bn256>::new(comm_W.comm.to_affine()),
+        challenge,
+      )
+      .unwrap();
   }
 
   #[derive(Clone, Debug)]
@@ -333,25 +354,28 @@ use rand::thread_rng;
 
   impl Circuit<Fr> for BigNatCircuit {
     fn synthesize<CS: ConstraintSystem<Fr>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
-      let alloc_w : AllocatedEmulPoint<<Dual<Bn256EngineKZG> as Engine>::GE>= AllocatedEmulPoint::alloc(
-        cs.namespace(|| "allocate comm_W"),
-        Some(self.w.to_coordinates()),
-        BN_LIMB_WIDTH,
-        BN_N_LIMBS,
-      )?;
-  
+      let alloc_w: AllocatedEmulPoint<<Dual<Bn256EngineKZG> as Engine>::GE> =
+        AllocatedEmulPoint::alloc(
+          cs.namespace(|| "allocate comm_W"),
+          Some(self.w.to_coordinates()),
+          BN_LIMB_WIDTH,
+          BN_N_LIMBS,
+        )?;
+
       let (U_i_cmW_x, U_i_cmW_y, U_i_cmW_id) = alloc_w.to_coordinates();
       println!("U_i_cmW_x: {:?}", U_i_cmW_x.value);
       println!("U_i_cmW_y: {:?}", U_i_cmW_y.value);
 
-      for (i, limb )in U_i_cmW_x.as_limbs().iter().enumerate() {
-        let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of x to num")))?;
+      for (i, limb) in U_i_cmW_x.as_limbs().iter().enumerate() {
+        let tmp =
+          limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of x to num")))?;
         println!("i: {:?}", tmp.get_value());
         tmp.inputize(cs.namespace(|| format!("convert limb {i} of x to num")))?;
       }
 
-      for (i, limb )in U_i_cmW_y.as_limbs().iter().enumerate() {
-        let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of y to num")))?;
+      for (i, limb) in U_i_cmW_y.as_limbs().iter().enumerate() {
+        let tmp =
+          limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of y to num")))?;
         println!("i: {:?}", tmp.get_value());
         tmp.inputize(cs.namespace(|| format!("convert limb {i} of y to num")))?;
       }
@@ -368,7 +392,6 @@ use rand::thread_rng;
   }
   #[test]
   fn test_commitment_input() -> Result<(), SynthesisError> {
-
     let num_steps = 5;
     let f_circuit = CubicFCircuit::new();
     let rs_pp = PublicParams::<E1>::setup(&f_circuit, &*S1::ck_floor(), &*S2::ck_floor());
@@ -381,11 +404,8 @@ use rand::thread_rng;
       IC_i = rs.increment_commitment(&rs_pp, &f_circuit);
     }
 
-
     let w = rs.r_U_primary.comm_W;
-    let circuit = BigNatCircuit {
-      w: w.clone(),
-    };
+    let circuit = BigNatCircuit { w: w.clone() };
     let mut rng = thread_rng();
     let params = generate_random_parameters::<Bn256EngineKZG, _, _>(circuit.clone(), &mut rng)?;
     let groth16_proof = create_random_proof(circuit, &params, &mut rng)?;
@@ -404,15 +424,8 @@ use rand::thread_rng;
     println!("w_x: {:?}", w_x);
     println!("w_y: {:?}", w_y);
 
-    let public_inputs = [
-      &w_x[..],
-      &w_y[..],
-    ].concat();
-    let verified = verify_proof(
-      &prepared_groth16_vk,
-      &groth16_proof,
-      &public_inputs,
-    )?;
+    let public_inputs = [&w_x[..], &w_y[..]].concat();
+    let verified = verify_proof(&prepared_groth16_vk, &groth16_proof, &public_inputs)?;
     if !verified {
       return Err(SynthesisError::MalformedProofs("".to_string()));
     }

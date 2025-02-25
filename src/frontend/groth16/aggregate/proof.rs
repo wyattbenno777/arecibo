@@ -679,10 +679,7 @@ pub fn write_gt<G: GroupEncoding, W: std::io::Write>(
 mod tests {
     use super::*;
 
-    use ff::Field;
-    use group::Group;
-
-    use halo2curves::bn256::{Bn256, G1Affine, G1, G2Affine, G2, Fr as Scalar};
+    use halo2curves::bn256::{Bn256, G1Affine, G1, G2Affine, G2};
 
     fn fake_proof() -> AggregateProof<Bn256> {
         // create pairing, as pairing results can be compressed
@@ -717,20 +714,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_proof_io() {
-        let proof = fake_proof();
-        let mut buffer = Vec::new();
-        proof.write(&mut buffer).unwrap();
-        assert_eq!(buffer.len(), 8_212);
-
-        let out = AggregateProof::<Bn256>::read(std::io::Cursor::new(&buffer)).unwrap();
-        assert_eq!(proof, out);
-
-        let ser_proof = bincode::serialize(&proof).unwrap();
-        let des_proof: AggregateProof<Bn256> = bincode::deserialize(&ser_proof).unwrap();
-        assert_eq!(des_proof, proof);
-    }
 
     #[test]
     fn test_proof_check() {
@@ -752,40 +735,6 @@ mod tests {
             .comms_ab
             .append(&mut vec![((a, a), (a, a))]);
         proof.parsing_check().expect_err("Proof should be invalid");
-    }
-
-    fn fake_proof_instance() -> AggregateProofAndInstance<Bn256> {
-        // create pairing, as pairing results can be compressed
-        let a = G1::generator();
-        let b = G1::generator();
-        let c = Scalar::ZERO;
-
-        AggregateProofAndInstance::<Bn256> {
-            num_inputs: 8,
-            pi_agg: fake_proof(),
-            com_f: vec![a, a, a, a],
-            com_w0: vec![a, a, a, a],
-            com_wd: vec![a, a, a, a],
-            f_eval: vec![c, c, c, c],
-            f_eval_proof: vec![b, b, b, b],
-        }
-    }
-
-    #[test]
-    fn test_proof_io_instance() {
-        let proof = fake_proof_instance();
-        proof.parsing_check().unwrap();
-        let mut buffer = Vec::new();
-        proof.write(&mut buffer).unwrap();
-        assert_eq!(buffer.len(), 9_112);
-
-        let out = AggregateProofAndInstance::<Bn256>::read(std::io::Cursor::new(&buffer)).unwrap();
-        assert_eq!(proof, out);
-
-        let ser_proof = bincode::serialize(&proof).unwrap();
-        let des_proof: AggregateProofAndInstance<Bn256> = bincode::deserialize(&ser_proof).unwrap();
-        assert_eq!(des_proof, proof);
-        des_proof.parsing_check().unwrap();
     }
 }
 

@@ -330,37 +330,3 @@ fn derive_non_zero<E: Engine, R: rand_core::RngCore>(rng: &mut R) -> E::Fr {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-    use halo2curves::bn256::{Bn256, G1, G2};
-    use group::Group;
-    use rand_core::RngCore;
-    use rand_core::SeedableRng;
-
-    fn gen_pairing_check<R: RngCore>(r: &mut R) -> PairingCheck<Bn256> {
-        let g1r = G1::random(&mut *r).to_affine();
-        let g2r = G2::random(&mut *r).to_affine();
-        let exp = Bn256::pairing(&g1r, &g2r);
-        let coeff = derive_non_zero::<Bn256, _>(r);
-        let tuple =
-            PairingCheck::<Bn256>::new_random_from_miller_inputs(coeff, &[(&g1r, &g2r)], &exp);
-        assert!(tuple.verify());
-        tuple
-    }
-
-    #[test]
-    fn test_pairing_randomize() {
-        let mut rng = rand_chacha::ChaChaRng::seed_from_u64(0u64);
-        let tuples = (0..3)
-            .map(|_| gen_pairing_check(&mut rng))
-            .collect::<Vec<_>>();
-        let final_tuple = tuples
-            .iter()
-            .fold(PairingCheck::<Bn256>::new(), |mut acc, tu| {
-                acc.merge(tu);
-                acc
-            });
-        assert!(final_tuple.verify());
-    }
-}

@@ -93,7 +93,3 @@ opt-level = 3
 lto = "thin"
 incremental = false
 codegen-units = 16
-
-# [[example]]
-# name = "full_flow"
-# path = "examples/full_flow.rs"
