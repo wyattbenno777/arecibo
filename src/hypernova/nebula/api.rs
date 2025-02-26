@@ -476,7 +476,7 @@ type VMMultiSets = (
 );
 
 /// Step size of used for zkVM execution
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
 pub struct StepSize {
   /// How many opcodes to execute per recursive step
   pub execution: usize,
