@@ -2,147 +2,31 @@
 //!
 //! This module implements a SNARK that proves the correct execution of an incremental computation.
 
-use super::nebula::ic::increment_comm;
+use super::{nebula::ic::increment_comm, pp::PublicParamsTrait};
 use crate::{
-  constants::{
-    BASE_CONSTRAINTS, BN_LIMB_WIDTH, BN_N_LIMBS, DEFAULT_ABSORBS,
-    MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT, MAX_CONSTRAINTS_PER_SUMCHECK_ROUND, NUM_HASH_BITS,
-  },
-  cyclefold::circuit::CycleFoldCircuit,
-  digest::SimpleDigestible,
+  constants::{DEFAULT_ABSORBS, NUM_HASH_BITS},
   errors::NovaError,
   frontend::{
-    num::AllocatedNum,
-    r1cs::{NovaShape, NovaWitness},
-    shape_cs::ShapeCS,
-    solver::SatisfyingAssignment,
-    test_cs::TestConstraintSystem,
-    ConstraintSystem, SynthesisError,
+    num::AllocatedNum, r1cs::NovaWitness, solver::SatisfyingAssignment,
+    test_cs::TestConstraintSystem, ConstraintSystem, SynthesisError,
   },
   gadgets::scalar_as_base,
   hypernova::{
-    augmented_circuit::{project_aug_circuit_size, AugmentedCircuit, AugmentedCircuitInputs},
+    augmented_circuit::{AugmentedCircuit, AugmentedCircuitInputs},
     nifs::NIFS,
   },
   r1cs::{
     split::{LR1CSInstance, SplitR1CSInstance, SplitR1CSWitness},
-    CommitmentKeyHint, RelaxedR1CSInstance, RelaxedR1CSWitness,
+    RelaxedR1CSInstance, RelaxedR1CSWitness,
   },
-  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},
-  AugmentedCircuitParams, CommitmentKey, DigestComputer, R1CSWithArity, ROConstants,
+  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROTrait},
+  ROConstants,
 };
 use ff::{Field, PrimeField};
-use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 /// A type that represents the carried commitments for this commitment-carrying HyperNova IVC scheme.
 pub type IncrementalCommitment<E> = (<E as Engine>::Scalar, <E as Engine>::Scalar);
-
-/// The public parameters used in the HyperNova recursiveSNARK proving and verification
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(bound = "")]
-pub struct PublicParams<E>
-where
-  E: CurveCycleEquipped,
-{
-  /// The arity of the step circuit
-  pub F_arity: usize,
-  /// RO constants for primary circuit
-  pub ro_consts: ROConstants<Dual<E>>,
-  /// RO constants for primary circuit
-  pub ro_consts_circuit: ROConstantsCircuit<Dual<E>>,
-  /// Commitment key for primary circuit
-  pub ck: Arc<CommitmentKey<E>>,
-  /// R1CS shape we are arguing about
-  pub circuit_shape: R1CSWithArity<E>,
-  /// Parameters of big nats in circuit
-  pub augmented_circuit_params: AugmentedCircuitParams,
-  /// secondary commitment key
-  pub ck_cyclefold: Arc<CommitmentKey<Dual<E>>>,
-  /// R1CS shape of cyclefold circuit
-  pub circuit_shape_cyclefold: R1CSWithArity<Dual<E>>,
-  /// Digest of the public parameters
-  #[serde(skip, default = "OnceCell::new")]
-  pub digest: OnceCell<E::Scalar>,
-  /// Number of sumcheck rounds used in the NIFS for the augmented circuit
-  pub num_rounds: usize,
-}
-
-impl<E> PublicParams<E>
-where
-  E: CurveCycleEquipped,
-{
-  /// Builds the public parameters for the circuit `C1`.
-  /// The same note for public parameter hints apply as in the case for Nova's public parameters:
-  /// For some final compressing SNARKs the size of the commitment key must be larger, so we include
-  /// `ck_hint_primary` and `ck_hint_cyclefold` parameters to accommodate this.
-  #[tracing::instrument(skip_all, name = "HyperNova::PublicParams::setup")]
-  pub fn setup(
-    step_circuit: &impl StepCircuit<E::Scalar>,
-    ck_hint: &CommitmentKeyHint<E>,
-    ck_hint_cyclefold: &CommitmentKeyHint<Dual<E>>,
-  ) -> Self {
-    // This value is used to validate inputs to API
-    let F_arity = step_circuit.arity();
-
-    // Get the round constants used in the poseidon hash function and poseidon hash function circuit
-    let ro_consts = ROConstants::<Dual<E>>::default();
-    let ro_consts_circuit = ROConstantsCircuit::<Dual<E>>::default();
-
-    // Get the structure for the AugmentedCircuit and corresponding commitment key
-    let num_rounds = project_aug_circuit_size::<E>(
-      BASE_CONSTRAINTS,
-      MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT,
-      MAX_CONSTRAINTS_PER_SUMCHECK_ROUND,
-      step_circuit,
-    );
-    let augmented_circuit_params = AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
-    let circuit: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
-      &augmented_circuit_params,
-      ro_consts_circuit.clone(),
-      None,
-      step_circuit,
-      num_rounds,
-    );
-    let mut cs: ShapeCS<E> = ShapeCS::new();
-    let _ = circuit.synthesize(&mut cs);
-    let (r1cs_shape, ck) = cs.r1cs_shape(ck_hint);
-    let ck = Arc::new(ck);
-    let circuit_shape = R1CSWithArity::new(r1cs_shape, F_arity);
-
-    // Get the structure for the CycleFold circuit and corresponding commitment key
-    let mut cs: ShapeCS<Dual<E>> = ShapeCS::new();
-    let circuit_cyclefold: CycleFoldCircuit<E> = CycleFoldCircuit::default();
-    let _ = circuit_cyclefold.synthesize(&mut cs);
-    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape(ck_hint_cyclefold);
-    let ck_cyclefold = Arc::new(ck_cyclefold);
-    let circuit_shape_cyclefold = R1CSWithArity::new(r1cs_shape_cyclefold, 0);
-    Self {
-      F_arity,
-      ro_consts,
-      ro_consts_circuit,
-      ck,
-      circuit_shape,
-      augmented_circuit_params,
-      ck_cyclefold,
-      circuit_shape_cyclefold,
-      digest: OnceCell::new(),
-      num_rounds,
-    }
-  }
-
-  /// Calculate the digest of the public parameters.
-  pub fn digest(&self) -> E::Scalar {
-    self
-      .digest
-      .get_or_try_init(|| DigestComputer::new(self).digest())
-      .cloned()
-      .expect("Failure in retrieving digest")
-  }
-}
-
-impl<E> SimpleDigestible for PublicParams<E> where E: CurveCycleEquipped {}
 
 /// A SNARK that proves the correct execution of an incremental computation. HyperNova IVC scheme (with CycleFold).
 ///
@@ -177,26 +61,26 @@ where
   /// Create a new instance of [`RecursiveSNARK`]
   #[tracing::instrument(skip_all, name = "HyperNova::RecursiveSNARK::new")]
   pub fn new<C>(
-    pp: &PublicParams<E>,
+    pp: &impl PublicParamsTrait<E>,
     step_circuit: &C,
     z_0: &[E::Scalar],
   ) -> Result<Self, NovaError>
   where
     C: StepCircuit<E::Scalar>,
   {
-    if z_0.len() != pp.F_arity {
+    if z_0.len() != pp.F_arity() {
       return Err(NovaError::InvalidInitialInputLength);
     }
 
     // --- Get running instance, witness pairs ---
     //
     // 1. Get default running primary instance and witness pair
-    let r1cs = &pp.circuit_shape.r1cs_shape;
+    let r1cs = &pp.circuit_shape().r1cs_shape;
     let r_U = LR1CSInstance::default(r1cs);
     let r_W = SplitR1CSWitness::default(r1cs);
     // 2. Get the running CycleFold instance and witness pair
-    let r1cs_cyclefold = &pp.circuit_shape_cyclefold.r1cs_shape;
-    let r_U_cyclefold = RelaxedR1CSInstance::default(&*pp.ck_cyclefold, r1cs_cyclefold);
+    let r1cs_cyclefold = &pp.circuit_shape_cyclefold().r1cs_shape;
+    let r_U_cyclefold = RelaxedR1CSInstance::default(&**pp.ck_cyclefold(), r1cs_cyclefold);
     let r_W_cyclefold = RelaxedR1CSWitness::default(r1cs_cyclefold);
 
     // --- Base case for F' ---
@@ -222,7 +106,7 @@ where
   #[tracing::instrument(skip_all, name = "HyperNova::RecursiveSNARK::prove_step")]
   pub fn prove_step<C>(
     &mut self,
-    pp: &PublicParams<E>,
+    pp: &impl PublicParamsTrait<E>,
     step_circuit: &C,
     ic: IncrementalCommitment<E>,
   ) -> Result<(), NovaError>
@@ -264,7 +148,7 @@ where
   #[tracing::instrument(skip_all, name = "HyperNova::RecursiveSNARK::verify")]
   pub fn verify(
     &self,
-    pp: &PublicParams<E>,
+    pp: &impl PublicParamsTrait<E>,
     num_steps: usize,
     z_0: &[E::Scalar],
     ic: IncrementalCommitment<E>,
@@ -292,7 +176,7 @@ where
     // 1. Compute H(pp, i, z_0, z_i, r_U, prev_ic)
     // 2. Compute H(pp, i, r_U_cyclefold)
     Self::hash_check(
-      &pp.ro_consts,
+      pp.ro_consts(),
       pp.digest(),
       num_steps,
       z_0,
@@ -306,20 +190,20 @@ where
     // Verify the satisfiability of running relaxed instances, and the final primary instance.
     let (res_r_U, (res_l_u, res_r_U_cyclefold)) = rayon::join(
       || {
-        pp.circuit_shape
+        pp.circuit_shape()
           .r1cs_shape
-          .is_sat_linearized(&pp.ck, &self.r_U, &self.r_W)
+          .is_sat_linearized(pp.ck(), &self.r_U, &self.r_W)
       },
       || {
         rayon::join(
           || {
-            pp.circuit_shape
+            pp.circuit_shape()
               .r1cs_shape
-              .is_sat_split(&pp.ck, &self.l_u, &self.l_w)
+              .is_sat_split(pp.ck(), &self.l_u, &self.l_w)
           },
           || {
-            pp.circuit_shape_cyclefold.r1cs_shape.is_sat_relaxed(
-              &pp.ck_cyclefold,
+            pp.circuit_shape_cyclefold().r1cs_shape.is_sat_relaxed(
+              pp.ck_cyclefold(),
               &self.r_U_cyclefold,
               &self.r_W_cyclefold,
             )
@@ -342,8 +226,12 @@ impl<E> RecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
 {
-  fn ic_check(&self, pp: &PublicParams<E>, ic: IncrementalCommitment<E>) -> Result<(), NovaError> {
-    let expected_ic = increment_comm::<E>(&pp.ro_consts, self.prev_ic, self.l_u.pre_committed);
+  fn ic_check(
+    &self,
+    pp: &impl PublicParamsTrait<E>,
+    ic: IncrementalCommitment<E>,
+  ) -> Result<(), NovaError> {
+    let expected_ic = increment_comm::<E>(pp.ro_consts(), self.prev_ic, self.l_u.pre_committed);
     if expected_ic != ic {
       return Err(NovaError::InvalidIC);
     }
@@ -352,7 +240,7 @@ where
 
   fn nifs(
     &self,
-    pp: &PublicParams<E>,
+    pp: &impl PublicParamsTrait<E>,
   ) -> Result<
     (
       NIFS<E>,
@@ -363,11 +251,11 @@ where
   > {
     NIFS::prove(
       (
-        &pp.circuit_shape.r1cs_shape,
-        &pp.circuit_shape_cyclefold.r1cs_shape,
+        &pp.circuit_shape().r1cs_shape,
+        &pp.circuit_shape_cyclefold().r1cs_shape,
       ),
-      &pp.ck_cyclefold,
-      &pp.ro_consts,
+      pp.ck_cyclefold(),
+      pp.ro_consts(),
       &pp.digest(),
       (&self.r_U, &self.r_W),
       (&self.l_u, &self.l_w),
@@ -376,30 +264,30 @@ where
   }
 
   fn synthesize_aug_circuit_with_inputs(
-    pp: &PublicParams<E>,
+    pp: &impl PublicParamsTrait<E>,
     inputs: AugmentedCircuitInputs<E>,
     step_circuit: &impl StepCircuit<E::Scalar>,
   ) -> Result<((SplitR1CSInstance<E>, SplitR1CSWitness<E>), Vec<E::Scalar>), NovaError> {
     let mut cs = SatisfyingAssignment::<E>::new();
     let circuit = AugmentedCircuit::new(
-      &pp.augmented_circuit_params,
-      pp.ro_consts_circuit.clone(),
+      pp.augmented_circuit_params(),
+      pp.ro_consts_circuit().clone(),
       Some(inputs),
       step_circuit,
-      pp.num_rounds,
+      pp.num_rounds(),
     );
     let z_i = circuit.synthesize(&mut cs)?;
     let z_i = z_i
       .iter()
       .map(|v| v.get_value().ok_or(SynthesisError::AssignmentMissing))
       .collect::<Result<Vec<_>, _>>()?;
-    let (u, w) = cs.split_r1cs_instance_and_witness(&pp.circuit_shape.r1cs_shape, &pp.ck)?;
+    let (u, w) = cs.split_r1cs_instance_and_witness(&pp.circuit_shape().r1cs_shape, pp.ck())?;
     Ok(((u, w), z_i))
   }
 
   fn synthesize_aug_circuit(
     &self,
-    pp: &PublicParams<E>,
+    pp: &impl PublicParamsTrait<E>,
     nifs: NIFS<E>,
     r_U: &LR1CSInstance<E>,
     step_circuit: &impl StepCircuit<E::Scalar>,
@@ -421,7 +309,7 @@ where
   }
 
   fn synthesize_aug_circuit_base_case(
-    pp: &PublicParams<E>,
+    pp: &impl PublicParamsTrait<E>,
     z_0: &[E::Scalar],
     step_circuit: &impl StepCircuit<E::Scalar>,
   ) -> Result<((SplitR1CSInstance<E>, SplitR1CSWitness<E>), Vec<E::Scalar>), NovaError> {
@@ -531,7 +419,7 @@ mod tests {
   use super::{IncrementalCommitment, RecursiveSNARK};
   use crate::{
     frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
-    hypernova::{nebula::ic::increment_ic, rs::StepCircuit},
+    hypernova::{nebula::ic::increment_ic, pp::PublicParams, rs::StepCircuit},
     provider::Bn256EngineIPA,
     traits::{snark::default_ck_hint, CurveCycleEquipped, Engine},
     NovaError,
@@ -561,20 +449,14 @@ mod tests {
   }
 
   fn run_circuit<E: CurveCycleEquipped>(c: &impl StepCircuit<E::Scalar>) -> Result<(), NovaError> {
-    let pp = super::PublicParams::<E>::setup(c, &*default_ck_hint(), &*default_ck_hint());
+    let pp = PublicParams::<E>::setup(c, &*default_ck_hint(), &*default_ck_hint());
     let z_0 = vec![E::Scalar::from(2u64)];
     let mut ic = IncrementalCommitment::<E>::default();
     let mut recursive_snark = RecursiveSNARK::new(&pp, c, &z_0)?;
     for i in 0..10 {
       recursive_snark.prove_step(&pp, c, ic)?;
       let (advice_0, advice_1) = c.advice();
-      ic = increment_ic::<E>(
-        &pp.ck,
-        &pp.ro_consts,
-        ic,
-        (&advice_0, &advice_1),
-        &pp.circuit_shape.r1cs_shape,
-      );
+      ic = increment_ic::<E>(&pp.ck, &pp.ro_consts, ic, (&advice_0, &advice_1));
       recursive_snark.verify(&pp, i + 1, &z_0, ic)?;
     }
     Ok(())

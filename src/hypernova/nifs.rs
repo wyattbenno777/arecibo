@@ -435,7 +435,7 @@ mod tests {
     // First create the shape
     let mut cs: TestShapeCS<E> = TestShapeCS::new();
     let _ = synthesize_tiny_r1cs_bellpepper(&mut cs, None);
-    let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
+    let (shape, ck) = cs.r1cs_shape_and_key(&*default_ck_hint());
     let ro_consts = ROConstants::<Dual<E>>::default();
 
     let instance_witness = |x: E::Scalar| -> (SplitR1CSInstance<E>, SplitR1CSWitness<E>) {
@@ -487,7 +487,7 @@ mod tests {
     let mut cs: ShapeCS<Dual<E>> = ShapeCS::new();
     let circuit_cyclefold: CycleFoldCircuit<E> = CycleFoldCircuit::default();
     let _ = circuit_cyclefold.synthesize(&mut cs);
-    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape(&*default_ck_hint());
+    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape_and_key(&*default_ck_hint());
     let ck_cyclefold = Arc::new(ck_cyclefold);
     let S_cyclefold = R1CSWithArity::new(r1cs_shape_cyclefold, 0);
     // Get the running CycleFold instance and witness pair

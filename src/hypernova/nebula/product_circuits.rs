@@ -13,9 +13,6 @@ use crate::{
 use ff::PrimeField;
 use itertools::Itertools;
 
-/// Maximum number of memory ops allowed per step of the zkVM
-pub const MEMORY_OPS_PER_STEP: usize = 14;
-
 /// Circuit to compute multiset hashes of (RS, WS)
 #[derive(Clone, Debug)]
 pub struct OpsCircuit {
@@ -141,10 +138,10 @@ impl OpsCircuit {
   }
 
   /// Create a empty instance of [`OpsCircuit`]. Used to produce public parameters
-  pub fn empty() -> Self {
+  pub fn empty<const M: usize>() -> Self {
     OpsCircuit {
-      RS: vec![(0, 0, 0); MEMORY_OPS_PER_STEP / 2],
-      WS: vec![(0, 0, 0); MEMORY_OPS_PER_STEP / 2],
+      RS: vec![(0, 0, 0); M],
+      WS: vec![(0, 0, 0); M],
     }
   }
 }
@@ -279,6 +276,58 @@ impl ScanCircuit {
       IS: vec![(0, 0, 0); step_size],
       FS: vec![(0, 0, 0); step_size],
     }
+  }
+}
+
+#[derive(Clone, Debug)]
+/// BatchedWasmTransitionCircuit
+pub struct BatchedOpsCircuit {
+  circuits: Vec<OpsCircuit>,
+}
+
+impl<F> StepCircuit<F> for BatchedOpsCircuit
+where
+  F: PrimeField + PartialOrd,
+{
+  fn arity(&self) -> usize {
+    6
+  }
+
+  fn synthesize<CS: ConstraintSystem<F>>(
+    &self,
+    cs: &mut CS,
+    z: &[AllocatedNum<F>],
+  ) -> Result<Vec<AllocatedNum<F>>, SynthesisError> {
+    let mut z = z.to_vec();
+
+    for circuit in self.circuits.iter() {
+      z = circuit.synthesize(cs, &z)?;
+    }
+
+    Ok(z)
+  }
+
+  fn advice(&self) -> (Vec<F>, Vec<F>) {
+    let advice0 = self
+      .circuits
+      .iter()
+      .flat_map(|circuit| circuit.advice().0)
+      .collect_vec();
+    (advice0, vec![])
+  }
+}
+
+impl BatchedOpsCircuit {
+  /// Create an empty instance of [`BatchedOpsCircuit`]
+  pub fn empty<const M: usize>(step_size: usize) -> Self {
+    Self {
+      circuits: vec![OpsCircuit::empty::<M>(); step_size],
+    }
+  }
+
+  /// Create a new instance of [`BatchedOpsCircuit`]
+  pub fn new(circuits: Vec<OpsCircuit>) -> Self {
+    Self { circuits }
   }
 }
 

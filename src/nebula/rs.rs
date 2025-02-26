@@ -94,7 +94,7 @@ where
     );
     let mut cs: ShapeCS<E1> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
-    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape(ck_hint_primary);
+    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape_and_key(ck_hint_primary);
     let ck_primary = Arc::new(ck_primary);
     let circuit_shape_primary = R1CSWithArity::new(r1cs_shape_primary, F_arity_primary);
 
@@ -102,7 +102,7 @@ where
     let mut cs: ShapeCS<Dual<E1>> = ShapeCS::new();
     let circuit_cyclefold: CycleFoldCircuit<E1> = CycleFoldCircuit::default();
     let _ = circuit_cyclefold.synthesize(&mut cs);
-    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape(ck_hint_cyclefold);
+    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape_and_key(ck_hint_cyclefold);
     let ck_cyclefold = Arc::new(ck_cyclefold);
     let circuit_shape_cyclefold = R1CSWithArity::new(r1cs_shape_cyclefold, 0);
 

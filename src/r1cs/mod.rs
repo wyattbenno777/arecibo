@@ -280,7 +280,14 @@ impl<E: Engine> R1CSShape<E> {
     // verify if comm_E and comm_W are commitments to E and W
     let res_comm = {
       let (comm_W, comm_E) = rayon::join(
-        || CE::<E>::commit(ck, &W.W, &W.r_W),
+        || {
+          CE::<E>::commit_at(
+            ck,
+            &W.W,
+            &W.r_W,
+            self.num_precommitted.0 + self.num_precommitted.1,
+          )
+        },
         || CE::<E>::commit(ck, &W.E, &W.r_E),
       );
       U.comm_W == comm_W && U.comm_E == comm_E
@@ -315,7 +322,14 @@ impl<E: Engine> R1CSShape<E> {
     })?;
 
     // verify if comm_W is a commitment to W
-    if U.comm_W != CE::<E>::commit(ck, &W.W, &W.r_W) {
+    if U.comm_W
+      != CE::<E>::commit_at(
+        ck,
+        &W.W,
+        &W.r_W,
+        self.num_precommitted.0 + self.num_precommitted.1,
+      )
+    {
       return Err(NovaError::UnSat);
     }
     Ok(())
@@ -343,15 +357,21 @@ impl<E: Engine> R1CSShape<E> {
     })?;
 
     // verify if comm_W is a commitment to W
-    if U.aux.comm_W != CE::<E>::commit(ck, &W.aux.W, &W.aux.r_W)
+    if U.aux.comm_W
+      != CE::<E>::commit_at(
+        ck,
+        &W.aux.W,
+        &W.aux.r_W,
+        self.num_precommitted.0 + self.num_precommitted.1,
+      )
       || U.pre_committed
         != (
-          CE::<E>::commit_at(ck, &W.pre_committed.0, &E::Scalar::ZERO, self.num_vars),
+          CE::<E>::commit(ck, &W.pre_committed.0, &E::Scalar::ZERO),
           CE::<E>::commit_at(
             ck,
             &W.pre_committed.1,
             &E::Scalar::ZERO,
-            self.num_vars + self.num_precommitted.0,
+            self.num_precommitted.0,
           ),
         )
     {
@@ -382,15 +402,21 @@ impl<E: Engine> R1CSShape<E> {
     assert_eq!(U.vs[2], eval_padded_poly(Cz));
 
     // verify if comm_W is a commitment to W
-    if U.comm_W != CE::<E>::commit(ck, &W.aux.W, &W.aux.r_W)
+    if U.comm_W
+      != CE::<E>::commit_at(
+        ck,
+        &W.aux.W,
+        &W.aux.r_W,
+        self.num_precommitted.0 + self.num_precommitted.1,
+      )
       || U.pre_committed
         != (
-          CE::<E>::commit_at(ck, &W.pre_committed.0, &E::Scalar::ZERO, self.num_vars),
+          CE::<E>::commit(ck, &W.pre_committed.0, &E::Scalar::ZERO),
           CE::<E>::commit_at(
             ck,
             &W.pre_committed.1,
             &E::Scalar::ZERO,
-            self.num_vars + self.num_precommitted.0,
+            self.num_precommitted.0,
           ),
         )
     {
@@ -630,8 +656,8 @@ impl<E: Engine> R1CSWitness<E> {
   }
 
   /// Commits to the witness using the supplied generators
-  pub(crate) fn commit(&self, ck: &CommitmentKey<E>) -> Commitment<E> {
-    CE::<E>::commit(ck, &self.W, &self.r_W)
+  pub(crate) fn commit_at(&self, ck: &CommitmentKey<E>, idx: usize) -> Commitment<E> {
+    CE::<E>::commit_at(ck, &self.W, &self.r_W, idx)
   }
 
   /// Folds an incoming `R1CSWitness` into the current one

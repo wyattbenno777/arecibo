@@ -38,7 +38,16 @@ pub trait NovaShape<E: Engine> {
   /// Return an appropriate `R1CSShape` and `CommitmentKey` structs.
   /// A `CommitmentKeyHint` should be provided to help guide the construction of the `CommitmentKey`.
   /// This parameter is documented in `r1cs::R1CS::commitment_key`.
-  fn r1cs_shape(&self, ck_hint: &CommitmentKeyHint<E>) -> (R1CSShape<E>, CommitmentKey<E>);
+  fn r1cs_shape_and_key(&self, ck_hint: &CommitmentKeyHint<E>) -> (R1CSShape<E>, CommitmentKey<E>) {
+    let S = self.r1cs_shape();
+    let ck = commitment_key(&S, ck_hint);
+
+    (S, ck)
+  }
+  /// Return an appropriate `R1CSShape` and `CommitmentKey` structs.
+  /// A `CommitmentKeyHint` should be provided to help guide the construction of the `CommitmentKey`.
+  /// This parameter is documented in `r1cs::R1CS::commitment_key`.
+  fn r1cs_shape(&self) -> R1CSShape<E>;
 }
 
 impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
@@ -49,7 +58,10 @@ impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
   ) -> Result<(R1CSInstance<E>, R1CSWitness<E>), NovaError> {
     let W = R1CSWitness::<E>::new(shape, self.aux_assignment().to_vec())?;
     let X = &self.input_assignment()[1..];
-    let comm_W = W.commit(ck);
+    let comm_W = W.commit_at(
+      ck,
+      self.precommitted_assignment().len() + self.precommitted1_assignment().len(),
+    );
     let instance = R1CSInstance::<E>::new(shape, comm_W, X.to_vec())?;
     Ok((instance, W))
   }
@@ -65,7 +77,7 @@ impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
       self.precommitted1_assignment().to_vec(),
     );
     let W = SplitR1CSWitness::new(aux_W, pre_committed_witness);
-    let pre_commits = W.commit(ck, S);
+    let pre_commits = W.commit(ck);
     let instance = SplitR1CSInstance::new(aux_U, pre_commits);
     Ok((instance, W))
   }
@@ -77,7 +89,7 @@ macro_rules! impl_nova_shape {
     where
       E::Scalar: PrimeField,
     {
-      fn r1cs_shape(&self, ck_hint: &CommitmentKeyHint<E>) -> (R1CSShape<E>, CommitmentKey<E>) {
+      fn r1cs_shape(&self) -> R1CSShape<E> {
         let mut A = SparseMatrix::<E::Scalar>::empty();
         let mut B = SparseMatrix::<E::Scalar>::empty();
         let mut C = SparseMatrix::<E::Scalar>::empty();
@@ -118,9 +130,8 @@ macro_rules! impl_nova_shape {
           C,
         )
         .unwrap();
-        let ck = commitment_key(&S, ck_hint);
 
-        (S, ck)
+        S
       }
     }
   };
@@ -161,16 +172,16 @@ fn add_constraint<S: PrimeField>(
           M.indices.push(idx);
         }
         Index::Aux(idx) => {
+          let idx = idx + num_precommitted + num_precommitted1;
           M.data.push(*coeff);
           M.indices.push(idx);
         }
         Index::Precommitted(idx) => {
-          let idx = idx + num_vars;
           M.data.push(*coeff);
           M.indices.push(idx);
         }
         Index::Precommitted1(idx) => {
-          let idx = idx + num_vars + num_precommitted;
+          let idx = idx + num_precommitted;
           M.data.push(*coeff);
           M.indices.push(idx);
         }

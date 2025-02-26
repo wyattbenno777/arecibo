@@ -12,5 +12,6 @@ pub mod compression;
 pub mod error;
 pub mod nebula;
 pub mod nifs;
+pub mod pp;
 pub mod ro_sumcheck;
 pub mod rs;

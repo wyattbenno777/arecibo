@@ -471,7 +471,7 @@ fn test_recursive_circuit_with<E1>(
   if let Err(e) = circuit1.synthesize(&mut cs) {
     panic!("{}", e)
   }
-  let (shape1, ck1) = cs.r1cs_shape(&*default_ck_hint());
+  let (shape1, ck1) = cs.r1cs_shape_and_key(&*default_ck_hint());
   num_constraints_primary.assert_eq(&cs.num_constraints().to_string());
 
   // Initialize the shape and ck for the secondary
@@ -489,7 +489,7 @@ fn test_recursive_circuit_with<E1>(
   if let Err(e) = circuit2.synthesize(&mut cs) {
     panic!("{}", e)
   }
-  let (shape2, ck2) = cs.r1cs_shape(&*default_ck_hint());
+  let (shape2, ck2) = cs.r1cs_shape_and_key(&*default_ck_hint());
   num_constraints_secondary.assert_eq(&cs.num_constraints().to_string());
 
   // Execute the base case for the primary
