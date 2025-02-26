@@ -265,7 +265,8 @@ where
   #[tracing::instrument(skip_all, name = "HyperNova::PublicParams::setup")]
   pub fn setup(
     step_circuit: &impl StepCircuit<E::Scalar>,
-    sub_aux_params: &SubAuxPublicParams<E>,
+    ro_consts_circuit: &ROConstantsCircuit<Dual<E>>,
+    augmented_circuit_params: &AugmentedCircuitParams,
   ) -> Self {
     // This value is used to validate inputs to API
     let F_arity = step_circuit.arity();
@@ -278,8 +279,8 @@ where
       step_circuit,
     );
     let circuit: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
-      &sub_aux_params.augmented_circuit_params,
-      sub_aux_params.ro_consts_circuit.clone(),
+      augmented_circuit_params,
+      ro_consts_circuit.clone(),
       None,
       step_circuit,
       num_rounds,
@@ -329,17 +330,29 @@ where
   /// `ck_hint_primary` and `ck_hint_cyclefold` parameters to accommodate this.
   pub fn setup(
     circuit_params: &[&R1CSWithArity<E>],
-    aux: SubAuxPublicParams<E>,
+    ro_consts_circuit: ROConstantsCircuit<Dual<E>>,
+    augmented_circuit_params: AugmentedCircuitParams,
     ck_hint: &CommitmentKeyHint<E>,
+    ck_hint_cyclefold: &CommitmentKeyHint<Dual<E>>,
   ) -> Self {
+    // Get the round constants used in the poseidon hash function and poseidon hash function circuit
+    let ro_consts = ROConstants::<Dual<E>>::default();
+
+    // Get the structure for the CycleFold circuit and corresponding commitment key
+    let mut cs: ShapeCS<Dual<E>> = ShapeCS::new();
+    let circuit_cyclefold: CycleFoldCircuit<E> = CycleFoldCircuit::default();
+    let _ = circuit_cyclefold.synthesize(&mut cs);
+    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape_and_key(ck_hint_cyclefold);
+    let ck_cyclefold = Arc::new(ck_cyclefold);
+    let circuit_shape_cyclefold = R1CSWithArity::new(r1cs_shape_cyclefold, 0);
     let ck = Self::compute_ck(circuit_params, ck_hint);
     Self {
       ck: Arc::new(ck),
-      ro_consts: aux.ro_consts,
-      ro_consts_circuit: aux.ro_consts_circuit,
-      augmented_circuit_params: aux.augmented_circuit_params,
-      ck_cyclefold: aux.ck_cyclefold,
-      circuit_shape_cyclefold: aux.circuit_shape_cyclefold,
+      ro_consts,
+      ro_consts_circuit,
+      augmented_circuit_params,
+      ck_cyclefold,
+      circuit_shape_cyclefold,
     }
   }
 
@@ -362,56 +375,3 @@ where
 }
 
 impl<E> SimpleDigestible for AuxPublicParams<E> where E: CurveCycleEquipped {}
-
-/// Auxillary public parameters for ck, ro and cyclefold circuit
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(bound = "")]
-pub struct SubAuxPublicParams<E>
-where
-  E: CurveCycleEquipped,
-{
-  /// RO constants for primary circuit
-  pub ro_consts: ROConstants<Dual<E>>,
-  /// RO constants for primary circuit
-  pub ro_consts_circuit: ROConstantsCircuit<Dual<E>>,
-  /// Parameters of big nats in circuit
-  pub augmented_circuit_params: AugmentedCircuitParams,
-  /// secondary commitment key
-  pub ck_cyclefold: Arc<CommitmentKey<Dual<E>>>,
-  /// R1CS shape of cyclefold circuit
-  pub circuit_shape_cyclefold: R1CSWithArity<Dual<E>>,
-}
-
-impl<E> SubAuxPublicParams<E>
-where
-  E: CurveCycleEquipped,
-{
-  /// Builds the public parameters for the circuit `C1`.
-  /// The same note for public parameter hints apply as in the case for Nova's public parameters:
-  /// For some final compressing SNARKs the size of the commitment key must be larger, so we include
-  /// `ck_hint_primary` and `ck_hint_cyclefold` parameters to accommodate this.
-  #[tracing::instrument(skip_all, name = "HyperNova::PublicParams::setup")]
-  pub fn setup(ck_hint_cyclefold: &CommitmentKeyHint<Dual<E>>) -> Self {
-    // Get the round constants used in the poseidon hash function and poseidon hash function circuit
-    let ro_consts = ROConstants::<Dual<E>>::default();
-    let ro_consts_circuit = ROConstantsCircuit::<Dual<E>>::default();
-
-    // Get the structure for the AugmentedCircuit and corresponding commitment key
-    let augmented_circuit_params = AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
-
-    // Get the structure for the CycleFold circuit and corresponding commitment key
-    let mut cs: ShapeCS<Dual<E>> = ShapeCS::new();
-    let circuit_cyclefold: CycleFoldCircuit<E> = CycleFoldCircuit::default();
-    let _ = circuit_cyclefold.synthesize(&mut cs);
-    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape_and_key(ck_hint_cyclefold);
-    let ck_cyclefold = Arc::new(ck_cyclefold);
-    let circuit_shape_cyclefold = R1CSWithArity::new(r1cs_shape_cyclefold, 0);
-    Self {
-      ro_consts,
-      ro_consts_circuit,
-      augmented_circuit_params,
-      ck_cyclefold,
-      circuit_shape_cyclefold,
-    }
-  }
-}

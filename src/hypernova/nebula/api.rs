@@ -5,16 +5,18 @@ use super::{
   product_circuits::{convert_advice_separate, BatchedOpsCircuit, OpsCircuit, ScanCircuit},
 };
 use crate::{
+  constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
   digest::{DigestComputer, SimpleDigestible},
   hypernova::{
     nebula::product_circuits::MEMORY_OPS_PER_STEP,
-    pp::{
-      AuxPublicParams, PublicParamsTrait, R1CSPublicParams, SplitPublicParams, SubAuxPublicParams,
-    },
+    pp::{AuxPublicParams, PublicParamsTrait, R1CSPublicParams, SplitPublicParams},
     rs::{IncrementalCommitment, RecursiveSNARK, StepCircuit},
   },
-  traits::{snark::default_ck_hint, CurveCycleEquipped, Engine, TranscriptEngineTrait},
-  NovaError,
+  traits::{
+    snark::default_ck_hint, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit,
+    TranscriptEngineTrait,
+  },
+  AugmentedCircuitParams, NovaError,
 };
 use ff::Field;
 use itertools::Itertools;
@@ -83,21 +85,31 @@ where
   /// Fn used to obtain setup material for producing succinct arguments for
   /// WASM program executions
   pub fn setup(F: &impl StepCircuit<E::Scalar>, step_size: StepSize) -> NebulaPublicParams<E> {
-    let sub_aux_params = SubAuxPublicParams::<E>::setup(&*default_ck_hint());
-    let F_pp = R1CSPublicParams::<E>::setup(F, &sub_aux_params);
+    // Get the round constants used in the poseidon hash function and poseidon hash function circuit
+    let ro_consts_circuit = ROConstantsCircuit::<Dual<E>>::default();
+
+    // Get the structure for the AugmentedCircuit and corresponding commitment key
+    let augmented_circuit_params = AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
+    let F_pp = R1CSPublicParams::<E>::setup(F, &ro_consts_circuit, &augmented_circuit_params);
     let ops_pp = R1CSPublicParams::<E>::setup(
       &BatchedOpsCircuit::empty(step_size.execution),
-      &sub_aux_params,
+      &ro_consts_circuit,
+      &augmented_circuit_params,
     );
-    let scan_pp =
-      R1CSPublicParams::<E>::setup(&ScanCircuit::empty(step_size.memory), &sub_aux_params);
+    let scan_pp = R1CSPublicParams::<E>::setup(
+      &ScanCircuit::empty(step_size.memory),
+      &ro_consts_circuit,
+      &augmented_circuit_params,
+    );
     let aux_pp = AuxPublicParams::setup(
       &[
         &F_pp.circuit_shape,
         &ops_pp.circuit_shape,
         &scan_pp.circuit_shape,
       ],
-      sub_aux_params,
+      ro_consts_circuit,
+      augmented_circuit_params,
+      &*default_ck_hint(),
       &*default_ck_hint(),
     );
     NebulaPublicParams {
