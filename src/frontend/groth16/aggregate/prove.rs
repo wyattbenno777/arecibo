@@ -144,6 +144,7 @@ where
     })
 }
 
+/// Aggregate `n` zkSnark proofs, where `n` must be a power of two.
 pub fn aggregate_proofs_and_instances<E: Engine + std::fmt::Debug>(
     srs: &ProverSRSInputAggregation<E>,
     transcript_include: &[u8],

@@ -12,30 +12,39 @@ use std::mem;
 use super::multiscalar;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Verifying key
 pub struct VerifyingKey<E: Engine + MultiMillerLoop> {
-    // alpha in g1 for verifying and for creating A/C elements of
-    // proof. Never the point at infinity.
+    /// alpha in g1 for verifying and for creating A/C elements of
+    /// proof. Never the point at infinity.
     pub alpha_g1: E::G1Affine,
 
-    // beta in g1 and g2 for verifying and for creating B/C elements
-    // of proof. Never the point at infinity.
+    /// beta in g1 for verifying and for creating B/C elements
+    /// of proof. Never the point at infinity.
     pub beta_g1: E::G1Affine,
+
+    /// beta in g2 for verifying and for creating B/C elements
+    /// of proof. Never the point at infinity.
     pub beta_g2: E::G2Affine,
 
-    // gamma in g2 for verifying. Never the point at infinity.
+    /// gamma in g2 for verifying. Never the point at infinity.
     pub gamma_g2: E::G2Affine,
 
-    // delta in g1/g2 for verifying and proving, essentially the magic
-    // trapdoor that forces the prover to evaluate the C element of the
-    // proof with only components from the CRS. Never the point at
-    // infinity.
+    /// delta in g1 for verifying and proving, essentially the magic
+    /// trapdoor that forces the prover to evaluate the C element of the
+    /// proof with only components from the CRS. Never the point at
+    /// infinity.
     pub delta_g1: E::G1Affine,
+
+    /// delta in g2 for verifying and proving, essentially the magic
+    /// trapdoor that forces the prover to evaluate the C element of the
+    /// proof with only components from the CRS. Never the point at
+    /// infinity.
     pub delta_g2: E::G2Affine,
 
-    // Elements of the form (beta * u_i(tau) + alpha v_i(tau) + w_i(tau)) / gamma
-    // for all public inputs. Because all public inputs have a dummy constraint,
-    // this is the same size as the number of inputs, and never contains points
-    // at infinity.
+    /// Elements of the form (beta * u_i(tau) + alpha v_i(tau) + w_i(tau)) / gamma
+    /// for all public inputs. Because all public inputs have a dummy constraint,
+    /// this is the same size as the number of inputs, and never contains points
+    /// at infinity.
     pub ic: Vec<E::G1Affine>,
 }
 
@@ -57,6 +66,7 @@ fn read_uncompressed_point<C: UncompressedEncoding>(repr: &C::Uncompressed) -> i
 }
 
 impl<E: Engine + MultiMillerLoop> VerifyingKey<E> {
+    /// Write a verifying key to a writer
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(self.alpha_g1.to_uncompressed().as_ref())?;
         writer.write_all(self.beta_g1.to_uncompressed().as_ref())?;
@@ -72,6 +82,7 @@ impl<E: Engine + MultiMillerLoop> VerifyingKey<E> {
         Ok(())
     }
 
+    /// Read a verifying key from a reader
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut g1_repr = <E::G1Affine as UncompressedEncoding>::Uncompressed::default();
         let mut g2_repr = <E::G2Affine as UncompressedEncoding>::Uncompressed::default();
@@ -122,6 +133,7 @@ impl<E: Engine + MultiMillerLoop> VerifyingKey<E> {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    /// Read a verifying key from a memory-mapped file
     pub fn read_mmap(mmap: &Mmap, offset: &mut usize) -> io::Result<Self> {
         let u32_len = mem::size_of::<u32>();
         let g1_len = mem::size_of::<<E::G1Affine as UncompressedEncoding>::Uncompressed>();
@@ -198,6 +210,7 @@ impl<E: Engine + MultiMillerLoop> VerifyingKey<E> {
     }
 }
 
+/// A prepared verifying key
 pub struct PreparedVerifyingKey<E>
 where
     E: MultiMillerLoop,

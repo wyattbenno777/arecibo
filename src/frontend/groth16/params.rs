@@ -29,30 +29,36 @@ use super::VerifyingKey;
   serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",
   deserialize = "E::G1Affine: Deserialize<'de>, E::G2Affine: Deserialize<'de>"
 ))]
+/// Parameters
 pub struct Parameters<E>
 where
     E: MultiMillerLoop,
 {
+    /// Verifying key
     pub vk: VerifyingKey<E>,
 
-    // Elements of the form ((tau^i * t(tau)) / delta) for i between 0 and
-    // m-2 inclusive. Never contains points at infinity.
+    /// Elements of the form ((tau^i * t(tau)) / delta) for i between 0 and
+    /// m-2 inclusive. Never contains points at infinity.
     pub h: Arc<Vec<E::G1Affine>>,
 
-    // Elements of the form (beta * u_i(tau) + alpha v_i(tau) + w_i(tau)) / delta
-    // for all auxiliary inputs. Variables can never be unconstrained, so this
-    // never contains points at infinity.
+    /// Elements of the form (beta * u_i(tau) + alpha v_i(tau) + w_i(tau)) / delta
+    /// for all auxiliary inputs. Variables can never be unconstrained, so this
+    /// never contains points at infinity.
     pub l: Arc<Vec<E::G1Affine>>,
 
-    // QAP "A" polynomials evaluated at tau in the Lagrange basis. Never contains
-    // points at infinity: polynomials that evaluate to zero are omitted from
-    // the CRS and the prover can deterministically skip their evaluation.
+    /// QAP "A" polynomials evaluated at tau in the Lagrange basis. Never contains
+    /// points at infinity: polynomials that evaluate to zero are omitted from
+    /// the CRS and the prover can deterministically skip their evaluation.
     pub a: Arc<Vec<E::G1Affine>>,
 
-    // QAP "B" polynomials evaluated at tau in the Lagrange basis. Needed in
-    // G1 and G2 for C/B queries, respectively. Never contains points at
-    // infinity for the same reason as the "A" polynomials.
+    /// QAP "B" polynomials evaluated at tau in the Lagrange basis. Needed in
+    /// G1 for C/B queries, respectively. Never contains points at
+    /// infinity for the same reason as the "A" polynomials.
     pub b_g1: Arc<Vec<E::G1Affine>>,
+
+    /// QAP "B" polynomials evaluated at tau in the Lagrange basis. Needed in
+    /// G2 for C/B queries. Never contains points at infinity for the same reason
+    /// as the "A" polynomials.
     pub b_g2: Arc<Vec<E::G2Affine>>,
 }
 
@@ -74,6 +80,7 @@ impl<E> Parameters<E>
 where
     E: MultiMillerLoop,
 {
+    /// Write parameters to a writer
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         self.vk.write(&mut writer)?;
 
@@ -105,9 +112,9 @@ where
         Ok(())
     }
 
-    // Quickly iterates through the parameter file, recording all
-    // parameter offsets and caches the verifying key (vk) for quick
-    // access via reference.
+    /// Quickly iterates through the parameter file, recording all
+    /// parameter offsets and caches the verifying key (vk) for quick
+    /// access via reference.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn build_mapped_parameters(
         param_file_path: PathBuf,
@@ -179,10 +186,10 @@ where
         })
     }
 
-    // This method is provided as a proof of concept, but isn't
-    // advantageous to use (can be called by read_cached_params in
-    // rust-fil-proofs repo).  It's equivalent to the existing read
-    // method, in that it loads all parameters to RAM.
+    /// This method is provided as a proof of concept, but isn't
+    /// advantageous to use (can be called by read_cached_params in
+    /// the rust-fil-proofs repo).  It's equivalent to the existing read
+    /// method, in that it loads all parameters to RAM.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn read_mmap(mmap: &Mmap, checked: bool) -> io::Result<Self> {
         let u32_len = mem::size_of::<u32>();
@@ -308,6 +315,7 @@ where
         })
     }
 
+    /// Read parameters from a reader
     pub fn read<R: Read>(mut reader: R, checked: bool) -> io::Result<Self> {
         let read_g1 = |reader: &mut R| -> io::Result<E::G1Affine> {
             let mut repr = <E::G1Affine as UncompressedEncoding>::Uncompressed::default();
@@ -410,26 +418,35 @@ where
     }
 }
 
+/// A trait for parameter sources
 pub trait ParameterSource<E>: Send + Sync
 where
     E: MultiMillerLoop,
 {
+    /// A builder for G1 elements
     type G1Builder: SourceBuilder<E::G1Affine>;
+    /// A builder for G2 elements
     type G2Builder: SourceBuilder<E::G2Affine>;
 
+    /// Get the Verifying Key
     fn get_vk(&self, num_ic: usize) -> Result<&VerifyingKey<E>, SynthesisError>;
+    /// Get the H/G1 elements of the CRS
     fn get_h(&self, num_h: usize) -> Result<Self::G1Builder, SynthesisError>;
+    /// Get the L/G1 elements of the CRS
     fn get_l(&self, num_l: usize) -> Result<Self::G1Builder, SynthesisError>;
+    /// Get the A/G1 elements of the CRS
     fn get_a(
         &self,
         num_inputs: usize,
         num_aux: usize,
     ) -> Result<(Self::G1Builder, Self::G1Builder), SynthesisError>;
+    /// Get the B/G1 elements of the CRS
     fn get_b_g1(
         &self,
         num_inputs: usize,
         num_aux: usize,
     ) -> Result<(Self::G1Builder, Self::G1Builder), SynthesisError>;
+    /// Get the B/G2 elements of the CRS
     fn get_b_g2(
         &self,
         num_inputs: usize,

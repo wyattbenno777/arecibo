@@ -11,9 +11,13 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[repr(C)]
 #[derive(Clone, Debug)]
+/// Groth16 proof
 pub struct Proof<E: Engine> {
+    /// A in G1
     pub a: E::G1Affine,
+    /// B in G2
     pub b: E::G2Affine,
+    /// C in G1
     pub c: E::G1Affine,
 }
 
@@ -58,6 +62,7 @@ impl<E: Engine> PartialEq for Proof<E> {
 }
 
 impl<E: Engine> Proof<E> {
+    /// Write a proof to a writer
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writer.write_all(self.a.to_bytes().as_ref())?;
         writer.write_all(self.b.to_bytes().as_ref())?;
@@ -66,6 +71,7 @@ impl<E: Engine> Proof<E> {
         Ok(())
     }
 
+    /// Read a proof from a reader
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut bytes = vec![0u8; Self::size()];
         reader.read_exact(&mut bytes)?;
@@ -74,6 +80,7 @@ impl<E: Engine> Proof<E> {
         Ok(proof)
     }
 
+    /// Get the size of a proof
     pub fn size() -> usize {
         let g1_compressed_size = <E::G1Affine as GroupEncoding>::Repr::default()
             .as_ref()
@@ -84,6 +91,7 @@ impl<E: Engine> Proof<E> {
         2 * g1_compressed_size + g2_compressed_size
     }
 
+    /// Read many proofs from a byte slice
     pub fn read_many(proof_bytes: &[u8], num_proofs: usize) -> io::Result<Vec<Self>> {
         if proof_bytes.len() != num_proofs * Self::size() {
             return Err(io::Error::new(

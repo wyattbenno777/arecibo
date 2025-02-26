@@ -40,15 +40,20 @@ use serde::{Deserialize, Serialize};
 /// A type that holds the prover key for [`Decider`]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DeciderProverKey {
+  /// Groth16 proving key
   pub groth16_pk: Parameters<Bn256EngineKZG>,
+  /// KZG proving key
   pub kzg_pk: KZGProverKey<Bn256>,
 }
 
 /// A type that holds the verifier key for [`Decider`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeciderVerifierKey {
+  /// Groth16 verifying key
   pub groth16_vk: groth16::VerifyingKey<Bn256EngineKZG>,
+  /// Public parameters hash
   pub pp_hash: <Bn256EngineKZG as Engine>::Scalar,
+  /// KZG verifying key
   pub kzg_vk: KZGVerifierKey<Bn256>,
 }
 
@@ -57,16 +62,27 @@ pub struct DeciderVerifierKey {
 /// A SNARK that proves the knowledge of a valid  proof
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Decider {
+  /// Groth16 proof
   pub groth16_proof: Groth16Proof<Bn256EngineKZG>,
+  /// Randomness
   pub rho: Fr,
+  /// KZG challenges
   pub kzg_challenges: (Fr, Fr),
+  /// KZG proofs
   pub kzg_proofs: (KZGProof<Bn256>, KZGProof<Bn256>),
+  /// NIFS proof
   pub nifs_proof: NIFS<Bn256EngineKZG>,
+  /// Commitment of the witness of incoming instance
   pub u_cmW: Commitment<Bn256EngineKZG>,
+  /// Commitment of the witness of current relaxed instance
   pub U_cmW: Commitment<Bn256EngineKZG>,
+  /// Commitment of the error of current relaxed instance
   pub U_cmE: Commitment<Bn256EngineKZG>,
+  /// Number of steps
   pub num_steps: Fr,
+  /// Initial state
   pub z_0: Vec<Fr>,
+  /// Current state
   pub z_i: Vec<Fr>,
 }
 

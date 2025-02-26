@@ -11,9 +11,11 @@ use crate::{
     ROConstantsCircuit,
   },
 };
+/// A gadget for folding group elements.
 pub struct FoldGadget {}
 
 impl FoldGadget {
+  /// Fold group elements natively.
   pub fn fold_group_elements_native<E: CurveCycleEquipped>(
     U_cmW: Commitment<E>,
     U_cmE: Commitment<E>,
@@ -26,7 +28,7 @@ impl FoldGadget {
     Ok((cmW, cmE))
   }
 
-
+  /// Fold in-circuit field elements.
 
   pub fn fold_field_elements_gadget<CS, E: CurveCycleEquipped>(
     cs: &mut CS,

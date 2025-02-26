@@ -314,6 +314,7 @@ impl<E> PrimaryRelaxedNIFS<E>
 where
   E: CurveCycleEquipped,
 {
+  /// Prove the primary relaxed NIFS
   #[tracing::instrument(skip_all, name = "PrimaryRelaxedNIFS::prove", level = "debug")]
   pub fn prove(
     ck: &CommitmentKey<E>,
@@ -348,6 +349,7 @@ where
     Ok((Self { comm_T }, (U, W), r))
   }
 
+  /// Verify the primary relaxed NIFS
   pub fn verify(
     &self,
     ro_consts: &ROConstants<Dual<E>>,

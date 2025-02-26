@@ -77,6 +77,7 @@ pub struct ProverSRS<E: Engine> {
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug)]
 pub struct ProverSRSInputAggregation<E: Engine> {
+    /// Prover SRS
     pub prover_srs: ProverSRS<E>,
     /// Needed for optimized input aggregation
     pub g_alpha_powers_end_table: MultiscalarPrecompOwned<E::G1Affine>,
@@ -96,13 +97,21 @@ impl<E: Engine> std::ops::Deref for ProverSRSInputAggregation<E> {
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug)]
 pub struct VerifierSRS<E: Engine> {
+    /// number of proofs to aggregate
     pub n: usize,
+    /// G1 generator
     pub g: E::G1,
+    /// G2 generator
     pub h: E::G2,
+    /// alpha*g
     pub g_alpha: E::G1,
+    /// beta*g
     pub g_beta: E::G1,
+    /// alpha*h
     pub h_alpha: E::G2,
+    /// beta*h
     pub h_beta: E::G2,
+    /// alpha*d*h
     pub h_alpha_d: E::G2,
 }
 
@@ -186,6 +195,8 @@ where
         (pk, vk)
     }
 
+    /// Specialize the prover SRS for a specific number of
+    /// proofs to aggregate. The number of proofs MUST BE a power of two.
     pub fn specialize_prover(&self, num_proofs: usize) -> ProverSRS<E> {
         assert!(num_proofs.is_power_of_two());
         let tn = 2 * num_proofs; // size of the CRS we need
@@ -230,6 +241,8 @@ where
         }
     }
 
+    /// Specialize the verifier SRS for a specific number of
+    /// proofs to aggregate. The number of proofs MUST BE a power of two.
     pub fn specialize_vk(&self, num_proofs: usize) -> VerifierSRS<E> {
         assert!(num_proofs.is_power_of_two());
         let n = num_proofs;
@@ -245,6 +258,7 @@ where
         }
     }
 
+    /// Write a generic SRS to a writer
     pub fn write<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         write_vec(writer, &self.g_alpha_powers)?;
         write_vec(writer, &self.g_beta_powers)?;
@@ -260,6 +274,7 @@ where
         Sha3_256::digest(&v).to_vec()
     }
 
+    /// Read a generic SRS from a reader
     pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
         let g_alpha_powers = read_vec(reader)?;
         let g_beta_powers = read_vec(reader)?;
@@ -274,6 +289,7 @@ where
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    /// Read a generic SRS from a memory-mapped file
     pub fn read_mmap(reader: &Mmap, max_len: usize) -> io::Result<Self> {
         fn read_length(mmap: &Mmap, offset: &mut usize) -> Result<usize, std::io::Error> {
             let u32_len = size_of::<u32>();
@@ -336,6 +352,7 @@ where
     }
 }
 
+/// Setup a fake SRS
 pub fn setup_fake_srs<E, R>(rng: &mut R, size: usize) -> GenericSRS<E>
 where
     E: Engine,

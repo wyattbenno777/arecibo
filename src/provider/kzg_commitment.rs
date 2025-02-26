@@ -37,6 +37,7 @@ pub struct UniversalKZGParam<E: Engine> {
   // this is a hack; we just assume the size of the element.
   // Look for the static assertions in provider macros for a justification
   pub powers_of_h: Vec<E::G2Affine>,
+  /// A generator of G1
   pub h: E::G1Affine,
 }
 
@@ -87,6 +88,7 @@ impl<E: Engine> KZGProverKey<E> {
     }
   }
 
+  /// Generates powers of g
   pub fn powers_of_g(&self) -> &[E::G1Affine] {
     &self.uv_params.powers_of_g[self.offset..self.offset + self.supported_size]
   }
@@ -198,6 +200,7 @@ pub struct UVKZGCommitment<E: Engine>(
 );
 
 impl<E: Engine> UVKZGCommitment<E> {
+  /// Create a new UVKZG commitment
   pub fn new(commitment: E::G1Affine) -> Self {
     Self(commitment)
   }

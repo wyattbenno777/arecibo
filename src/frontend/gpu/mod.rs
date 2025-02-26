@@ -1,3 +1,4 @@
+//! GPU support
 mod error;
 
 use halo2curves::bn256::{G1Affine, G2Affine, Fr as Scalar};
@@ -25,6 +26,7 @@ pub use self::nogpu::*;
 #[cfg(any(feature = "cuda", feature = "opencl"))]
 pub use ec_gpu::GpuName;
 #[cfg(not(any(feature = "cuda", feature = "opencl")))]
+/// A trait for GPU names
 pub trait GpuName {}
 #[cfg(not(any(feature = "cuda", feature = "opencl")))]
 impl GpuName for G1Affine {}

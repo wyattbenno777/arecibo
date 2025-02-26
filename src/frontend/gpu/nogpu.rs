@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use crate::frontend::gpu::GpuName;
 
+/// A kernel for multiexp
 pub struct MultiexpKernel<G>(PhantomData<G>)
 where
     G: PrimeCurveAffine;
@@ -18,10 +19,12 @@ impl<G> MultiexpKernel<G>
 where
     G: PrimeCurveAffine,
 {
+    /// Create a new kernel
     pub fn create(_: bool) -> GpuResult<Self> {
         Err(GpuError::GpuDisabled)
     }
 
+    /// Run a kernel
     pub fn multiexp(
         &mut self,
         _: &Worker,
@@ -43,6 +46,7 @@ macro_rules! locked_kernel {
             $bound:ty: $boundvalue:tt $(+ $morebounds:tt )*,
         )+
     ) => {
+        /// A kernel for multiexp
         pub struct $class<$generic>(PhantomData<$generic>);
 
         impl<$generic> $class<$generic>
@@ -50,10 +54,12 @@ macro_rules! locked_kernel {
             $bound: $boundvalue $(+ $morebounds)*,
         )+
         {
+            /// Create a new kernel
             pub fn new(_: bool) -> Self {
                 Self(PhantomData)
             }
 
+            /// Run a kernel
             pub fn with<Fun, R, K>(&mut self, _: Fun) -> GpuResult<R>
             where
                 Fun: FnMut(&mut K) -> GpuResult<R>,

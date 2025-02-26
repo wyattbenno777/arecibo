@@ -13,6 +13,7 @@ use crate::onchain::gadgets::domain::{AllocatedEvaluations, AllocatedRadix2Domai
 pub struct EvalGadget {}
 
 impl EvalGadget {
+  /// Evaluate a polynomial natively.
   pub fn evaluate_native<F: PrimeField + GpuName>(v: Vec<F>, point: F) -> F {
     let mut domain = EvaluationDomain::from_coeffs(v).expect("Failed to create evaluation domain");
 
@@ -24,6 +25,7 @@ impl EvalGadget {
     eval
   }
 
+  /// Evaluate a polynomial in circuit.
   pub fn evaluate_gadget<CS, E: CurveCycleEquipped>(
     mut cs: CS,
     mut v: Vec<AllocatedNum<E::Scalar>>,

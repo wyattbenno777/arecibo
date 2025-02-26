@@ -162,16 +162,18 @@ pub struct RecursiveSNARK<E1>
 where
   E1: CurveCycleEquipped,
 {
-  // Input
+  /// initial inputs
   pub z0: Vec<E1::Scalar>,
 
-  // primary circuit data
+  // running witness
   pub(crate) r_W_primary: RelaxedR1CSWitness<E1>,
+  /// running instance
   pub r_U_primary: RelaxedR1CSInstance<E1>,
   pub(crate) l_w_primary: R1CSWitness<E1>,
+  /// incoming instance
   pub l_u_primary: R1CSInstance<E1>,
 
-  // Number of recursive steps proven
+  /// Number of recursive steps proven
   pub i: usize,
 
   // incremental commitment of previous invokation of step circuit
@@ -184,10 +186,10 @@ where
   pub(crate) r_W_cyclefold: RelaxedR1CSWitness<Dual<E1>>,
   pub(crate) r_U_cyclefold: RelaxedR1CSInstance<Dual<E1>>,
 
-  // outputs
+  /// outputs
   pub zi: Vec<E1::Scalar>,
 
-  // makes Nova simulataable
+  /// makes Nova simulatable
   pub r_i: E1::Scalar,
 }
 

@@ -135,6 +135,7 @@ pub fn nth_root_of_unity<F: PrimeField>(n: usize) -> Option<F> {
     Some(root)
 }
 
+/// Converts a commitment to its scalar coordinates.
 pub fn to_scalar_coordinates(comm: &Commitment<Bn256EngineKZG>) -> Result<(Vec<Fr>, Vec<Fr>, Fr), NovaError> {
     let (x, y, id) = comm.to_coordinates();
     let x_bignat = BigInt::from_bytes_le(Sign::Plus, &x.to_repr());

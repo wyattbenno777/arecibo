@@ -1,3 +1,4 @@
+//! Aggregation of proofs
 use std::fmt::{self, Display, Formatter};
 use std::ops::AddAssign;
 
@@ -25,9 +26,12 @@ pub use self::prove::*;
 pub use self::srs::*;
 pub use self::verify::*;
 
+/// Version of the aggregation scheme
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum AggregateVersion {
+    /// Version 1
     V1,
+    /// Version 2
     V2,
 }
 

@@ -6,6 +6,7 @@ use crate::{
   traits::{CurveCycleEquipped, Dual, Engine, ROCircuitTrait, ROConstantsCircuit},
 };
 
+/// Hash a relaxed R1CS instance.
 pub fn hash_U_i<E: CurveCycleEquipped, CS: ConstraintSystem<E::Scalar>>(
   cs: &mut CS,
   U_i: &AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
@@ -35,6 +36,7 @@ pub fn hash_U_i<E: CurveCycleEquipped, CS: ConstraintSystem<E::Scalar>>(
   le_bits_to_num(cs.namespace(|| "bits_to_num"), &hash_bits_p)
 }
 
+/// Hash a cyclefoldcommitment.
 pub fn hash_cf_U_i<E: CurveCycleEquipped, CS: ConstraintSystem<E::Scalar>>(
   cs: &mut CS,
   cf_U_i: &AllocatedRelaxedR1CSInstance<Dual<E>, BN_N_LIMBS>,

@@ -20,12 +20,17 @@ use crate::frontend::gpu;
 use ec_gpu_gen::fft_cpu;
 use ec_gpu_gen::threadpool::Worker;
 
+/// Evaluation domain
 pub struct EvaluationDomain<F: PrimeField + gpu::GpuName> {
     coeffs: Vec<F>,
     exp: u32,
+    /// primitive root of unity
     pub omega: F,
+    /// inverse of omega
     omegainv: F,
+    /// inverse of the generator
     geninv: F,
+    /// inverse of the size of the domain
     minv: F,
 }
 
@@ -42,10 +47,12 @@ impl<F: PrimeField + gpu::GpuName> AsMut<[F]> for EvaluationDomain<F> {
 }
 
 impl<F: PrimeField + gpu::GpuName> EvaluationDomain<F> {
+    /// Convert the evaluation domain to a vector of coefficients
     pub fn into_coeffs(self) -> Vec<F> {
         self.coeffs
     }
 
+    /// Create an evaluation domain from a vector of coefficients
     pub fn from_coeffs(mut coeffs: Vec<F>) -> Result<Self, SynthesisError> {
         // Compute the size of our evaluation domain
         let mut m = 1;
@@ -79,6 +86,7 @@ impl<F: PrimeField + gpu::GpuName> EvaluationDomain<F> {
         })
     }
 
+    /// Evaluate the polynomial at a given point
     pub fn evaluate_at(&self, point: F) -> F {
         let mut result = F::ZERO;
         let mut power_of_x = F::ONE;
@@ -91,6 +99,7 @@ impl<F: PrimeField + gpu::GpuName> EvaluationDomain<F> {
         result
     }
 
+    /// Execute a FFT.
     pub fn fft(
         &mut self,
         worker: &Worker,
@@ -122,6 +131,7 @@ impl<F: PrimeField + gpu::GpuName> EvaluationDomain<F> {
         Ok(())
     }
 
+    /// Execute an inverse FFT.
     pub fn ifft(
         &mut self,
         worker: &Worker,
@@ -161,6 +171,7 @@ impl<F: PrimeField + gpu::GpuName> EvaluationDomain<F> {
         Ok(())
     }
 
+    /// Distribute the powers of a given generator over the coefficients.
     pub fn distribute_powers(&mut self, worker: &Worker, g: F) {
         worker.scope(self.coeffs.len(), |scope, chunk| {
             for (i, v) in self.coeffs.chunks_mut(chunk).enumerate() {
@@ -175,6 +186,7 @@ impl<F: PrimeField + gpu::GpuName> EvaluationDomain<F> {
         });
     }
 
+    /// Execute a Coset FFT.
     pub fn coset_fft(
         &mut self,
         worker: &Worker,
@@ -198,6 +210,7 @@ impl<F: PrimeField + gpu::GpuName> EvaluationDomain<F> {
         Ok(())
     }
 
+    /// Execute an inverse Coset FFT.
     pub fn icoset_fft(
         &mut self,
         worker: &Worker,

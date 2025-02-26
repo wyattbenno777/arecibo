@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use super::{ParameterSource, PreparedVerifyingKey, VerifyingKey};
 
+/// Represents the parameters mapped from a file for the Groth16 proving system.
 pub struct MappedParameters<E>
 where
     E: MultiMillerLoop,
@@ -28,6 +29,7 @@ where
 
     /// This is always loaded (i.e. not lazily loaded).
     pub vk: VerifyingKey<E>,
+    /// The prepared verifying key, always loaded.
     pub pvk: PreparedVerifyingKey<E>,
 
     /// Elements of the form ((tau^i * t(tau)) / delta) for i between 0 and
@@ -48,8 +50,13 @@ where
     /// G1 and G2 for C/B queries, respectively. Never contains points at
     /// infinity for the same reason as the "A" polynomials.
     pub b_g1: Vec<Range<usize>>,
+
+    /// QAP "B" polynomials evaluated at tau in the Lagrange basis. Needed in
+    /// G2 for C/B queries, respectively. Never contains points at
+    /// infinity for the same reason as the "A" polynomials.
     pub b_g2: Vec<Range<usize>>,
 
+    /// Indicates whether the parameters have been checked for validity.
     pub checked: bool,
 }
 
@@ -60,10 +67,12 @@ where
     type G1Builder = (Arc<Vec<E::G1Affine>>, usize);
     type G2Builder = (Arc<Vec<E::G2Affine>>, usize);
 
+    /// Returns the verifying key.
     fn get_vk(&self, _: usize) -> Result<&VerifyingKey<E>, SynthesisError> {
         Ok(&self.vk)
     }
 
+    /// Returns the G1 elements for the "h" polynomials.
     fn get_h(&self, _num_h: usize) -> Result<Self::G1Builder, SynthesisError> {
         let builder = self
             .h
@@ -75,6 +84,7 @@ where
         Ok((Arc::new(builder), 0))
     }
 
+    /// Returns the G1 elements for the "l" polynomials.
     fn get_l(&self, _num_l: usize) -> Result<Self::G1Builder, SynthesisError> {
         let builder = self
             .l
@@ -86,6 +96,7 @@ where
         Ok((Arc::new(builder), 0))
     }
 
+    /// Returns the G1 elements for the "a" polynomials.
     fn get_a(
         &self,
         num_inputs: usize,
@@ -103,6 +114,7 @@ where
         Ok(((builder.clone(), 0), (builder, num_inputs)))
     }
 
+    /// Returns the G1 elements for the "b_g1" polynomials.
     fn get_b_g1(
         &self,
         num_inputs: usize,
@@ -120,6 +132,7 @@ where
         Ok(((builder.clone(), 0), (builder, num_inputs)))
     }
 
+    /// Returns the G2 elements for the "b_g2" polynomials.
     fn get_b_g2(
         &self,
         num_inputs: usize,
@@ -138,9 +151,9 @@ where
     }
 }
 
-// A re-usable method for parameter loading via mmap.  Unlike the
-// internal ones used elsewhere, this one does not update offset state
-// and simply does the cast and transform needed.
+/// A re-usable method for parameter loading via mmap.  Unlike the
+/// internal ones used elsewhere, this one does not update offset state
+/// and simply does the cast and transform needed.
 pub fn read_g1<E: MultiMillerLoop>(
     mmap: &Mmap,
     range: Range<usize>,
@@ -175,9 +188,9 @@ pub fn read_g1<E: MultiMillerLoop>(
     }
 }
 
-// A re-usable method for parameter loading via mmap.  Unlike the
-// internal ones used elsewhere, this one does not update offset state
-// and simply does the cast and transform needed.
+/// A re-usable method for parameter loading via mmap.  Unlike the
+/// internal ones used elsewhere, this one does not update offset state
+/// and simply does the cast and transform needed.
 pub fn read_g2<E: MultiMillerLoop>(
     mmap: &Mmap,
     range: Range<usize>,

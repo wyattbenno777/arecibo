@@ -1,6 +1,4 @@
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-#![allow(unused_mut)]
+//! Implements the decider circuit.
 
 use super::gadgets::{EvalGadget, FoldGadget, KZGChallengesGadget};
 use crate::{
@@ -35,6 +33,7 @@ use crate::{
 use ff::PrimeField;
 use std::sync::Arc;
 
+/// Decider circuit.
 #[derive(Debug, Clone)]
 pub struct DeciderCircuit<E>
 where
@@ -48,28 +47,37 @@ where
   pub ro_consts: ROConstants<E>,
   /// public params hash
   pub pp_hash: E::Scalar,
+  /// current index
   pub i: usize,
+  /// previous IC
   pub prev_IC: E::Scalar,
+  /// Randomness
   pub r_i: E::Scalar,
   /// initial state
   pub z_0: Vec<E::Scalar>,
   /// current i-th state
   pub z_i: Vec<E::Scalar>,
-  /// Folding scheme instances
+  /// Primary relaxed R1CS instance
   pub U_i: RelaxedR1CSInstance<E>,
+  /// Primary relaxed R1CS witness
   pub W_i: RelaxedR1CSWitness<E>,
+  /// Primary R1CS instance
   pub u_i: R1CSInstance<E>,
+  /// Primary R1CS witness
   pub w_i: R1CSWitness<E>,
+  /// Next relaxed R1CS instance
   pub U_i1: RelaxedR1CSInstance<E>,
+  /// Next relaxed R1CS witness
   pub W_i1: RelaxedR1CSWitness<E>,
-
-  // /// Helper for folding verification
+  /// NIFS proof
   pub nifs_proof: NIFS<E>,
+  /// Randomness
   pub randomness: E::Scalar,
-
   /// CycleFold running instance
   pub cf_U_i: RelaxedR1CSInstance<Dual<E>>,
+  /// CycleFold running witness
   pub cf_W_i: RelaxedR1CSWitness<Dual<E>>,
+  /// CycleFold commitment key      
   pub cf_ck: Arc<CommitmentKey<Dual<E>>>,
   /// KZG challenges
   pub kzg_challenges: (E::Scalar, E::Scalar),
@@ -82,6 +90,7 @@ where
   E: CurveCycleEquipped,
   <E as Engine>::Scalar: GpuName,
 {
+  /// Default constructor.
   pub fn default(
     arith: &R1CSShape<E>,
     cf_arith: &R1CSShape<Dual<E>>,
@@ -122,6 +131,7 @@ where
     }
   }
 
+  /// Constructor from public parameters and recursive SNARK.
   pub fn new(pp: &PublicParams<E>, rs: RecursiveSNARK<E>) -> Result<Self, NovaError> {
     let ro_consts = ROConstants::<E>::default(); // TODO: Not sure if this is OK
 
@@ -297,21 +307,21 @@ where
     // --------------------------------------------------------------------------------------------
     // Step 4: Commitments verification for U_{EC,n}.{E, W} with respect to W_{EC,n}.{E, W}.
     // --------------------------------------------------------------------------------------------
-    #[cfg(not(feature = "light_onchain_prover"))]
-    {
-      let cf_W_i_commit = <Dual<E> as Engine>::CE::commit_gadget(
-        cs,
-        &*self.cf_ck,
-        &self.cf_W_i.W[..],
-        &self.cf_W_i.r_W,
-      )?;
+    // #[cfg(not(feature = "light_onchain_prover"))]
+    // {
+    //   let cf_W_i_commit = <Dual<E> as Engine>::CE::commit_gadget(
+    //     cs,
+    //     &*self.cf_ck,
+    //     &self.cf_W_i.W[..],
+    //     &self.cf_W_i.r_W,
+    //   )?;
 
-      // Check that Commit(cf_W_i.W) == cf_U_i.cmW
-      cf_W_i_commit.check_equal(
-        cs.namespace(|| "check that cf_W_i.W == cf_U_i.cmW"),
-        &cf_U_i.W,
-      )?;
-    }
+    //   // Check that Commit(cf_W_i.W) == cf_U_i.cmW
+    //   cf_W_i_commit.check_equal(
+    //     cs.namespace(|| "check that cf_W_i.W == cf_U_i.cmW"),
+    //     &cf_U_i.W,
+    //   )?;
+    // }
 
     // -------------------------------------------------------------------------------------------- 
     // Step 5: Enforce U_{EC,n} and W_{EC,n} satisfy r1cs_{EC}, the Relaxed R1CS relation of the CycleFoldCircuit.

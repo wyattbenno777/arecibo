@@ -8,41 +8,49 @@ use serde::{Deserialize, Serialize};
 use crate::frontend::groth16::aggregate::{commit, srs};
 use crate::frontend::SynthesisError;
 
+/// A structure representing an aggregated proof along with its associated instance data.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AggregateProofAndInstance<E: Engine>
 where
     E: MultiMillerLoop,
     <E as Engine>::Gt: GroupEncoding,{
+    /// number of public inputs
     pub num_inputs: u32,
     #[serde(bound(
         serialize = "AggregateProof<E>: Serialize",
         deserialize = "AggregateProof<E>: Deserialize<'de>",
     ))]
+    /// aggregated proof
     pub pi_agg: AggregateProof<E>,
     #[serde(bound(
         serialize = "<E as pairing::Engine>::G1: Serialize",
         deserialize = "<E as pairing::Engine>::G1: Deserialize<'de>",
     ))]
+    /// commitments to f
     pub com_f: Vec<E::G1>,
     #[serde(bound(
         serialize = "<E as pairing::Engine>::G1: Serialize",
         deserialize = "<E as pairing::Engine>::G1: Deserialize<'de>",
     ))]
+    /// commitments to witness polynomial \( w_0 \)
     pub com_w0: Vec<E::G1>,
     #[serde(bound(
         serialize = "<E as pairing::Engine>::G1: Serialize",
         deserialize = "<E as pairing::Engine>::G1: Deserialize<'de>",
     ))]
+    /// commitments to witness polynomial \( w_d \)
     pub com_wd: Vec<E::G1>,
     #[serde(bound(
         serialize = "<E as pairing::Engine>::Fr: Serialize",
         deserialize = "<E as pairing::Engine>::Fr: Deserialize<'de>",
     ))]
+    /// evaluations of f
     pub f_eval: Vec<E::Fr>,
     #[serde(bound(
         serialize = "<E as pairing::Engine>::G1: Serialize",
         deserialize = "<E as pairing::Engine>::G1: Deserialize<'de>",
     ))]
+    /// proof of evaluations of f
     pub f_eval_proof: Vec<E::G1>,
 }
 
@@ -93,6 +101,7 @@ where
         serialize = "TippMippProof<E>: Serialize",
         deserialize = "TippMippProof<E>: Deserialize<'de>",
     ))]
+    /// TIPP and MIPP proof
     pub tmipp: TippMippProof<E>,
 }
 
@@ -181,8 +190,7 @@ where
         out.len()
     }
 
-
-
+    /// Reads the proof from the provided buffer.
     pub fn read(mut source: impl Read) -> std::io::Result<Self> {
         let com_ab = (
             read_gt::<E::Gt, _>(&mut source)?,
@@ -216,53 +224,63 @@ pub struct GipaProof<E>
 where
     E: MultiMillerLoop,
     <E as Engine>::Gt: GroupEncoding,{
+    /// Number of proofs
     pub nproofs: u32,
     #[serde(bound(
         serialize = "<E as pairing::Engine>::Gt: Serialize",
         deserialize = "<E as pairing::Engine>::Gt: Deserialize<'de>",
     ))]
+    /// Vector of A and B values
     pub comms_ab: Vec<(commit::Output<E>, commit::Output<E>)>,
     #[serde(bound(
         serialize = "<E as pairing::Engine>::Gt: Serialize",
         deserialize = "<E as pairing::Engine>::Gt: Deserialize<'de>",
     ))]
+    /// Vector of commitments to C
     pub comms_c: Vec<(commit::Output<E>, commit::Output<E>)>,
     #[serde(bound(
         serialize = "<E as pairing::Engine>::Gt: Serialize",
         deserialize = "<E as pairing::Engine>::Gt: Deserialize<'de>",
     ))]
+    /// Vector of evaluations in Gt related to A and B
     pub z_ab: Vec<(<E as Engine>::Gt, <E as Engine>::Gt)>,
     #[serde(bound(
         serialize = "E::G1: Serialize",
         deserialize = "E::G1: Deserialize<'de>",
     ))]
+    /// Vector of evaluations in G1 related to C
     pub z_c: Vec<(E::G1, E::G1)>,
     #[serde(bound(
         serialize = "E::G1Affine: Serialize",
         deserialize = "E::G1Affine: Deserialize<'de>",
     ))]
+    /// final commitment a
     pub final_a: E::G1Affine,
     #[serde(bound(
         serialize = "E::G2Affine: Serialize",
         deserialize = "E::G2Affine: Deserialize<'de>",
     ))]
+    /// final commitment b
     pub final_b: E::G2Affine,
     #[serde(bound(
         serialize = "E::G1Affine: Serialize",
         deserialize = "E::G1Affine: Deserialize<'de>",
     ))]
+    /// final commitment c
     pub final_c: E::G1Affine,
-    /// final commitment keys $v$ and $w$ - there is only one element at the
-    /// end for v1 and v2 hence it's a tuple.
+    // final commitment keys $v$ and $w$ - there is only one element at the
+    // end for v1 and v2 hence it's a tuple.
     #[serde(bound(
         serialize = "E::G2Affine: Serialize",
         deserialize = "E::G2Affine: Deserialize<'de>",
     ))]
+    /// final verification key
     pub final_vkey: (E::G2Affine, E::G2Affine),
     #[serde(bound(
         serialize = "E::G1Affine: Serialize",
         deserialize = "E::G1Affine: Deserialize<'de>",
     ))]
+    /// final witness key
     pub final_wkey: (E::G1Affine, E::G1Affine),
 }
 
@@ -439,16 +457,19 @@ where
         serialize = "GipaProof<E>: Serialize",
         deserialize = "GipaProof<E>: Deserialize<'de>",
     ))]
+    /// GIPA proof
     pub gipa: GipaProof<E>,
     #[serde(bound(
         serialize = "E::G2Affine: Serialize",
         deserialize = "E::G2Affine: Deserialize<'de>",
     ))]
+    /// vkey opening
     pub vkey_opening: KZGOpening<E::G2Affine>,
     #[serde(bound(
         serialize = "E::G1Affine: Serialize",
         deserialize = "E::G1Affine: Deserialize<'de>",
     ))]
+    /// wkey opening
     pub wkey_opening: KZGOpening<E::G1Affine>,
 }
 
@@ -510,6 +531,7 @@ where
     E: MultiMillerLoop,
     <E as Engine>::Gt: GroupEncoding,
 {
+    /// Check the parsing of the proof and instance.
     pub fn parsing_check(&self) -> Result<(), SynthesisError> {
         self.pi_agg.parsing_check()?;
         let n = (self.num_inputs / 2) as usize;
@@ -587,6 +609,7 @@ where
         Ok(())
     }
 
+    /// Reads the proof from the provided buffer.
     pub fn read(mut source: impl Read) -> std::io::Result<Self> {
         let mut buffer = 0u32.to_le_bytes();
         source.read_exact(&mut buffer)?;

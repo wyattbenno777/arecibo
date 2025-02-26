@@ -13,14 +13,11 @@ mod tests {
     frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
     nebula::rs::{PublicParams, RecursiveSNARK, StepCircuit},
     onchain::{
-      decider::{prepare_calldata, Decider},
-      eth::evm::{compile_solidity, Evm},
-      utils::{get_formatted_calldata, get_function_selector_for_nova_cyclefold_verifier},
-      verifiers::{
+      decider::{prepare_calldata, Decider}, eth::evm::{compile_solidity, Evm}, test::circuit::CubicFCircuit, utils::{get_formatted_calldata, get_function_selector_for_nova_cyclefold_verifier}, verifiers::{
         groth16::SolidityGroth16VerifierKey,
         kzg::SolidityKZGVerifierKey,
         nebula::{get_decider_template_for_cyclefold_decider, NovaCycleFoldVerifierKey},
-      },
+      }
     },
     provider::{Bn256EngineKZG, GrumpkinEngine},
     traits::{snark::RelaxedR1CSSNARKTrait, Engine},
@@ -38,39 +35,6 @@ mod tests {
   type S1 = crate::spartan::snark::RelaxedR1CSSNARK<E1, EE1>; // non-preprocessing SNARK
   type S2 = crate::spartan::snark::RelaxedR1CSSNARK<E2, EE2>; // non-preprocessing SNARK
 
-  /// Test circuit to be folded
-  #[derive(Clone, Copy, Debug)]
-  pub struct CubicFCircuit {}
-
-  impl CubicFCircuit {
-    fn new() -> Self {
-      Self {}
-    }
-  }
-  impl StepCircuit<halo2curves::bn256::Fr> for CubicFCircuit {
-    fn arity(&self) -> usize {
-      1
-    }
-    fn synthesize<CS: ConstraintSystem<halo2curves::bn256::Fr>>(
-      &self,
-      cs: &mut CS,
-      z_in: &[AllocatedNum<halo2curves::bn256::Fr>],
-    ) -> Result<Vec<AllocatedNum<halo2curves::bn256::Fr>>, SynthesisError> {
-      let five = AllocatedNum::alloc(cs.namespace(|| "five"), || {
-        Ok(halo2curves::bn256::Fr::from(5u64))
-      })?;
-      let z_i = z_in[0].clone();
-      let z_i_sq = z_i.mul(cs.namespace(|| "z_i_sq"), &z_i)?;
-      let z_i_cube = z_i_sq.mul(cs.namespace(|| "z_i_cube"), &z_i)?;
-      let result = z_i_cube.add(cs.namespace(|| "add z_i"), &z_i)?;
-      let result = result.add(cs.namespace(|| "add five"), &five)?;
-
-      Ok(vec![result])
-    }
-    fn non_deterministic_advice(&self) -> Vec<halo2curves::bn256::Fr> {
-      vec![]
-    }
-  }
 
   #[test]
   fn test_full_flow() {

@@ -5,7 +5,9 @@ use ff::PrimeField;
 use halo2curves::bn256::{Bn256, Fq, Fq2, Fr, G1Affine, G2Affine, G1};
 pub mod evm;
 
+/// Trait for converting Rust types to EVM calldata.
 pub trait ToEth {
+    /// Convert the type to a vector of bytes.
     fn to_eth(&self) -> Vec<u8>;
 }
 

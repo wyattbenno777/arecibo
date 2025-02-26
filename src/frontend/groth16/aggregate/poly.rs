@@ -1,9 +1,12 @@
+//! Polynomials
 use ff::Field;
 use std::fmt;
 use std::ops::{Div, Sub};
 
+/// Dense polynomial
 #[derive(Clone)]
 pub struct DensePolynomial<F: Field> {
+    /// Coefficients
     coeffs: Vec<F>,
 }
 
@@ -28,6 +31,7 @@ impl<F: Field> fmt::Debug for DensePolynomial<F> {
 }
 
 impl<F: Field> DensePolynomial<F> {
+    /// Create a dense polynomial from a vector of coefficients
     pub fn from_coeffs(coeffs: Vec<F>) -> Self {
         let mut result = Self { coeffs };
         // While there are zeros at the end of the coefficient vector, pop them off.
@@ -41,10 +45,12 @@ impl<F: Field> DensePolynomial<F> {
         result
     }
 
+    /// Get the coefficients of the polynomial
     pub fn coeffs(&self) -> &[F] {
         &self.coeffs
     }
 
+    /// Convert the polynomial to a vector of coefficients
     pub fn into_coeffs(self) -> Vec<F> {
         self.coeffs
     }
@@ -67,16 +73,19 @@ impl<F: Field> DensePolynomial<F> {
         self.coeffs.is_empty() || self.coeffs.iter().all(|coeff| coeff.is_zero().into())
     }
 
+    /// Create a zero polynomial
     pub fn zero() -> Self {
         Self { coeffs: Vec::new() }
     }
 
+    /// Truncate leading zeros
     fn truncate_leading_zeros(&mut self) {
         while self.coeffs.last().map_or(false, |c| c.is_zero().into()) {
             self.coeffs.pop();
         }
     }
 
+    /// Quotient and remainder of the division of two polynomials
     pub fn quot_rem(self, divisor: &DensePolynomial<F>) -> (DensePolynomial<F>, DensePolynomial<F>) {
         if self.is_zero() {
             (DensePolynomial::zero(), self)

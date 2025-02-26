@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 pub struct KZGChallengesGadget {}
 
 impl KZGChallengesGadget {
+  /// Compute the KZG challenges natively.
   pub fn get_challenges_native<E: CurveCycleEquipped>(
     U_i: RelaxedR1CSInstance<E>,
   ) -> (E::Scalar, E::Scalar) {
@@ -40,6 +41,7 @@ impl KZGChallengesGadget {
     (rw, re)
   }
 
+  /// Compute the KZG challenges in-circuit.
   pub fn get_challenges_gadget<CS, E: CurveCycleEquipped>(
     cs: &mut CS,
     U_i: AllocatedEmulRelaxedR1CSInstance<Dual<E>>,
@@ -67,13 +69,17 @@ impl KZGChallengesGadget {
   }
 }
 
+/// A KZG proof.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KZGProof<E: PairingEngine> {
+  /// The proof.
   pub proof: E::G1,
+  /// The evaluation.
   pub eval: E::Fr,
 }
 
 impl<E: PairingEngine> KZGProof<E> {
+  /// Create a KZG proof.
   pub fn prove(
     pk: &KZGProverKey<E>,
     challenge: E::Fr,
@@ -113,6 +119,7 @@ e evaluation domain");
     Ok(KZGProof { proof, eval })
   }
 
+  /// Verify a KZG proof.
   pub fn verify(
     &self,
     vk: &KZGVerifierKey<E>,
