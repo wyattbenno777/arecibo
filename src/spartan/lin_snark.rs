@@ -168,7 +168,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> LinearizedR1CSSNARKTrait<E>
       ck,
       &pk.pk_ee,
       &mut transcript,
-      &(U.comm_W + U.pre_committed.0 + U.pre_committed.1),
+      &(U.pre_committed.0 + U.pre_committed.1 + U.comm_W),
       &W,
       &r_y[1..],
       &eval_W,

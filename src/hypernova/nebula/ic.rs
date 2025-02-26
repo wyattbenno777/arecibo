@@ -5,7 +5,6 @@ use crate::{
   cyclefold::util::absorb_primary_commitment,
   gadgets::scalar_as_base,
   hypernova::rs::IncrementalCommitment,
-  r1cs::R1CSShape,
   traits::{
     commitment::CommitmentEngineTrait, CurveCycleEquipped, Dual, Engine, ROConstants, ROTrait,
   },
@@ -23,20 +22,14 @@ pub fn increment_ic<E>(
   ro_consts: &ROConstants<Dual<E>>,
   prev_ic: IncrementalCommitment<E>,
   advice: (&[E::Scalar], &[E::Scalar]),
-  S: &R1CSShape<E>,
 ) -> (E::Scalar, E::Scalar)
 where
   E: CurveCycleEquipped,
 {
   // TODO: add blind.
   //       We have not added blinding yet because for sharding we need the incremental comms to be deterministic
-  let comm_advice_0 = E::CE::commit_at(ck, advice.0, &E::Scalar::ZERO, S.num_vars);
-  let comm_advice_1 = E::CE::commit_at(
-    ck,
-    advice.1,
-    &E::Scalar::ZERO,
-    S.num_vars + S.num_precommitted.0,
-  );
+  let comm_advice_0 = E::CE::commit(ck, advice.0, &E::Scalar::ZERO);
+  let comm_advice_1 = E::CE::commit_at(ck, advice.1, &E::Scalar::ZERO, advice.0.len());
   increment_comm::<E>(ro_consts, prev_ic, (comm_advice_0, comm_advice_1))
 }
 

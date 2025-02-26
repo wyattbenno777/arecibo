@@ -192,7 +192,24 @@ where
       return Err(NovaError::InvalidMultisetProof);
     }
 
-    // TODO: implement other multiset check
+    // --- 2. check Cn′ = Cn  ---
+    // commitments carried in both Πops and ΠF are the same
+    if U.F_ic != U.ops_ic {
+      return Err(NovaError::InvalidMultisetProof);
+    }
+
+    // --- 3. check γ and γ are derived by hashing C and C′′. ---
+    // Get alpha and gamma
+    let mut keccak = E::TE::new(b"compute MCC challenges");
+    keccak.absorb(b"ic_ops", &U.F_ic.0);
+    keccak.absorb(b"ic_is", &U.scan_ic.0);
+    keccak.absorb(b"ic_fs", &U.scan_ic.1);
+    let gamma = keccak.squeeze(b"gamma")?;
+    let alpha = keccak.squeeze(b"alpha")?;
+
+    if U.ops_z_0[0] != gamma || U.ops_z_0[1] != alpha {
+      return Err(NovaError::InvalidMultisetProof);
+    }
 
     // --- 4. check h_IS' · h_WS' = h_RS' · h_FS'.---
     //
@@ -225,13 +242,12 @@ where
           &convert_advice_separate(init_memory_chunk),
           &convert_advice_separate(final_memory_chunk),
         ),
-        &pp.circuit_shape().r1cs_shape,
       );
     }
     let mut keccak = E::TE::new(b"compute MCC challenges");
-    keccak.absorb(b"C_n", &ic_F);
-    keccak.absorb(b"C_pprime", &ic_scan.0);
-    keccak.absorb(b"C_pprime", &ic_scan.1);
+    keccak.absorb(b"ic_ops", &ic_F);
+    keccak.absorb(b"ic_is", &ic_scan.0);
+    keccak.absorb(b"ic_fs", &ic_scan.1);
     let gamma = keccak.squeeze(b"gamma")?;
     let alpha = keccak.squeeze(b"alpha")?;
     Ok((gamma, alpha))
@@ -271,13 +287,7 @@ where
     for circuit in circuits.iter() {
       rs.prove_step(pp, circuit, ic)?;
       let (advice_0, advice_1) = circuit.advice();
-      ic = increment_ic::<E>(
-        pp.ck(),
-        pp.ro_consts(),
-        ic,
-        (&advice_0, &advice_1),
-        &pp.circuit_shape().r1cs_shape,
-      );
+      ic = increment_ic::<E>(pp.ck(), pp.ro_consts(), ic, (&advice_0, &advice_1));
     }
     Ok((rs, ic, z_0))
   }

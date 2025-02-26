@@ -322,13 +322,7 @@ mod tests {
     for i in 0..3 {
       recursive_snark.prove_step(&pp, c, ic)?;
       let (advice_0, advice_1) = c.advice();
-      ic = increment_ic::<E>(
-        &pp.ck,
-        &pp.ro_consts,
-        ic,
-        (&advice_0, &advice_1),
-        &pp.circuit_shape.r1cs_shape,
-      );
+      ic = increment_ic::<E>(&pp.ck, &pp.ro_consts, ic, (&advice_0, &advice_1));
       recursive_snark.verify(&pp, i + 1, &z_0, ic)?;
     }
     let (pk, vk) = CompressedSNARK::<E, S1, S2>::setup(&pp)?;

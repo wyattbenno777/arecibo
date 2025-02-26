@@ -178,14 +178,14 @@ where
   }
 
   /// Get the precommitted commitments
-  pub fn commit(&self, ck: &CommitmentKey<E>, S: &R1CSShape<E>) -> (Commitment<E>, Commitment<E>) {
+  pub fn commit(&self, ck: &CommitmentKey<E>) -> (Commitment<E>, Commitment<E>) {
     (
-      CE::<E>::commit_at(ck, &self.pre_committed.0, &E::Scalar::ZERO, S.num_vars),
+      CE::<E>::commit(ck, &self.pre_committed.0, &E::Scalar::ZERO),
       CE::<E>::commit_at(
         ck,
         &self.pre_committed.1,
         &E::Scalar::ZERO,
-        S.num_vars + S.num_precommitted.0,
+        self.pre_committed.0.len(),
       ),
     )
   }
@@ -203,9 +203,9 @@ where
   /// Construct the witness vector. witness_vec = [aux.W, pre_committed.0, pre_committed.1]
   pub fn W(&self) -> Vec<E::Scalar> {
     [
-      self.aux.W.as_slice(),
       &self.pre_committed.0,
       &self.pre_committed.1,
+      self.aux.W.as_slice(),
     ]
     .concat()
   }
