@@ -38,7 +38,16 @@ pub trait NovaShape<E: Engine> {
   /// Return an appropriate `R1CSShape` and `CommitmentKey` structs.
   /// A `CommitmentKeyHint` should be provided to help guide the construction of the `CommitmentKey`.
   /// This parameter is documented in `r1cs::R1CS::commitment_key`.
-  fn r1cs_shape(&self, ck_hint: &CommitmentKeyHint<E>) -> (R1CSShape<E>, CommitmentKey<E>);
+  fn r1cs_shape_and_key(&self, ck_hint: &CommitmentKeyHint<E>) -> (R1CSShape<E>, CommitmentKey<E>) {
+    let S = self.r1cs_shape();
+    let ck = commitment_key(&S, ck_hint);
+
+    (S, ck)
+  }
+  /// Return an appropriate `R1CSShape` and `CommitmentKey` structs.
+  /// A `CommitmentKeyHint` should be provided to help guide the construction of the `CommitmentKey`.
+  /// This parameter is documented in `r1cs::R1CS::commitment_key`.
+  fn r1cs_shape(&self) -> R1CSShape<E>;
 }
 
 impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
@@ -77,7 +86,7 @@ macro_rules! impl_nova_shape {
     where
       E::Scalar: PrimeField,
     {
-      fn r1cs_shape(&self, ck_hint: &CommitmentKeyHint<E>) -> (R1CSShape<E>, CommitmentKey<E>) {
+      fn r1cs_shape(&self) -> R1CSShape<E> {
         let mut A = SparseMatrix::<E::Scalar>::empty();
         let mut B = SparseMatrix::<E::Scalar>::empty();
         let mut C = SparseMatrix::<E::Scalar>::empty();
@@ -118,9 +127,8 @@ macro_rules! impl_nova_shape {
           C,
         )
         .unwrap();
-        let ck = commitment_key(&S, ck_hint);
 
-        (S, ck)
+        S
       }
     }
   };

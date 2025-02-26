@@ -1,28 +1,69 @@
 //! Nebula API
 
-use super::product_circuits::{BatchedOpsCircuit, OpsCircuit, ScanCircuit};
-use super::{ic::increment_ic, product_circuits::convert_advice_separate};
-use crate::hypernova::nebula::product_circuits::MEMORY_OPS_PER_STEP;
-use crate::traits::snark::default_ck_hint;
-use crate::traits::{Engine, TranscriptEngineTrait};
+use super::{
+  ic::increment_ic,
+  product_circuits::{convert_advice_separate, BatchedOpsCircuit, OpsCircuit, ScanCircuit},
+};
 use crate::{
-  hypernova::rs::{IncrementalCommitment, PublicParams, RecursiveSNARK, StepCircuit},
-  traits::CurveCycleEquipped,
+  digest::{DigestComputer, SimpleDigestible},
+  hypernova::{
+    nebula::product_circuits::MEMORY_OPS_PER_STEP,
+    pp::{
+      compute_ck, AuxPublicParams, PublicParamsTrait, R1CSPublicParams, SplitPublicParams,
+      SubAuxPublicParams,
+    },
+    rs::{IncrementalCommitment, RecursiveSNARK, StepCircuit},
+  },
+  traits::{snark::default_ck_hint, CurveCycleEquipped, Engine, TranscriptEngineTrait},
   NovaError,
 };
 use ff::Field;
 use itertools::Itertools;
+use once_cell::sync::OnceCell;
+use serde::{Deserialize, Serialize};
 
-// TODO: have a single public params struct
-/// Nebula pp
+/// Public parameters for the Nebula SNARK
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct NebulaPublicParams<E>
 where
   E: CurveCycleEquipped,
 {
-  F: PublicParams<E>,
-  ops: PublicParams<E>,
-  scan: PublicParams<E>,
+  aux: AuxPublicParams<E>,
+  F: R1CSPublicParams<E>,
+  ops: R1CSPublicParams<E>,
+  scan: R1CSPublicParams<E>,
+  #[serde(skip, default = "OnceCell::new")]
+  digest: OnceCell<E::Scalar>,
 }
+
+impl<E> NebulaPublicParams<E>
+where
+  E: CurveCycleEquipped,
+{
+  fn F(&self) -> SplitPublicParams<'_, E> {
+    (&self.aux, &self.F, self.digest())
+  }
+
+  fn ops(&self) -> SplitPublicParams<'_, E> {
+    (&self.aux, &self.ops, self.digest())
+  }
+
+  fn scan(&self) -> SplitPublicParams<'_, E> {
+    (&self.aux, &self.scan, self.digest())
+  }
+
+  /// Calculate the digest of the public parameters.
+  pub fn digest(&self) -> E::Scalar {
+    self
+      .digest
+      .get_or_try_init(|| DigestComputer::new(self).digest())
+      .cloned()
+      .expect("Failure in retrieving digest")
+  }
+}
+
+impl<E> SimpleDigestible for NebulaPublicParams<E> where E: CurveCycleEquipped {}
 
 /// A SNARK that proves correct execution of a vm and that the vm maintained
 /// memory correctly.
@@ -43,18 +84,30 @@ where
   /// Fn used to obtain setup material for producing succinct arguments for
   /// WASM program executions
   pub fn setup(F: &impl StepCircuit<E::Scalar>, step_size: StepSize) -> NebulaPublicParams<E> {
-    let F = PublicParams::<E>::setup(F, &*default_ck_hint(), &*default_ck_hint());
-    let ops = PublicParams::<E>::setup(
+    let sub_aux_params = SubAuxPublicParams::<E>::setup(&*default_ck_hint());
+    let F_pp = R1CSPublicParams::<E>::setup(F, &sub_aux_params);
+    let ops_pp = R1CSPublicParams::<E>::setup(
       &BatchedOpsCircuit::empty(step_size.execution),
-      &*default_ck_hint(),
+      &sub_aux_params,
+    );
+    let scan_pp =
+      R1CSPublicParams::<E>::setup(&ScanCircuit::empty(step_size.memory), &sub_aux_params);
+    let ck = compute_ck(
+      &[
+        &F_pp.circuit_shape,
+        &ops_pp.circuit_shape,
+        &scan_pp.circuit_shape,
+      ],
       &*default_ck_hint(),
     );
-    let scan = PublicParams::<E>::setup(
-      &ScanCircuit::empty(step_size.memory),
-      &*default_ck_hint(),
-      &*default_ck_hint(),
-    );
-    NebulaPublicParams { F, ops, scan }
+    let aux_pp = AuxPublicParams::setup(ck, sub_aux_params);
+    NebulaPublicParams {
+      aux: aux_pp,
+      F: F_pp,
+      ops: ops_pp,
+      scan: scan_pp,
+      digest: OnceCell::new(),
+    }
   }
 
   /// Produce a SNARK that proves correct execution of a vm and that the vm maintained
@@ -70,14 +123,14 @@ where
     // --- Run the F (transition) circuit ---
     //
     // We use commitment-carrying IVC to prove the repeated execution of F
-    let (F_rs, F_ic, F_z_0) = RecursiveSNARKEngine::run(|| F_engine, &pp.F)?;
+    let (F_rs, F_ic, F_z_0) = RecursiveSNARKEngine::run(|| F_engine, &pp.F())?;
 
     // --- Get challenges gamma and alpha ---
     //
     // * Compute commitment to IS & FS -> IC_Audit
     // * hash ic_ops & ic_scan and get gamma, alpha
     let (gamma, alpha) = Self::gamma_alpha(
-      &pp.scan,
+      &pp.scan(),
       &init_memory,
       &final_memory,
       F_ic.0,
@@ -87,13 +140,13 @@ where
     // Grand product checks for RS & WS
     let (ops_rs, ops_ic, ops_z_0) = RecursiveSNARKEngine::run(
       || OpsGrandProductEngine::new(read_ops, write_ops, gamma, alpha, step_size),
-      &pp.ops,
+      &pp.ops(),
     )?;
 
     // Grand product checks for IS & FS
     let (scan_rs, scan_ic, scan_z_0) = RecursiveSNARKEngine::run(
       || ScanGrandProductEngine::new(init_memory, final_memory, gamma, alpha, step_size),
-      &pp.scan,
+      &pp.scan(),
     )?;
     Ok((
       Self {
@@ -115,17 +168,19 @@ where
   /// Verify the [`NebulaSNARK`]
   pub fn verify(&self, pp: &NebulaPublicParams<E>, U: &NebulaInstance<E>) -> Result<(), NovaError> {
     // verify F
-    self.F.verify(&pp.F, self.F.num_steps(), &U.F_z_0, U.F_ic)?;
+    self
+      .F
+      .verify(&pp.F(), self.F.num_steps(), &U.F_z_0, U.F_ic)?;
 
     // verify F_ops
     let ops_z_i = self
       .ops
-      .verify(&pp.ops, self.ops.num_steps(), &U.ops_z_0, U.ops_ic)?;
+      .verify(&pp.ops(), self.ops.num_steps(), &U.ops_z_0, U.ops_ic)?;
 
     // verify F_scan
     let scan_z_i = self
       .scan
-      .verify(&pp.scan, self.scan.num_steps(), &U.scan_z_0, U.scan_ic)?;
+      .verify(&pp.scan(), self.scan.num_steps(), &U.scan_z_0, U.scan_ic)?;
 
     // 1. check h_IS = h_RS = h_WS = h_FS = 1 // initial values are correct
     let (init_h_is, init_h_rs, init_h_ws, init_h_fs) =
@@ -152,7 +207,7 @@ where
   }
 
   fn gamma_alpha(
-    pp: &PublicParams<E>,
+    pp: &impl PublicParamsTrait<E>,
     init_memory: &[(usize, u64, u64)],
     final_memory: &[(usize, u64, u64)],
     ic_F: E::Scalar,
@@ -164,14 +219,14 @@ where
       .zip_eq(final_memory.chunks(memory_size))
     {
       ic_scan = increment_ic::<E>(
-        &pp.ck,
-        &pp.ro_consts,
+        pp.ck(),
+        pp.ro_consts(),
         ic_scan,
         (
           &convert_advice_separate(init_memory_chunk),
           &convert_advice_separate(final_memory_chunk),
         ),
-        &pp.circuit_shape.r1cs_shape,
+        &pp.circuit_shape().r1cs_shape,
       );
     }
     let mut keccak = E::TE::new(b"compute MCC challenges");
@@ -207,7 +262,7 @@ where
   /// Run the recursive proving loop over the built circuits.
   fn prove_recursive(
     &mut self,
-    pp: &PublicParams<E>,
+    pp: &impl PublicParamsTrait<E>,
   ) -> Result<(RecursiveSNARK<E>, IncrementalCommitment<E>, Vec<E::Scalar>), NovaError> {
     let circuits = self.circuits()?;
     let z_0 = self.z0();
@@ -218,11 +273,11 @@ where
       rs.prove_step(pp, circuit, ic)?;
       let (advice_0, advice_1) = circuit.advice();
       ic = increment_ic::<E>(
-        &pp.ck,
-        &pp.ro_consts,
+        pp.ck(),
+        pp.ro_consts(),
         ic,
         (&advice_0, &advice_1),
-        &pp.circuit_shape.r1cs_shape,
+        &pp.circuit_shape().r1cs_shape,
       );
     }
     Ok((rs, ic, z_0))
@@ -231,7 +286,7 @@ where
   /// Run the engine
   fn run(
     constructor: impl FnOnce() -> Self,
-    pp: &PublicParams<E>,
+    pp: &impl PublicParamsTrait<E>,
   ) -> Result<(RecursiveSNARK<E>, IncrementalCommitment<E>, Vec<E::Scalar>), NovaError> {
     let mut engine = constructor();
     engine.prove_recursive(pp)

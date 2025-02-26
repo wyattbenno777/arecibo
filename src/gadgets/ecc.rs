@@ -1036,7 +1036,7 @@ mod tests {
     let _ = synthesize_smul::<E1::GE, _>(cs.namespace(|| "synthesize"));
     expected_constraints.assert_eq(&cs.num_constraints().to_string());
     expected_variables.assert_eq(&cs.num_aux().to_string());
-    let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
+    let (shape, ck) = cs.r1cs_shape_and_key(&*default_ck_hint());
 
     // Then the satisfying assignment
     let mut cs = SatisfyingAssignment::<E2>::new();
@@ -1092,7 +1092,7 @@ mod tests {
     let mut cs: TestShapeCS<E2> = TestShapeCS::new();
     let _ = synthesize_add_equal::<E1::GE, _>(cs.namespace(|| "synthesize add equal"));
     println!("Number of constraints: {}", cs.num_constraints());
-    let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
+    let (shape, ck) = cs.r1cs_shape_and_key(&*default_ck_hint());
 
     // Then the satisfying assignment
     let mut cs = SatisfyingAssignment::<E2>::new();
@@ -1167,7 +1167,7 @@ mod tests {
     let _ = synthesize_add_negation::<E1::GE, _>(cs.namespace(|| "synthesize add equal"));
     expected_constraints.assert_eq(&cs.num_constraints().to_string());
     expected_variables.assert_eq(&cs.num_aux().to_string());
-    let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
+    let (shape, ck) = cs.r1cs_shape_and_key(&*default_ck_hint());
 
     // Then the satisfying assignment
     let mut cs = SatisfyingAssignment::<E2>::new();
