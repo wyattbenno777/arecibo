@@ -3,7 +3,8 @@
 
 pub mod api;
 pub mod ic;
-pub mod product_circuits;
+pub use product_circuits::convert_advice;
 
+mod product_circuits;
 #[cfg(test)]
 mod tests;
