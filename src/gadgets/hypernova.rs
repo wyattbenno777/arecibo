@@ -322,7 +322,6 @@ where
   {
     let comm_T = AllocatedPoint::alloc(
       cs.namespace(|| "allocate T"),
-      // inst.map(|inst| inst.comm_T.to_coordinates()),
       map_field!(inst, comm_T.to_coordinates()),
     )?;
     let l_u = AllocatedCycleFoldInstance::alloc(
