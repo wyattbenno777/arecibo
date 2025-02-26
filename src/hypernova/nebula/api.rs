@@ -1,4 +1,5 @@
-//! Nebula API
+//! This module defines the Nebula API. A CC-IVC scheme that proves the correct execution of a program
+//! and that the program maintained memory correctly.
 
 use super::{
   ic::increment_ic,
@@ -68,6 +69,8 @@ impl<E> SimpleDigestible for NebulaPublicParams<E> where E: CurveCycleEquipped {
 
 /// A SNARK that proves correct execution of a vm and that the vm maintained
 /// memory correctly.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct NebulaSNARK<E>
 where
   E: CurveCycleEquipped,
@@ -85,10 +88,7 @@ where
   /// Fn used to obtain setup material for producing succinct arguments for
   /// WASM program executions
   pub fn setup(F: &impl StepCircuit<E::Scalar>, step_size: StepSize) -> NebulaPublicParams<E> {
-    // Get the round constants used in the poseidon hash function and poseidon hash function circuit
     let ro_consts_circuit = ROConstantsCircuit::<Dual<E>>::default();
-
-    // Get the structure for the AugmentedCircuit and corresponding commitment key
     let augmented_circuit_params = AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
     let F_pp = R1CSPublicParams::<E>::setup(F, &ro_consts_circuit, &augmented_circuit_params);
     let ops_pp = R1CSPublicParams::<E>::setup(
@@ -205,12 +205,14 @@ where
     }
 
     // --- 2. check Cn′ = Cn  ---
+    //
     // commitments carried in both Πops and ΠF are the same
     if U.F_ic != U.ops_ic {
       return Err(NovaError::InvalidMultisetProof);
     }
 
     // --- 3. check γ and γ are derived by hashing C and C′′. ---
+    //
     // Get alpha and gamma
     let mut keccak = E::TE::new(b"compute MCC challenges");
     keccak.absorb(b"ic_ops", &U.F_ic.0);
@@ -234,6 +236,7 @@ where
     Ok(())
   }
 
+  // Get MCC challenges for grand products
   fn gamma_alpha(
     pp: &impl PublicParamsTrait<E>,
     init_memory: &[(usize, u64, u64)],
@@ -370,7 +373,7 @@ where
   }
 
   fn z0(&self) -> Vec<E::Scalar> {
-    // The ops RS initial input is [gamma, alpha, ts=0, h_RS=1, h_WS=1, size]
+    // The ops RS initial input is [gamma, alpha, ts=0, h_RS=1, h_WS=1, ms_size]
     vec![
       self.gamma,
       self.alpha,
@@ -432,7 +435,7 @@ where
   }
 
   fn z0(&self) -> Vec<E::Scalar> {
-    // scan_z0 = [gamma, alpha, h_IS=1, h_FS=1, size]
+    // scan_z0 = [gamma, alpha, h_IS=1, h_FS=1, ms_size]
     vec![
       self.gamma,
       self.alpha,
@@ -443,8 +446,8 @@ where
   }
 }
 
-/// Public i/o for WASM execution proving
-#[derive(Clone, Debug)]
+/// Public i/o for a Nebula zkVM
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NebulaInstance<E>
 where
   E: CurveCycleEquipped,

@@ -126,7 +126,9 @@ where
   }
 }
 
-/// Public params trait
+/// Public params trait.
+/// This trait defines the limited behavior of the public parameters used in the HyperNova recursiveSNARK proving and verification.
+/// The behavior of the public parameters has no logic and simply returns the values of the public parameters.
 pub trait PublicParamsTrait<E>
 where
   E: CurveCycleEquipped,
@@ -239,7 +241,7 @@ where
 
 impl<E> SimpleDigestible for SplitPublicParams<'_, E> where E: CurveCycleEquipped {}
 
-/// The public parameters used in the HyperNova recursiveSNARK proving and verification
+/// Circuit specific public parameters for the circuit
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct R1CSPublicParams<E>
@@ -258,10 +260,7 @@ impl<E> R1CSPublicParams<E>
 where
   E: CurveCycleEquipped,
 {
-  /// Builds the public parameters for the circuit `C1`.
-  /// The same note for public parameter hints apply as in the case for Nova's public parameters:
-  /// For some final compressing SNARKs the size of the commitment key must be larger, so we include
-  /// `ck_hint_primary` and `ck_hint_cyclefold` parameters to accommodate this.
+  /// Builds circuit specific public parameters for the circuit
   #[tracing::instrument(skip_all, name = "HyperNova::PublicParams::setup")]
   pub fn setup(
     step_circuit: &impl StepCircuit<E::Scalar>,
@@ -324,10 +323,8 @@ impl<E> AuxPublicParams<E>
 where
   E: CurveCycleEquipped,
 {
-  /// Builds the public parameters for the circuit `C1`.
-  /// The same note for public parameter hints apply as in the case for Nova's public parameters:
-  /// For some final compressing SNARKs the size of the commitment key must be larger, so we include
-  /// `ck_hint_primary` and `ck_hint_cyclefold` parameters to accommodate this.
+  /// Builds auxillary public parameters for the circuit, which includes the
+  /// commitment key, RO constants and cyclefold circuit
   pub fn setup(
     circuit_params: &[&R1CSWithArity<E>],
     ro_consts_circuit: ROConstantsCircuit<Dual<E>>,
