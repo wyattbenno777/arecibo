@@ -283,7 +283,7 @@ fn prefetch<T>(p: *const T) {
 }
 
 // Requires nightly for aarch64
-#[cfg(all(nightly, target_arch = "aarch64"))]
+#[cfg(all(feature = "nightly", target_arch = "aarch64"))]
 fn prefetch<T>(p: *const T) {
     unsafe {
         use std::arch::aarch64::*;
@@ -291,7 +291,7 @@ fn prefetch<T>(p: *const T) {
     }
 }
 
-#[cfg(not(any(target_arch = "x86_64", all(target_arch = "aarch64", nightly))))]
+#[cfg(not(any(target_arch = "x86_64", all(target_arch = "aarch64", feature = "nightly"))))]
 fn prefetch<T>(_: *const T) {}
 
 #[cfg(test)]

@@ -15,6 +15,7 @@ use ff::Field;
 use itertools::Itertools as _;
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct AllocatedRelaxedR1CSWitness<E: Engine, const N: usize> {
   W: Vec<AllocatedNum<E::Base>>,
   r_W: AllocatedNum<E::Base>,
@@ -24,7 +25,8 @@ pub struct AllocatedRelaxedR1CSWitness<E: Engine, const N: usize> {
 
 impl<E: Engine, const N: usize> AllocatedRelaxedR1CSWitness<E, N> {
   /// Allocates the given [`RelaxedR1CSInstance`] as a witness of the circuit
-  pub fn alloc<CS: ConstraintSystem<<E as Engine>::Base>>(
+  #[allow(dead_code)]
+  fn alloc<CS: ConstraintSystem<<E as Engine>::Base>>(
     mut cs: CS,
     witness: Option<&RelaxedR1CSWitness<E>>,
     limb_width: usize,
@@ -72,7 +74,8 @@ impl<E: Engine, const N: usize> AllocatedRelaxedR1CSWitness<E, N> {
 
   /// Allocates the hardcoded default `RelaxedR1CSWitness` in the circuit.
   /// W = E = vec![], r_W = 0, r_E = 0
-  pub fn default<CS: ConstraintSystem<<E as Engine>::Base>>(
+  #[allow(dead_code)]
+  fn default<CS: ConstraintSystem<<E as Engine>::Base>>(
     mut cs: CS,
     _limb_width: usize,
     _n_limbs: usize,

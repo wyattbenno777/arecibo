@@ -17,7 +17,6 @@ use crate::{
     rs::{PublicParams, RecursiveSNARK},
   },
   onchain::gadgets::hash::{hash_U_i, hash_cf_U_i},
-  provider::traits::DlogGroup,
   r1cs::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{
     commitment::CommitmentTrait,
@@ -131,7 +130,7 @@ where
 
     // TODO: Do I need to run an iteration for IS and FS in Nebula?
     // 1. Compute the U_{i+1}, W_{i+1}
-    let (nifs, (r_U_primary, r_W_primary), (r_U_cyclefold, r_W_cyclefold), rho, _U_secondary_temp) =
+    let (nifs, (r_U_primary, r_W_primary), _, rho, _U_secondary_temp) =
       NIFS::<E>::prove(
         (&pp.ck_primary, &pp.ck_cyclefold),
         &pp.ro_consts,
@@ -232,7 +231,7 @@ where
       BN_N_LIMBS,
     )?;
 
-    let (U_i1_cmW_x, U_i1_cmW_y, U_i1_cmW_id) = U_i1.comm_W.to_coordinates();
+    let (U_i1_cmW_x, U_i1_cmW_y, _) = U_i1.comm_W.to_coordinates();
 
     for (i, limb) in U_i1_cmW_x.as_limbs().iter().enumerate() {
       let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of x to num")))?;
@@ -244,7 +243,7 @@ where
       tmp.inputize(cs.namespace(|| format!("convert limb {i} of y to num")))?;
     }
 
-    let (U_i1_cmE_x, U_i1_cmE_y, U_i1_cmE_id) = U_i1.comm_E.to_coordinates();
+    let (U_i1_cmE_x, U_i1_cmE_y, _) = U_i1.comm_E.to_coordinates();
     for (i, limb) in U_i1_cmE_x.as_limbs().iter().enumerate() {
       let tmp = limb.as_allocated_num(cs.namespace(|| format!("convert limb {i} of x to num")))?;
       tmp.inputize(cs.namespace(|| format!("convert limb {i} of x to num")))?;

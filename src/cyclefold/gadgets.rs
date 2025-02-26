@@ -423,6 +423,7 @@ pub mod emulated {
   #[derive(Clone, Debug)]
   /// A non-native circuit version of a `R1CSInstance`. This is used for the in-circuit
   /// representation of the primary running instance
+  #[allow(dead_code)]
   pub struct AllocatedEmulRelaxedR1CSWitness<E: Engine> {
     pub W: Vec<AllocatedNum<E::Base>>,
     pub E: Vec<AllocatedNum<E::Base>>,
@@ -432,7 +433,8 @@ pub mod emulated {
   where
     E: Engine,
   {
-    pub fn alloc<CS, E2: Engine<Base = E::Scalar, Scalar = E::Base>>(
+    #[allow(dead_code)]
+    fn alloc<CS, E2: Engine<Base = E::Scalar, Scalar = E::Base>>(
       mut cs: CS,
       inst: Option<&RelaxedR1CSWitness<E2>>,
     ) -> Result<Self, SynthesisError>
