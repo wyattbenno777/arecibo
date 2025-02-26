@@ -13,9 +13,6 @@ use crate::{
 use ff::PrimeField;
 use itertools::Itertools;
 
-/// Maximum number of memory ops allowed per step of the zkVM
-pub const MEMORY_OPS_PER_STEP: usize = 14;
-
 /// Circuit to compute multiset hashes of (RS, WS)
 #[derive(Clone, Debug)]
 pub struct OpsCircuit {
@@ -141,10 +138,10 @@ impl OpsCircuit {
   }
 
   /// Create a empty instance of [`OpsCircuit`]. Used to produce public parameters
-  pub fn empty() -> Self {
+  pub fn empty<const M: usize>() -> Self {
     OpsCircuit {
-      RS: vec![(0, 0, 0); MEMORY_OPS_PER_STEP / 2],
-      WS: vec![(0, 0, 0); MEMORY_OPS_PER_STEP / 2],
+      RS: vec![(0, 0, 0); M],
+      WS: vec![(0, 0, 0); M],
     }
   }
 }
@@ -322,9 +319,9 @@ where
 
 impl BatchedOpsCircuit {
   /// Create an empty instance of [`BatchedOpsCircuit`]
-  pub fn empty(step_size: usize) -> Self {
+  pub fn empty<const M: usize>(step_size: usize) -> Self {
     Self {
-      circuits: vec![OpsCircuit::empty(); step_size],
+      circuits: vec![OpsCircuit::empty::<M>(); step_size],
     }
   }
 

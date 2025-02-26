@@ -13,8 +13,11 @@ use itertools::Itertools;
 
 use super::{
   api::{NebulaPublicParams, NebulaSNARK, RecursiveSNARKEngine, StepSize},
-  product_circuits::{convert_advice, MEMORY_OPS_PER_STEP},
+  product_circuits::convert_advice,
 };
+
+/// Maximum number of memory ops allowed per step of the heapify zkvm
+const MEMORY_OPS_PER_STEP: usize = 7;
 
 /// Used in the lt circuit to determine how many bits the range check should
 /// check
@@ -26,7 +29,8 @@ type E = Bn256EngineIPA;
 #[test]
 fn test_heapify() {
   let step_size = StepSize::new(1).set_memory_step_size(2);
-  let pp: NebulaPublicParams<E> = NebulaSNARK::setup(&HeapifyCircuit::empty(), step_size);
+  let pp: NebulaPublicParams<E, MEMORY_OPS_PER_STEP> =
+    NebulaSNARK::setup(&HeapifyCircuit::empty(), step_size);
 
   // Calculate testing memory (heap) size. We keep the test simple and ensure
   // memory size is a power of two
@@ -233,8 +237,8 @@ where
 impl HeapifyCircuit {
   pub fn empty() -> Self {
     HeapifyCircuit {
-      RS: vec![(0, 0, 0); MEMORY_OPS_PER_STEP / 2],
-      WS: vec![(0, 0, 0); MEMORY_OPS_PER_STEP / 2],
+      RS: vec![(0, 0, 0); MEMORY_OPS_PER_STEP],
+      WS: vec![(0, 0, 0); MEMORY_OPS_PER_STEP],
     }
   }
 

@@ -9,7 +9,6 @@ use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
   digest::{DigestComputer, SimpleDigestible},
   hypernova::{
-    nebula::product_circuits::MEMORY_OPS_PER_STEP,
     pp::{AuxPublicParams, PublicParamsTrait, R1CSPublicParams, SplitPublicParams},
     rs::{IncrementalCommitment, RecursiveSNARK, StepCircuit},
   },
@@ -25,9 +24,11 @@ use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 
 /// Public parameters for the Nebula SNARK
+///
+/// /// The constant `M` is the number of memory operations per step in the vm.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct NebulaPublicParams<E>
+pub struct NebulaPublicParams<E, const M: usize>
 where
   E: CurveCycleEquipped,
 {
@@ -39,7 +40,7 @@ where
   digest: OnceCell<E::Scalar>,
 }
 
-impl<E> NebulaPublicParams<E>
+impl<E, const M: usize> NebulaPublicParams<E, M>
 where
   E: CurveCycleEquipped,
 {
@@ -65,13 +66,15 @@ where
   }
 }
 
-impl<E> SimpleDigestible for NebulaPublicParams<E> where E: CurveCycleEquipped {}
+impl<E, const M: usize> SimpleDigestible for NebulaPublicParams<E, M> where E: CurveCycleEquipped {}
 
 /// A SNARK that proves correct execution of a vm and that the vm maintained
 /// memory correctly.
+///
+/// The constant `M` is the number of memory operations per step in the vm.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct NebulaSNARK<E>
+pub struct NebulaSNARK<E, const M: usize>
 where
   E: CurveCycleEquipped,
 {
@@ -80,19 +83,19 @@ where
   scan: RecursiveSNARK<E>,
 }
 
-impl<E> NebulaSNARK<E>
+impl<E, const M: usize> NebulaSNARK<E, M>
 where
   E: CurveCycleEquipped,
   <E as Engine>::Scalar: PartialOrd,
 {
   /// Fn used to obtain setup material for producing succinct arguments for
   /// WASM program executions
-  pub fn setup(F: &impl StepCircuit<E::Scalar>, step_size: StepSize) -> NebulaPublicParams<E> {
+  pub fn setup(F: &impl StepCircuit<E::Scalar>, step_size: StepSize) -> NebulaPublicParams<E, M> {
     let ro_consts_circuit = ROConstantsCircuit::<Dual<E>>::default();
     let augmented_circuit_params = AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
     let F_pp = R1CSPublicParams::<E>::setup(F, &ro_consts_circuit, &augmented_circuit_params);
     let ops_pp = R1CSPublicParams::<E>::setup(
-      &BatchedOpsCircuit::empty(step_size.execution),
+      &BatchedOpsCircuit::empty::<M>(step_size.execution),
       &ro_consts_circuit,
       &augmented_circuit_params,
     );
@@ -124,7 +127,7 @@ where
   /// Produce a SNARK that proves correct execution of a vm and that the vm maintained
   /// memory correctly.
   pub fn prove(
-    pp: &NebulaPublicParams<E>,
+    pp: &NebulaPublicParams<E, M>,
     step_size: StepSize,
     vm_multi_sets: VMMultiSets,
     F_engine: impl RecursiveSNARKEngine<E>,
@@ -150,7 +153,7 @@ where
 
     // Grand product checks for RS & WS
     let (ops_rs, ops_ic, ops_z_0) = RecursiveSNARKEngine::run(
-      || OpsGrandProductEngine::new(read_ops, write_ops, gamma, alpha, step_size),
+      || OpsGrandProductEngine::<E, M>::new(read_ops, write_ops, gamma, alpha, step_size),
       &pp.ops(),
     )?;
 
@@ -177,7 +180,11 @@ where
   }
 
   /// Verify the [`NebulaSNARK`]
-  pub fn verify(&self, pp: &NebulaPublicParams<E>, U: &NebulaInstance<E>) -> Result<(), NovaError> {
+  pub fn verify(
+    &self,
+    pp: &NebulaPublicParams<E, M>,
+    U: &NebulaInstance<E>,
+  ) -> Result<(), NovaError> {
     // verify F
     self
       .F
@@ -317,7 +324,7 @@ where
   }
 }
 
-struct OpsGrandProductEngine<E>
+struct OpsGrandProductEngine<E, const M: usize>
 where
   E: CurveCycleEquipped,
 {
@@ -328,7 +335,7 @@ where
   step_size: StepSize,
 }
 
-impl<E> OpsGrandProductEngine<E>
+impl<E, const M: usize> OpsGrandProductEngine<E, M>
 where
   E: CurveCycleEquipped,
 {
@@ -349,7 +356,7 @@ where
   }
 }
 
-impl<E> RecursiveSNARKEngine<E> for OpsGrandProductEngine<E>
+impl<E, const M: usize> RecursiveSNARKEngine<E> for OpsGrandProductEngine<E, M>
 where
   E: CurveCycleEquipped,
   <E as Engine>::Scalar: PartialOrd,
@@ -380,7 +387,7 @@ where
       E::Scalar::ZERO,
       E::Scalar::ONE,
       E::Scalar::ONE,
-      E::Scalar::from((MEMORY_OPS_PER_STEP / 2) as u64),
+      E::Scalar::from(M as u64),
     ]
   }
 }
