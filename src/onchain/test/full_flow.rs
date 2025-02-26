@@ -139,15 +139,15 @@ mod tests {
     assert_eq!(*output.last().unwrap(), 1);
 
     // save smart contract and the calldata
-    println!("storing nova-verifier.sol and the calldata into files");
-    use std::fs;
-    fs::write(
-      "./examples/nova-verifier.sol",
-      decider_solidity_code.clone(),
-    )
-    .expect("Unable to write to file");
-    fs::write("./examples/solidity-calldata.calldata", calldata.clone()).expect("");
-    let s = get_formatted_calldata(calldata.clone());
-    fs::write("./examples/solidity-calldata.inputs", s.join(",\n")).expect("");
+    // println!("storing nova-verifier.sol and the calldata into files");
+    // use std::fs;
+    // fs::write(
+    //   "./examples/nova-verifier.sol",
+    //   decider_solidity_code.clone(),
+    // )
+    // .expect("Unable to write to file");
+    // fs::write("./examples/solidity-calldata.calldata", calldata.clone()).expect("");
+    // let s = get_formatted_calldata(calldata.clone());
+    // fs::write("./examples/solidity-calldata.inputs", s.join(",\n")).expect("");
   }
 }

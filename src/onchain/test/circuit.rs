@@ -30,7 +30,8 @@ use crate::{constants::{BN_LIMB_WIDTH, BN_N_LIMBS}, cyclefold::gadgets::emulated
       }
     }
 
-    fn default() -> Self {
+    /// Create a new test challenge circuit with default values
+    pub fn default() -> Self {
       Self {
         relaxed_instance: RelaxedR1CSInstance {
           comm_W: Commitment::<Bn256EngineKZG>::default(),

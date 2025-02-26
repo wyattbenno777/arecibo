@@ -1,15 +1,10 @@
 use crate::{
-  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_FE_IN_EMULATED_POINT},
-  cyclefold::gadgets::emulated::{
+  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS}, cyclefold::gadgets::emulated::{
     AllocatedEmulPoint, AllocatedEmulR1CSInstance, AllocatedEmulRelaxedR1CSInstance,
-  },
-  frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
-  nebula::nifs::NIFS,
-  Commitment,
-  traits::{
+  }, frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError}, gadgets::le_bits_to_num, nebula::nifs::NIFS, traits::{
     commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
     ROConstantsCircuit,
-  },
+  }, Commitment
 };
 /// A gadget for folding group elements.
 pub struct FoldGadget {}
@@ -54,17 +49,6 @@ impl FoldGadget {
       BN_N_LIMBS,
     )?;
     cm_T.absorb_in_ro(cs.namespace(|| "cm_T"), &mut ro_circuit)?;
-
-    // TODO: Make this constraint work
-    // let r_1_bits = ro_circuit.squeeze(cs.namespace(|| "squeeze_r_1"), NUM_HASH_BITS)?;
-    // let r_1 = le_bits_to_num(cs.namespace(|| "bits_to_num r_1"), &r_1_bits)?;
-
-    // cs.enforce(
-    //   || "r_1 is a valid scalar",
-    //   |lc| lc,
-    //   |lc| lc,
-    //   |lc| lc + r.get_variable() - r_1.get_variable(),
-    // );
 
     let r_mul_x0 = r.mul(cs.namespace(|| "mul x0"), &u.x0)?;
     let x0 = U.x0.add(cs.namespace(|| "add x0"), &r_mul_x0)?;

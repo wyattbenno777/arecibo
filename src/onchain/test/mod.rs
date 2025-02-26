@@ -25,7 +25,7 @@ mod tests {
     nebula::rs::{PublicParams, RecursiveSNARK, StepCircuit},
     onchain::{
       decider_circuit::DeciderCircuit,
-      gadgets::{EvalGadget, FoldGadget, KZGChallengesGadget, KZGProof}, test::circuit::{BigNatCircuit, CubicFCircuit},
+      gadgets::{EvalGadget, FoldGadget, KZGChallengesGadget, KZGProof}, test::circuit::{BigNatCircuit, CubicFCircuit, TrivialCircuit},
     },
     provider::{
       hyperkzg::EvaluationEngine,
@@ -33,8 +33,7 @@ mod tests {
       Bn256EngineKZG, GrumpkinEngine,
     },
     r1cs::{commitment_key, RelaxedR1CSInstance},
-    traits::{
-      circuit::TrivialCircuit, commitment::{CommitmentEngineTrait, CommitmentTrait}, evaluation::EvaluationEngineTrait, snark::{default_ck_hint, RelaxedR1CSSNARKTrait}, Dual, Engine
+    traits::{commitment::{CommitmentEngineTrait, CommitmentTrait}, evaluation::EvaluationEngineTrait, snark::{default_ck_hint, RelaxedR1CSSNARKTrait}, Dual, Engine
     },
     Commitment,
   };
@@ -82,7 +81,7 @@ use super::circuit::TestChallengeCircuit;
 
   #[test]
   fn test_eval_gadget() {
-    let circuit = TrivialCircuit {
+    let circuit = TrivialCircuit{
       a: Some(Fr::from(2)),
       b: Some(Fr::from(3)),
       c: Some(Fr::from(6)),
