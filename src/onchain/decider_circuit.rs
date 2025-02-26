@@ -2,20 +2,16 @@
 
 use super::gadgets::{EvalGadget, FoldGadget, KZGChallengesGadget};
 use crate::{
-  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_HASH_BITS},
+  constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
   cyclefold::gadgets::emulated::{
     AllocatedEmulPoint, AllocatedEmulR1CSInstance, AllocatedEmulRelaxedR1CSInstance,
-    AllocatedEmulRelaxedR1CSWitness,
   },
   errors::NovaError,
   frontend::{
-    gpu::GpuName, num::AllocatedNum, AllocatedBit, Circuit, ConstraintSystem, Index,
-    SynthesisError, Variable,
+    gpu::GpuName, num::AllocatedNum, Circuit, ConstraintSystem,
+    SynthesisError,
   },
-  gadgets::{
-    alloc_num_equals, le_bits_to_num, AllocatedPoint, AllocatedRelaxedR1CSInstance,
-    AllocatedRelaxedR1CSWitness,
-  },
+  gadgets::AllocatedRelaxedR1CSInstance,
   nebula::{
     nifs::NIFS,
     rs::{PublicParams, RecursiveSNARK},
@@ -24,13 +20,11 @@ use crate::{
   provider::traits::DlogGroup,
   r1cs::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{
-    commitment::{CommitmentEngineTrait, CommitmentTrait},
-    CurveCycleEquipped, Dual, Engine, Group, ROCircuitTrait, ROConstants, ROConstantsCircuit,
-    ROTrait,
+    commitment::CommitmentTrait,
+    CurveCycleEquipped, Dual, Engine, ROConstants,
   },
   CommitmentKey,
 };
-use ff::PrimeField;
 use std::sync::Arc;
 
 /// Decider circuit.

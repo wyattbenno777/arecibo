@@ -12,7 +12,6 @@ mod tests {
 
   use crate::{
     constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
-    cyclefold::gadgets::emulated::{AllocatedEmulPoint, AllocatedEmulRelaxedR1CSInstance},
     frontend::{
       groth16::{self, create_random_proof, generate_random_parameters, verify_proof},
       num::AllocatedNum,
@@ -33,9 +32,8 @@ mod tests {
       Bn256EngineKZG, GrumpkinEngine,
     },
     r1cs::{commitment_key, RelaxedR1CSInstance},
-    traits::{commitment::{CommitmentEngineTrait, CommitmentTrait}, evaluation::EvaluationEngineTrait, snark::{default_ck_hint, RelaxedR1CSSNARKTrait}, Dual, Engine
+    traits::{commitment::{CommitmentEngineTrait, CommitmentTrait}, evaluation::EvaluationEngineTrait, snark::{default_ck_hint, RelaxedR1CSSNARKTrait}, Engine
     },
-    Commitment,
   };
   use ff::{Field, PrimeField};
   use group::Curve;

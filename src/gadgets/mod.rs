@@ -6,7 +6,7 @@ mod nonnative;
 pub(crate) use nonnative::{bignat::nat_to_limbs, bignat::BigNat, util::f_to_nat, util::Num};
 
 mod r1cs;
-pub(crate) use r1cs::{AllocatedRelaxedR1CSInstance, AllocatedRelaxedR1CSWitness};
+pub(crate) use r1cs::AllocatedRelaxedR1CSInstance;
 
 mod utils;
 

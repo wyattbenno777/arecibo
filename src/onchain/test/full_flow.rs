@@ -10,10 +10,10 @@ mod tests {
   /// - generate the Solidity contract that verifies the proof
   /// - verify the proof in the EVM
   use crate::{
-    frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
-    nebula::rs::{PublicParams, RecursiveSNARK, StepCircuit},
+    frontend::ConstraintSystem,
+    nebula::rs::{PublicParams, RecursiveSNARK},
     onchain::{
-      decider::{prepare_calldata, Decider}, eth::evm::{compile_solidity, Evm}, test::circuit::CubicFCircuit, utils::{get_formatted_calldata, get_function_selector_for_nova_cyclefold_verifier}, verifiers::{
+      decider::{prepare_calldata, Decider}, eth::evm::{compile_solidity, Evm}, test::circuit::CubicFCircuit, utils::get_function_selector_for_nova_cyclefold_verifier, verifiers::{
         groth16::SolidityGroth16VerifierKey,
         kzg::SolidityKZGVerifierKey,
         nebula::{get_decider_template_for_cyclefold_decider, NovaCycleFoldVerifierKey},

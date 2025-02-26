@@ -1,8 +1,8 @@
 //! This module provides an implementation of a commitment engine
 use crate::{
   errors::NovaError,
-  frontend::{num::AllocatedNum, AllocatedBit, ConstraintSystem, SynthesisError},
-  gadgets::{scalar_as_base, AllocatedPoint},
+  frontend::{AllocatedBit, ConstraintSystem, SynthesisError},
+  gadgets::AllocatedPoint,
   provider::traits::DlogGroup,
   traits::{
     commitment::{CommitmentEngineTrait, CommitmentTrait, Len},

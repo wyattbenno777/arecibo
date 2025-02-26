@@ -1,7 +1,7 @@
 use crate::{
-  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS}, cyclefold::gadgets::emulated::{
+  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_FE_IN_EMULATED_POINT}, cyclefold::gadgets::emulated::{
     AllocatedEmulPoint, AllocatedEmulR1CSInstance, AllocatedEmulRelaxedR1CSInstance,
-  }, frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError}, gadgets::le_bits_to_num, nebula::nifs::NIFS, traits::{
+  }, frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError}, nebula::nifs::NIFS, traits::{
     commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
     ROConstantsCircuit,
   }, Commitment

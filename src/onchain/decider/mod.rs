@@ -5,13 +5,11 @@ use super::{
   gadgets::{FoldGadget, KZGProof}, utils::to_scalar_coordinates,
 };
 use crate::{
-  constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
   errors::NovaError,
   frontend::groth16::{
     self, create_random_proof, generate_random_parameters, verify_proof, Parameters,
     Proof as Groth16Proof,
   },
-  gadgets::{nat_to_limbs, scalar_as_base, BigNat},
   nebula::{
     nifs::NIFS,
     rs::{PublicParams, RecursiveSNARK},
@@ -20,19 +18,15 @@ use crate::{
   provider::{
     hyperkzg::EvaluationEngine,
     kzg_commitment::{KZGProverKey, KZGVerifierKey, UVKZGCommitment},
-    traits::DlogGroup,
     Bn256EngineKZG,
   },
-  r1cs::{R1CSInstance, RelaxedR1CSInstance},
   traits::{
-    commitment::CommitmentTrait, evaluation::EvaluationEngineTrait, Dual, Engine, ROConstants,
+    evaluation::EvaluationEngineTrait, Engine, ROConstants,
   },
   Commitment,
 };
-use ff::PrimeField;
 use group::Curve;
 use halo2curves::bn256::{Bn256, Fr};
-use num_bigint::{BigInt, Sign};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 

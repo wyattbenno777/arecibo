@@ -12,7 +12,7 @@ use super::kzg::{SolidityKZGVerifier, SolidityKZGVerifierKey};
 use crate::onchain::utils::HeaderInclusion;
 use crate::onchain::verifiers::{ProtocolVerifierKey, PRAGMA_GROTH16_VERIFIER};
 use serde::{Deserialize, Serialize};
-use halo2curves::bn256::{Bn256, Fr, Fq, G1Affine};
+use halo2curves::bn256::{Bn256, Fr, G1Affine};
 use ff::PrimeField;
 use crate::gadgets::BigNat;
 

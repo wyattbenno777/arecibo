@@ -1,7 +1,7 @@
 //! This module defines a collection of traits that define the behavior of a commitment engine
 //! We require the commitment engine to provide a commitment to vectors with a single group element
 use crate::frontend::{ConstraintSystem, SynthesisError};
-use crate::gadgets::{le_bits_to_num, scalar_as_base, AllocatedPoint};
+use crate::gadgets::AllocatedPoint;
 use crate::provider::traits::DlogGroup;
 use crate::{
   errors::NovaError,
@@ -11,7 +11,6 @@ use core::{
   fmt::Debug,
   ops::{Add, Mul, MulAssign},
 };
-use ff::PrimeFieldBits;
 use group::prime::PrimeCurve;
 use serde::{Deserialize, Serialize};
 
