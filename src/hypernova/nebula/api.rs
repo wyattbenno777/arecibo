@@ -9,8 +9,7 @@ use crate::{
   hypernova::{
     nebula::product_circuits::MEMORY_OPS_PER_STEP,
     pp::{
-      compute_ck, AuxPublicParams, PublicParamsTrait, R1CSPublicParams, SplitPublicParams,
-      SubAuxPublicParams,
+      AuxPublicParams, PublicParamsTrait, R1CSPublicParams, SplitPublicParams, SubAuxPublicParams,
     },
     rs::{IncrementalCommitment, RecursiveSNARK, StepCircuit},
   },
@@ -92,15 +91,15 @@ where
     );
     let scan_pp =
       R1CSPublicParams::<E>::setup(&ScanCircuit::empty(step_size.memory), &sub_aux_params);
-    let ck = compute_ck(
+    let aux_pp = AuxPublicParams::setup(
       &[
         &F_pp.circuit_shape,
         &ops_pp.circuit_shape,
         &scan_pp.circuit_shape,
       ],
+      sub_aux_params,
       &*default_ck_hint(),
     );
-    let aux_pp = AuxPublicParams::setup(ck, sub_aux_params);
     NebulaPublicParams {
       aux: aux_pp,
       F: F_pp,

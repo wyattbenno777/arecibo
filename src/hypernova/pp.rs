@@ -327,7 +327,12 @@ where
   /// The same note for public parameter hints apply as in the case for Nova's public parameters:
   /// For some final compressing SNARKs the size of the commitment key must be larger, so we include
   /// `ck_hint_primary` and `ck_hint_cyclefold` parameters to accommodate this.
-  pub fn setup(ck: CommitmentKey<E>, aux: SubAuxPublicParams<E>) -> Self {
+  pub fn setup(
+    circuit_params: &[&R1CSWithArity<E>],
+    aux: SubAuxPublicParams<E>,
+    ck_hint: &CommitmentKeyHint<E>,
+  ) -> Self {
+    let ck = Self::compute_ck(circuit_params, ck_hint);
     Self {
       ck: Arc::new(ck),
       ro_consts: aux.ro_consts,
@@ -336,6 +341,23 @@ where
       ck_cyclefold: aux.ck_cyclefold,
       circuit_shape_cyclefold: aux.circuit_shape_cyclefold,
     }
+  }
+
+  /// Compute primary and secondary commitment keys sized to handle the largest of the circuits in the provided
+  /// `R1CSWithArity`.
+  pub fn compute_ck(
+    circuit_params: &[&R1CSWithArity<E>],
+    ck_hint1: &CommitmentKeyHint<E>,
+  ) -> CommitmentKey<E>
+  where
+    E: CurveCycleEquipped,
+  {
+    let size_primary = circuit_params
+      .iter()
+      .map(|circuit| commitment_key_size(&circuit.r1cs_shape, ck_hint1))
+      .max()
+      .unwrap();
+    E::CE::setup(b"ck", size_primary)
   }
 }
 
@@ -392,21 +414,4 @@ where
       circuit_shape_cyclefold,
     }
   }
-}
-
-/// Compute primary and secondary commitment keys sized to handle the largest of the circuits in the provided
-/// `R1CSWithArity`.
-pub fn compute_ck<E>(
-  circuit_params: &[&R1CSWithArity<E>],
-  ck_hint1: &CommitmentKeyHint<E>,
-) -> CommitmentKey<E>
-where
-  E: CurveCycleEquipped,
-{
-  let size_primary = circuit_params
-    .iter()
-    .map(|circuit| commitment_key_size(&circuit.r1cs_shape, ck_hint1))
-    .max()
-    .unwrap();
-  E::CE::setup(b"ck", size_primary)
 }
