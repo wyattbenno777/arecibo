@@ -23,7 +23,7 @@ mod tests {
     gadgets::nat_to_limbs,
     nebula::rs::{PublicParams, RecursiveSNARK},
     onchain::{
-      decider_circuit::DeciderCircuit,
+      compressed::circuit::VerifierCircuit,
       gadgets::{EvalGadget, FoldGadget, KZGChallengesGadget, KZGProof}, test::circuit::{BigNatCircuit, CubicFCircuit, TrivialCircuit},
     },
     provider::{
@@ -124,9 +124,9 @@ use super::circuit::TestChallengeCircuit;
 
     let res = rs.verify(&rs_pp, num_steps, &z0, IC_i);
     res.unwrap();
-    let decider_circuit = DeciderCircuit::<Bn256EngineKZG>::new(&rs_pp, rs.clone()).unwrap();
+    let verifier_circuit = VerifierCircuit::<Bn256EngineKZG>::new(&rs_pp, rs.clone()).unwrap();
     let mut cs = TestConstraintSystem::new();
-    let _ = decider_circuit.synthesize(&mut cs);
+    let _ = verifier_circuit.synthesize(&mut cs);
     assert!(cs.is_satisfied());
   }
 
@@ -148,7 +148,7 @@ use super::circuit::TestChallengeCircuit;
     let (kzg_pk, kzg_vk) =
       EvaluationEngine::<Bn256, Bn256EngineKZG>::setup(rs_pp.ck_primary.clone());
 
-    let circuit = DeciderCircuit::<Bn256EngineKZG>::new(&rs_pp, rs.clone()).unwrap();
+    let circuit = VerifierCircuit::<Bn256EngineKZG>::new(&rs_pp, rs.clone()).unwrap();
     let rho = circuit.randomness;
     let nifs_proof = circuit.nifs_proof.clone();
 

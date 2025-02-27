@@ -1,7 +1,8 @@
 //! Implements components to enable the compression-step for IVC proofs
+pub mod circuit;
 
-use super::{
-  decider_circuit::DeciderCircuit,
+use crate::onchain::{
+  compressed::circuit::VerifierCircuit,
   gadgets::{FoldGadget, KZGProof}, utils::to_scalar_coordinates,
 };
 use crate::{
@@ -31,18 +32,18 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
 
-/// A type that holds the prover key for [`Decider`]
+/// A type that holds the prover key for [`CompressedSNARK`]
 #[derive(Clone, Serialize, Deserialize)]
-pub struct DeciderProverKey {
+pub struct CompressedPK {
   /// Groth16 proving key
   pub groth16_pk: Parameters<Bn256EngineKZG>,
   /// KZG proving key
   pub kzg_pk: KZGProverKey<Bn256>,
 }
 
-/// A type that holds the verifier key for [`Decider`]
+/// A type that holds the verifier key for [`CompressedSNARK`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeciderVerifierKey {
+pub struct CompressedVK {
   /// Groth16 verifying key
   pub groth16_vk: groth16::VerifyingKey<Bn256EngineKZG>,
   /// Public parameters hash
@@ -55,7 +56,7 @@ pub struct DeciderVerifierKey {
 
 /// A SNARK that proves the knowledge of a valid  proof
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Decider {
+pub struct CompressedSNARK {
   /// Groth16 proof
   pub groth16_proof: Groth16Proof<Bn256EngineKZG>,
   /// Randomness
@@ -80,18 +81,18 @@ pub struct Decider {
   pub z_i: Vec<Fr>,
 }
 
-impl Decider {
+impl CompressedSNARK {
   /// Creates prover and verifier keys for [`Decider`]
   pub fn setup<R>(
     pp: &PublicParams<Bn256EngineKZG>,
     rng: &mut R,
     state_len: usize,
-  ) -> Result<(DeciderProverKey, DeciderVerifierKey), NovaError>
+  ) -> Result<(CompressedPK, CompressedVK), NovaError>
   where
     R: RngCore,
   {
     let pp_hash = pp.digest();
-    let circuit = DeciderCircuit::<Bn256EngineKZG>::default(
+    let circuit = VerifierCircuit::<Bn256EngineKZG>::default(
       &pp.circuit_shape_primary.r1cs_shape,
       &pp.circuit_shape_cyclefold.r1cs_shape,
       ROConstants::<Bn256EngineKZG>::default(),
@@ -105,12 +106,12 @@ impl Decider {
     // get the Groth16 specific setup for the circuit
     let params = generate_random_parameters::<Bn256EngineKZG, _, _>(circuit, rng).unwrap();
 
-    let pk = DeciderProverKey {
+    let pk = CompressedPK {
       // TODO: Remove vk from pk (optimisation)
       groth16_pk: params.clone(),
       kzg_pk,
     };
-    let vk = DeciderVerifierKey {
+    let vk = CompressedVK {
       groth16_vk: params.vk,
       pp_hash,
       kzg_vk,
@@ -122,14 +123,14 @@ impl Decider {
   /// Create a new [`CompressedSNARK`]
   pub fn prove<R>(
     pp: &PublicParams<Bn256EngineKZG>,
-    pk: &DeciderProverKey,
+    pk: &CompressedPK,
     rs: &RecursiveSNARK<Bn256EngineKZG>,
     rng: &mut R,
   ) -> Result<Self, NovaError>
   where
     R: RngCore,
   {
-    let circuit = DeciderCircuit::<Bn256EngineKZG>::new(pp, rs.clone())?;
+    let circuit = VerifierCircuit::<Bn256EngineKZG>::new(pp, rs.clone())?;
     let rho = circuit.randomness;
     let nifs_proof = circuit.nifs_proof.clone();
     let kzg_challenges = circuit.kzg_challenges.clone();
@@ -157,9 +158,9 @@ impl Decider {
   /// Verify the correctness of the [`CompressedSNARK`]
   pub fn verify(
     &self,
-    vk: DeciderVerifierKey,
+    vk: CompressedVK,
   ) -> Result<(), NovaError> {
-    let DeciderVerifierKey {
+    let CompressedVK {
       groth16_vk,
       pp_hash,
       kzg_vk,
@@ -189,8 +190,10 @@ impl Decider {
       &U_cmW_y[..],
       &U_cmE_x[..],
       &U_cmE_y[..],
-      &[self.kzg_challenges.0, self.kzg_challenges.1],
-      &[self.kzg_proofs.0.eval, self.kzg_proofs.1.eval],
+      &[self.kzg_challenges.0],
+      &[self.kzg_challenges.1],
+      &[self.kzg_proofs.0.eval],
+      &[self.kzg_proofs.1.eval],
       &cmT_x[..],
       &cmT_y[..],
     ]
@@ -226,7 +229,7 @@ impl Decider {
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_calldata(
   function_signature_check: [u8; 4],
-  proof: &Decider,
+  proof: &CompressedSNARK,
 ) -> Result<Vec<u8>, NovaError> {
   Ok(
     [

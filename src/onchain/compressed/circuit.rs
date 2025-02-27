@@ -1,6 +1,6 @@
-//! Implements the decider circuit.
+//! Implements the compressedSNARK circuit.
 
-use super::gadgets::{EvalGadget, FoldGadget, KZGChallengesGadget};
+use crate::onchain::gadgets::{EvalGadget, FoldGadget, KZGChallengesGadget};
 use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
   cyclefold::gadgets::emulated::{
@@ -29,9 +29,9 @@ use crate::{
 };
 use std::sync::Arc;
 
-/// Decider circuit.
+/// Verifier circuit for the CompressedSNARK.
 #[derive(Debug, Clone)]
-pub struct DeciderCircuit<E>
+pub struct VerifierCircuit<E>
 where
   E: CurveCycleEquipped,
 {
@@ -81,7 +81,7 @@ where
   pub kzg_evaluations: (E::Scalar, E::Scalar),
 }
 
-impl<E> DeciderCircuit<E>
+impl<E> VerifierCircuit<E>
 where
   E: CurveCycleEquipped,
   <E as Engine>::Scalar: GpuName,
@@ -178,7 +178,7 @@ where
   }
 }
 
-impl<E> Circuit<E::Scalar> for DeciderCircuit<E>
+impl<E> Circuit<E::Scalar> for VerifierCircuit<E>
 where
   E: CurveCycleEquipped,
   E::Scalar: GpuName,

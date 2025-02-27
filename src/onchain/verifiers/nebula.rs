@@ -2,7 +2,7 @@
 use askama::Template;
 use crate::constants::{BN_N_LIMBS, BN_LIMB_WIDTH};
 use crate::frontend::num::AllocatedNum;
-use crate::onchain::decider::DeciderVerifierKey;
+use crate::onchain::compressed::CompressedVK;
 use crate::provider::kzg_commitment::KZGVerifierKey;
 use crate::provider::Bn256EngineKZG;
 
@@ -154,8 +154,8 @@ impl From<(Fr, SolidityGroth16VerifierKey, SolidityKZGVerifierKey, usize)> for N
     }
 }
 
-impl From<DeciderVerifierKey> for NovaCycleFoldVerifierKey {
-    fn from(value: DeciderVerifierKey) -> Self {
+impl From<CompressedVK> for NovaCycleFoldVerifierKey {
+    fn from(value: CompressedVK) -> Self {
         let g16_vk = SolidityGroth16VerifierKey::from(value.groth16_vk);
         let kzg_vk = SolidityKZGVerifierKey::from((value.kzg_vk, Vec::new()));
         Self {

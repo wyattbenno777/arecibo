@@ -12,7 +12,7 @@ mod tests {
   use crate::{
     nebula::rs::{PublicParams, RecursiveSNARK},
     onchain::{
-      decider::{prepare_calldata, Decider}, eth::evm::{compile_solidity, Evm}, test::circuit::CubicFCircuit, utils::get_function_selector_for_nova_cyclefold_verifier, verifiers::{
+      compressed::{prepare_calldata, CompressedSNARK}, eth::evm::{compile_solidity, Evm}, test::circuit::CubicFCircuit, utils::get_function_selector_for_nova_cyclefold_verifier, verifiers::{
         groth16::SolidityGroth16VerifierKey,
         kzg::SolidityKZGVerifierKey,
         nebula::{get_decider_template_for_cyclefold_decider, NovaCycleFoldVerifierKey},
@@ -89,22 +89,22 @@ mod tests {
     let mut rng = thread_rng();
     let start = Instant::now();
 
-    let (decider_pk, decider_vk) = Decider::setup(&rs_pp, &mut rng, z0.len()).unwrap();
-    println!("Decider::setup: took {:?}", start.elapsed());
+    let (compressed_pk, compressed_vk) = CompressedSNARK::setup(&rs_pp, &mut rng, z0.len()).unwrap();
+    println!("CompressedSNARK::setup: took {:?}", start.elapsed());
     let start = Instant::now();
-    let proof = Decider::prove(&rs_pp, &decider_pk, &rs, &mut rng);
+    let proof = CompressedSNARK::prove(&rs_pp, &compressed_pk, &rs, &mut rng);
     match &proof {
-      Ok(_) => println!("Decider::prove: Ok, took {:?}", start.elapsed()),
-      Err(e) => println!("Decider::prove: Error: {:?}, took {:?}", e, start.elapsed()),
+      Ok(_) => println!("CompressedSNARK::prove: Ok, took {:?}", start.elapsed()),
+      Err(e) => println!("CompressedSNARK::prove: Error: {:?}, took {:?}", e, start.elapsed()),
     }
     assert!(proof.is_ok());
 
     let proof = proof.unwrap();
 
     let start = Instant::now();
-    let res = Decider::verify(&proof, decider_vk.clone());
+    let res = CompressedSNARK::verify(&proof, compressed_vk.clone());
     println!(
-      "Decider::verify: {:?}, took {:?}",
+      "CompressedSNARK::verify: {:?}, took {:?}",
       res.is_ok(),
       start.elapsed()
     );
@@ -118,9 +118,9 @@ mod tests {
 
     // prepare the setup params for the solidity verifier
     let nova_cyclefold_vk = NovaCycleFoldVerifierKey::from((
-      decider_vk.pp_hash,
-      SolidityGroth16VerifierKey::from(decider_vk.groth16_vk),
-      SolidityKZGVerifierKey::from((decider_vk.kzg_vk, Vec::new())),
+      compressed_vk.pp_hash,
+      SolidityGroth16VerifierKey::from(compressed_vk.groth16_vk),
+      SolidityKZGVerifierKey::from((compressed_vk.kzg_vk, Vec::new())),
       rs.z0.len(),
     ));
 
