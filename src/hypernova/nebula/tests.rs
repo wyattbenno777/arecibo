@@ -4,8 +4,9 @@ use crate::{
   },
   gadgets::{conditionally_select2, nebula::allocated_avt, Num},
   hypernova::rs::StepCircuit,
-  provider::Bn256EngineIPA,
-  traits::{CurveCycleEquipped, Engine},
+  provider::{ipa_pc, Bn256EngineIPA},
+  spartan::{lin_snark::LinearizedR1CSSNARK, snark::RelaxedR1CSSNARK},
+  traits::{CurveCycleEquipped, Dual, Engine},
   NovaError,
 };
 use ff::PrimeField;
@@ -24,12 +25,17 @@ const MEMORY_OPS_PER_STEP: usize = 7;
 const MAX_BITS: usize = 32;
 
 // Basic type alias's for specifying proving curve-cycle
-type E = Bn256EngineIPA;
+type E1 = Bn256EngineIPA;
+type E2 = Dual<E1>;
+type EE1 = ipa_pc::EvaluationEngine<E1>;
+type EE2 = ipa_pc::EvaluationEngine<E2>;
+type S1 = LinearizedR1CSSNARK<E1, EE1>;
+type S2 = RelaxedR1CSSNARK<E2, EE2>;
 
 #[test]
 fn test_heapify() {
   let step_size = StepSize::new(1).set_memory_step_size(2);
-  let pp: NebulaPublicParams<E, MEMORY_OPS_PER_STEP> =
+  let pp: NebulaPublicParams<E1, S1, S2, MEMORY_OPS_PER_STEP> =
     NebulaSNARK::setup(&HeapifyCircuit::empty(), step_size);
 
   // Calculate testing memory (heap) size. We keep the test simple and ensure
@@ -47,7 +53,7 @@ fn test_heapify() {
     start_addr: ((init_memory.len() - 4) / 2),
   };
 
-  let err_msg = "Multisets should be valid and input circuit should be sat";
+  let ms_err = "Multisets should be valid and input circuit should be sat";
 
   // Prove vm execution and memory consistency
   let (nebula_snark, U) = NebulaSNARK::prove(
@@ -56,10 +62,20 @@ fn test_heapify() {
     (init_memory, final_memory, read_ops, write_ops),
     heapify_engine,
   )
-  .expect(err_msg);
+  .expect(ms_err);
 
   // Verify vm execution and memory consistency
-  nebula_snark.verify(&pp, &U).expect(err_msg);
+  nebula_snark.verify(&pp, &U).expect(ms_err);
+
+  // setup and compress
+  let r1cs_err = "R1CS instance, witness pairs should be sat";
+  let spartan = nebula_snark.compress(&pp).expect(r1cs_err);
+  spartan.verify(&pp, &U).expect(r1cs_err);
+
+  if false {
+    let spartan_str = serde_json::to_string(&spartan).unwrap();
+    println!("SNARK size {} KB", spartan_str.len() / 1024);
+  }
 }
 
 struct HeapifyEngine {
