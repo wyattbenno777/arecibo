@@ -35,14 +35,15 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// A type that represents the prover's key
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct ProverKey<E: Engine, EE: EvaluationEngineTrait<E>> {
   pk_ee: EE::ProverKey,
   vk_digest: E::Scalar, // digest of the verifier's key
 }
 
 /// A type that represents the verifier's key
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct VerifierKey<E: Engine, EE: EvaluationEngineTrait<E>> {
   vk_ee: EE::VerifierKey,

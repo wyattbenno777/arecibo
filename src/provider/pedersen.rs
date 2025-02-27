@@ -244,22 +244,26 @@ where
     }
   }
 
-  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment {
-    assert!(ck.ck.len() >= v.len());
+  fn commit_at(
+    ck: &Self::CommitmentKey,
+    v: &[E::Scalar],
+    r: &E::Scalar,
+    idx: usize,
+  ) -> Self::Commitment {
+    assert!(ck.ck.len() > idx);
+    assert!(ck.ck.len() - idx >= v.len());
     if ck.h.is_some() {
       let mut scalars: Vec<E::Scalar> = v.to_vec();
       scalars.push(*r);
-      let mut bases = ck.ck[..v.len()].to_vec();
+      let mut bases = ck.ck[idx..idx + v.len()].to_vec();
       bases.push(*ck.h.as_ref().unwrap());
-
       Commitment {
         comm: E::GE::vartime_multiscalar_mul(&scalars, &bases),
       }
     } else {
       assert_eq!(*r, E::Scalar::ZERO);
-
       Commitment {
-        comm: E::GE::vartime_multiscalar_mul(v, &ck.ck[..v.len()]),
+        comm: E::GE::vartime_multiscalar_mul(v, &ck.ck[idx..idx + v.len()]),
       }
     }
   }

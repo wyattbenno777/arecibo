@@ -23,9 +23,7 @@ use serde::{Deserialize, Serialize};
 #[serde(bound = "")]
 /// A SNARK that holds the proof of a step of an incremental computation
 pub struct NIFS<E: CurveCycleEquipped> {
-  pub(crate) sc: ROSumcheckProof<E>,
-  pub(crate) sigmas: Vec<E::Scalar>,
-  pub(crate) thetas: Vec<E::Scalar>,
+  pub(crate) partial_nifs: PartialNIFS<E>,
   pub(crate) cyclefold_nifs: CycleFoldNIFS<E>,
   pub(crate) cyclefold_nifs_1: CycleFoldNIFS<E>,
   pub(crate) cyclefold_nifs_2: CycleFoldNIFS<E>,
@@ -56,27 +54,103 @@ where
     ),
     NovaError,
   > {
+    let (partial_nifs, (U, W), rho) =
+      PartialNIFS::<E>::prove(S, ro_consts, pp_digest, (U1, W1), (U2, W2))?;
+
+    // CycleFold for main part of the witness
+    let (cyclefold_nifs, (U_cyclefold_temp, W_cyclefold_temp)) = CycleFoldNIFS::<E>::prove(
+      S_cyclefold,
+      ck_cyclefold,
+      ro_consts,
+      U1.comm_W,
+      U2.aux.comm_W,
+      rho,
+      (U1_cyclefold, W1_cyclefold),
+    )?;
+
+    // CycleFold for first split of the witness
+    let (cyclefold_nifs_1, (U_cyclefold_temp_1, W_cyclefold_temp_1)) = CycleFoldNIFS::<E>::prove(
+      S_cyclefold,
+      ck_cyclefold,
+      ro_consts,
+      U1.pre_committed.0,
+      U2.pre_committed.0,
+      rho,
+      (&U_cyclefold_temp, &W_cyclefold_temp),
+    )?;
+
+    // CycleFold for second split of the witness
+    let (cyclefold_nifs_2, (U_cyclefold, W_cyclefold)) = CycleFoldNIFS::<E>::prove(
+      S_cyclefold,
+      ck_cyclefold,
+      ro_consts,
+      U1.pre_committed.1,
+      U2.pre_committed.1,
+      rho,
+      (&U_cyclefold_temp_1, &W_cyclefold_temp_1),
+    )?;
+
+    Ok((
+      Self {
+        partial_nifs,
+        cyclefold_nifs,
+        cyclefold_nifs_1,
+        cyclefold_nifs_2,
+      },
+      (U, W),
+      (U_cyclefold, W_cyclefold),
+    ))
+  }
+
+  /// Verify a fold
+  pub fn verify(
+    &self,
+    num_rounds: usize,
+    ro_consts: &ROConstants<Dual<E>>,
+    pp_digest: &E::Scalar,
+    U1: &LR1CSInstance<E>,
+    U2: &SplitR1CSInstance<E>,
+    U1_cyclefold: &RelaxedR1CSInstance<Dual<E>>,
+  ) -> Result<(LR1CSInstance<E>, RelaxedR1CSInstance<Dual<E>>), NovaError> {
+    // Verify partial folding proof
+    let U = self
+      .partial_nifs
+      .verify(num_rounds, ro_consts, pp_digest, U1, U2)?;
+
+    // Output folded instance.
+    let U_cyclefold_temp = self.cyclefold_nifs.verify(ro_consts, U1_cyclefold)?;
+    let U_cyclefold_temp_1 = self.cyclefold_nifs_1.verify(ro_consts, &U_cyclefold_temp)?;
+    let U_cyclefold = self
+      .cyclefold_nifs_2
+      .verify(ro_consts, &U_cyclefold_temp_1)?;
+    Ok((U, U_cyclefold))
+  }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
+/// The HyperNova NIFS w/o the CycleFold instances
+pub struct PartialNIFS<E: CurveCycleEquipped> {
+  pub(crate) sc: ROSumcheckProof<E>,
+  pub(crate) sigmas: Vec<E::Scalar>,
+  pub(crate) thetas: Vec<E::Scalar>,
+}
+
+impl<E> PartialNIFS<E>
+where
+  E: CurveCycleEquipped,
+{
+  /// HyperNova partial folding prover
+  pub fn prove(
+    S: &R1CSShape<E>,
+    ro_consts: &ROConstants<Dual<E>>,
+    pp_digest: &E::Scalar,
+    (U1, W1): (&LR1CSInstance<E>, &SplitR1CSWitness<E>),
+    (U2, W2): (&SplitR1CSInstance<E>, &SplitR1CSWitness<E>),
+  ) -> Result<(Self, (LR1CSInstance<E>, SplitR1CSWitness<E>), E::Scalar), NovaError> {
     // squeeze rho, gamma, beta
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    ro.absorb(*pp_digest);
-    absorb_split_instance::<E>(U2, &mut ro);
-    let rho = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    ro.absorb(rho);
-    let gamma = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    ro.absorb(gamma);
-    let s = S.num_cons.next_power_of_two().log_2();
-    let beta = {
-      ro.squeeze_vec(NUM_CHALLENGE_BITS, s)
-        .iter()
-        .map(|b| scalar_as_base::<Dual<E>>(*b))
-        .collect::<Vec<_>>()
-    };
-    let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
-    for b in beta.iter() {
-      ro.absorb(*b);
-    }
+    let num_rounds = S.num_cons.next_power_of_two().log_2();
+    let ((rho, gamma, beta), ro) = Self::challenges(ro_consts, pp_digest, U2, num_rounds);
 
     // Helper function for resizing polynomials
     let pad_poly = |mut vec: Vec<E::Scalar>| {
@@ -84,8 +158,7 @@ where
       vec
     };
 
-    // Compute L_j's
-    //
+    // --- Compute L_j's ---
     // where L_j = eq(rx, y) • H_j(y)
     let z1 = [W1.W().as_slice(), [U1.u].as_slice(), U1.X.as_slice()].concat();
     let mut poly_ABC = {
@@ -124,7 +197,9 @@ where
       (a * b - c) * eq * gamma_cubed
     };
 
-    // HyperNova's sum-check.
+    // --- HyperNova's sum-check ---
+    // The sum-check instance uses poseidon as the transcript, enabling the
+    // implementation of the verifier circuit
     let comb_func =
       |L_abc: E::Scalar,
        L_eq: E::Scalar,
@@ -136,7 +211,7 @@ where
     let claim = U1.vs[0] + gamma * U1.vs[1] + gamma * gamma * U1.vs[2];
     let (sc, rx_p, _) = ROSumcheckProof::<E>::prove_cubic_hypernova(
       claim,
-      s,
+      num_rounds,
       &mut poly_ABC,
       &mut eq_rx,
       &mut poly_Az,
@@ -163,55 +238,10 @@ where
     // Output the folded instance, witness pair
     let U = U1.fold(U2, rho, &rx_p, &sigmas, &thetas)?;
     let W = W1.fold(W2, rho)?;
-
-    // CycleFold for main part of the witness
-    let (cyclefold_nifs, (U_cyclefold_temp, W_cyclefold_temp)) = CycleFoldNIFS::<E>::prove(
-      S_cyclefold,
-      ck_cyclefold,
-      ro_consts,
-      U1.comm_W,
-      U2.aux.comm_W,
-      rho,
-      (U1_cyclefold, W1_cyclefold),
-    )?;
-
-    // CycleFold for first split of the witness
-    let (cyclefold_nifs_1, (U_cyclefold_temp_1, W_cyclefold_temp_1)) = CycleFoldNIFS::<E>::prove(
-      S_cyclefold,
-      ck_cyclefold,
-      ro_consts,
-      U1.pre_committed.0,
-      U2.pre_committed.0,
-      rho,
-      (&U_cyclefold_temp, &W_cyclefold_temp),
-    )?;
-
-    // CycleFold for second split of the witness
-    let (cyclefold_nifs_2, (U_cyclefold, W_cyclefold)) = CycleFoldNIFS::<E>::prove(
-      S_cyclefold,
-      ck_cyclefold,
-      ro_consts,
-      U1.pre_committed.1,
-      U2.pre_committed.1,
-      rho,
-      (&U_cyclefold_temp_1, &W_cyclefold_temp_1),
-    )?;
-
-    Ok((
-      Self {
-        sc,
-        sigmas,
-        thetas,
-        cyclefold_nifs,
-        cyclefold_nifs_1,
-        cyclefold_nifs_2,
-      },
-      (U, W),
-      (U_cyclefold, W_cyclefold),
-    ))
+    Ok((Self { sc, sigmas, thetas }, (U, W), rho))
   }
 
-  /// Verify a fold
+  /// HyperNova partial folding verifier
   pub fn verify(
     &self,
     num_rounds: usize,
@@ -219,8 +249,38 @@ where
     pp_digest: &E::Scalar,
     U1: &LR1CSInstance<E>,
     U2: &SplitR1CSInstance<E>,
-    U1_cyclefold: &RelaxedR1CSInstance<Dual<E>>,
-  ) -> Result<(LR1CSInstance<E>, RelaxedR1CSInstance<Dual<E>>), NovaError> {
+  ) -> Result<LR1CSInstance<E>, NovaError> {
+    // squeeze rho, gamma, beta
+    let ((rho, gamma, beta), ro) = Self::challenges(ro_consts, pp_digest, U2, num_rounds);
+
+    // Verify sum-check proof
+    let claim = U1.vs[0] + gamma * U1.vs[1] + gamma * gamma * U1.vs[2];
+    let (sub_claim, rx_p) = self.sc.verify(claim, num_rounds, 3, ro, ro_consts)?;
+
+    // sub_claim = (σ_0 + γ•σ_1 + γ^2•σ_2) * eq(rx, rx_p) + (θ_0•θ_1 - θ_2) * eq(β, rx_p)
+    let e1 = EqPolynomial::new(U1.rx.to_vec()).evaluate(&rx_p);
+    let cl = (self.sigmas[0] + gamma * self.sigmas[1] + gamma * gamma * self.sigmas[2]) * e1;
+    let e2 = EqPolynomial::new(beta).evaluate(&rx_p);
+    let gamma_cubed = gamma * gamma * gamma;
+    let cr = (self.thetas[0] * self.thetas[1] - self.thetas[2]) * e2 * gamma_cubed;
+    if cl + cr != sub_claim {
+      return Err(NovaError::InvalidSumcheckProof);
+    }
+
+    // Output folded instance.
+    let U = U1.fold(U2, rho, &rx_p, &self.sigmas, &self.thetas)?;
+    Ok(U)
+  }
+
+  fn challenges(
+    ro_consts: &ROConstants<Dual<E>>,
+    pp_digest: &E::Scalar,
+    U2: &SplitR1CSInstance<E>,
+    num_rounds: usize,
+  ) -> (
+    (E::Scalar, E::Scalar, Vec<E::Scalar>),
+    <Dual<E> as Engine>::RO,
+  ) {
     // squeeze rho, gamma, beta
     let mut ro = <Dual<E> as Engine>::RO::new(ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(*pp_digest);
@@ -241,29 +301,7 @@ where
     for b in beta.iter() {
       ro.absorb(*b);
     }
-
-    // Verify sumcheck proof
-    let claim = U1.vs[0] + gamma * U1.vs[1] + gamma * gamma * U1.vs[2];
-    let (sub_claim, rx_p) = self.sc.verify(claim, num_rounds, 3, ro, ro_consts)?;
-
-    // sub_claim = (σ_0 + γ•σ_1 + γ^2•σ_2) * eq(rx, rx_p) + (θ_0•θ_1 - θ_2) * eq(β, rx_p)
-    let e1 = EqPolynomial::new(U1.rx.to_vec()).evaluate(&rx_p);
-    let cl = (self.sigmas[0] + gamma * self.sigmas[1] + gamma * gamma * self.sigmas[2]) * e1;
-    let e2 = EqPolynomial::new(beta).evaluate(&rx_p);
-    let gamma_cubed = gamma * gamma * gamma;
-    let cr = (self.thetas[0] * self.thetas[1] - self.thetas[2]) * e2 * gamma_cubed;
-    if cl + cr != sub_claim {
-      return Err(NovaError::InvalidSumcheckProof);
-    }
-
-    // Output folded instance.
-    let U = U1.fold(U2, rho, &rx_p, &self.sigmas, &self.thetas)?;
-    let U_cyclefold_temp = self.cyclefold_nifs.verify(ro_consts, U1_cyclefold)?;
-    let U_cyclefold_temp_1 = self.cyclefold_nifs_1.verify(ro_consts, &U_cyclefold_temp)?;
-    let U_cyclefold = self
-      .cyclefold_nifs_2
-      .verify(ro_consts, &U_cyclefold_temp_1)?;
-    Ok((U, U_cyclefold))
+    ((rho, gamma, beta), ro)
   }
 }
 
@@ -397,7 +435,7 @@ mod tests {
     // First create the shape
     let mut cs: TestShapeCS<E> = TestShapeCS::new();
     let _ = synthesize_tiny_r1cs_bellpepper(&mut cs, None);
-    let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
+    let (shape, ck) = cs.r1cs_shape_and_key(&*default_ck_hint());
     let ro_consts = ROConstants::<Dual<E>>::default();
 
     let instance_witness = |x: E::Scalar| -> (SplitR1CSInstance<E>, SplitR1CSWitness<E>) {
@@ -449,7 +487,7 @@ mod tests {
     let mut cs: ShapeCS<Dual<E>> = ShapeCS::new();
     let circuit_cyclefold: CycleFoldCircuit<E> = CycleFoldCircuit::default();
     let _ = circuit_cyclefold.synthesize(&mut cs);
-    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape(&*default_ck_hint());
+    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape_and_key(&*default_ck_hint());
     let ck_cyclefold = Arc::new(ck_cyclefold);
     let S_cyclefold = R1CSWithArity::new(r1cs_shape_cyclefold, 0);
     // Get the running CycleFold instance and witness pair

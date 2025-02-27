@@ -126,7 +126,11 @@ where
 }
 
 /// `ZMProverKey` is used to generate a proof
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(bound(
+  serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",
+  deserialize = "E::G1Affine: Deserialize<'de>, E::G2Affine: Deserialize<'de>"
+))]
 pub struct ZMProverKey<E: Engine> {
   commit_pp: KZGProverKey<E>,
   open_pp: KZGProverKey<E>,
@@ -134,8 +138,11 @@ pub struct ZMProverKey<E: Engine> {
 
 /// `ZMVerifierKey` is used to check evaluation proofs for a given
 /// commitment.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(bound(serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",))]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(bound(
+  serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",
+  deserialize = "E::G1Affine: Deserialize<'de>, E::G2Affine: Deserialize<'de>"
+))]
 pub struct ZMVerifierKey<E: Engine> {
   vp: KZGVerifierKey<E>,
   s_offset_h: E::G2Affine,

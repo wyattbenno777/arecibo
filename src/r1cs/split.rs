@@ -6,8 +6,11 @@ use crate::{
   cyclefold::util::absorb_primary_commitment,
   hypernova::error::HyperNovaError,
   spartan::math::Math,
-  traits::{commitment::CommitmentEngineTrait, CurveCycleEquipped, Dual, Engine, ROTrait},
-  zip_with, Commitment, CommitmentKey, NovaError, CE,
+  traits::{
+    commitment::CommitmentEngineTrait, CurveCycleEquipped, Dual, Engine, ROTrait,
+    TranscriptReprTrait,
+  },
+  zip_with, Commitment, CommitmentKey, DerandKey, NovaError, CE,
 };
 use ff::Field;
 use itertools::Itertools;
@@ -86,6 +89,18 @@ where
     })
   }
 
+  /// Derandomizes the `LR1CSInstance` using a `DerandKey`
+  pub(crate) fn derandomize(&self, dk: &DerandKey<E>, r_W: &E::Scalar) -> Self {
+    Self {
+      comm_W: CE::<E>::derandomize(dk, &self.comm_W, r_W),
+      X: self.X.clone(),
+      u: self.u,
+      pre_committed: self.pre_committed,
+      rx: self.rx.clone(),
+      vs: self.vs.clone(),
+    }
+  }
+
   pub(crate) fn absorb_in_ro(&self, ro: &mut <Dual<E> as Engine>::RO)
   where
     E: CurveCycleEquipped,
@@ -103,6 +118,21 @@ where
     }
     absorb_primary_commitment::<E, Dual<E>>(&self.pre_committed.0, ro);
     absorb_primary_commitment::<E, Dual<E>>(&self.pre_committed.1, ro);
+  }
+}
+
+impl<E: Engine> TranscriptReprTrait<E::GE> for LR1CSInstance<E> {
+  fn to_transcript_bytes(&self) -> Vec<u8> {
+    [
+      self.comm_W.to_transcript_bytes(),
+      self.pre_committed.0.to_transcript_bytes(),
+      self.pre_committed.1.to_transcript_bytes(),
+      self.u.to_transcript_bytes(),
+      self.X.as_slice().to_transcript_bytes(),
+      self.rx.as_slice().to_transcript_bytes(),
+      self.vs.as_slice().to_transcript_bytes(),
+    ]
+    .concat()
   }
 }
 
@@ -151,7 +181,12 @@ where
   pub fn commit(&self, ck: &CommitmentKey<E>) -> (Commitment<E>, Commitment<E>) {
     (
       CE::<E>::commit(ck, &self.pre_committed.0, &E::Scalar::ZERO),
-      CE::<E>::commit(ck, &self.pre_committed.1, &E::Scalar::ZERO),
+      CE::<E>::commit_at(
+        ck,
+        &self.pre_committed.1,
+        &E::Scalar::ZERO,
+        self.pre_committed.0.len(),
+      ),
     )
   }
 
@@ -168,11 +203,30 @@ where
   /// Construct the witness vector. witness_vec = [aux.W, pre_committed.0, pre_committed.1]
   pub fn W(&self) -> Vec<E::Scalar> {
     [
-      self.aux.W.as_slice(),
       &self.pre_committed.0,
       &self.pre_committed.1,
+      self.aux.W.as_slice(),
     ]
     .concat()
+  }
+
+  /// Pads the provided witness to the correct length
+  pub(crate) fn padded_W(&self, S: &R1CSShape<E>) -> Vec<E::Scalar> {
+    let mut W = self.W();
+    W.extend(vec![E::Scalar::ZERO; S.total_num_vars() - W.len()]);
+    W
+  }
+
+  /// Derandomizes the `R1CSWitness`
+  pub(crate) fn derandomize(&self) -> (Self, E::Scalar) {
+    let (aux, r_W) = self.aux.derandomize();
+    (
+      Self {
+        aux,
+        pre_committed: self.pre_committed.clone(),
+      },
+      r_W,
+    )
   }
 }
 

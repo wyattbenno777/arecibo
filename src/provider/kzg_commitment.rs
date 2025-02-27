@@ -53,7 +53,11 @@ impl<E: Engine> Len for UniversalKZGParam<E> {
 }
 
 /// `UnivariateProverKey` is used to generate a proof
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(bound(
+  serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",
+  deserialize = "E::G1Affine: Deserialize<'de>, E::G2Affine: Deserialize<'de>"
+))]
 pub struct KZGProverKey<E: Engine> {
   /// generators from the universal parameters
   uv_params: Arc<UniversalKZGParam<E>>,
@@ -90,7 +94,7 @@ impl<E: Engine> KZGProverKey<E> {
 
 /// `UVKZGVerifierKey` is used to check evaluation proofs for a given
 /// commitment.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(bound(serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",))]
 pub struct KZGVerifierKey<E: Engine> {
   /// The generator of G1.
@@ -245,15 +249,17 @@ where
     UniversalKZGParam::gen_srs_for_testing(rng, n.next_power_of_two())
   }
 
-  fn commit(
+  fn commit_at(
     ck: &Self::CommitmentKey,
     v: &[<E::G1 as Group>::Scalar],
     r: &<E::G1 as Group>::Scalar,
+    idx: usize,
   ) -> Self::Commitment {
-    assert!(ck.length() >= v.len());
+    assert!(ck.length() > idx);
+    assert!(ck.length() - idx >= v.len());
     let mut scalars = v.to_vec();
     scalars.push(*r);
-    let mut bases = ck.powers_of_g[..v.len()].to_vec();
+    let mut bases = ck.powers_of_g[idx..idx + v.len()].to_vec();
     bases.push(ck.h);
     Commitment {
       comm: E::G1::vartime_multiscalar_mul(&scalars, &bases),

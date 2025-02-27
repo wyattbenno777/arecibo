@@ -111,7 +111,7 @@ pub(crate) fn commitment_key_size<E: Engine>(
   ck_floor: &CommitmentKeyHint<E>,
 ) -> usize {
   let num_cons = S.num_cons;
-  let num_vars = S.num_vars;
+  let num_vars = S.total_num_vars();
   let ck_hint = ck_floor(S);
   max(max(num_cons, num_vars), ck_hint)
 }
@@ -160,11 +160,16 @@ impl<E: Engine> R1CSShape<E> {
     })
   }
 
+  /// Get the total number of variables in the R1CS instance
+  pub(crate) fn total_num_vars(&self) -> usize {
+    self.num_vars + self.num_precommitted.0 + self.num_precommitted.1
+  }
+
   // Checks regularity conditions on the R1CSShape, required in Spartan-class SNARKs
   // Returns false if num_cons or num_vars are not powers of two, or if num_io > num_vars
   #[inline]
   pub(crate) fn is_regular_shape(&self) -> bool {
-    let num_vars = self.num_vars + self.num_precommitted.0 + self.num_precommitted.1;
+    let num_vars = self.total_num_vars();
     let cons_valid = self.num_cons.next_power_of_two() == self.num_cons;
     let vars_valid = num_vars.next_power_of_two() == num_vars;
     let io_lt_vars = self.num_io < num_vars;
@@ -275,7 +280,14 @@ impl<E: Engine> R1CSShape<E> {
     // verify if comm_E and comm_W are commitments to E and W
     let res_comm = {
       let (comm_W, comm_E) = rayon::join(
-        || CE::<E>::commit(ck, &W.W, &W.r_W),
+        || {
+          CE::<E>::commit_at(
+            ck,
+            &W.W,
+            &W.r_W,
+            self.num_precommitted.0 + self.num_precommitted.1,
+          )
+        },
         || CE::<E>::commit(ck, &W.E, &W.r_E),
       );
       U.comm_W == comm_W && U.comm_E == comm_E
@@ -310,7 +322,14 @@ impl<E: Engine> R1CSShape<E> {
     })?;
 
     // verify if comm_W is a commitment to W
-    if U.comm_W != CE::<E>::commit(ck, &W.W, &W.r_W) {
+    if U.comm_W
+      != CE::<E>::commit_at(
+        ck,
+        &W.W,
+        &W.r_W,
+        self.num_precommitted.0 + self.num_precommitted.1,
+      )
+    {
       return Err(NovaError::UnSat);
     }
     Ok(())
@@ -338,11 +357,22 @@ impl<E: Engine> R1CSShape<E> {
     })?;
 
     // verify if comm_W is a commitment to W
-    if U.aux.comm_W != CE::<E>::commit(ck, &W.aux.W, &W.aux.r_W)
+    if U.aux.comm_W
+      != CE::<E>::commit_at(
+        ck,
+        &W.aux.W,
+        &W.aux.r_W,
+        self.num_precommitted.0 + self.num_precommitted.1,
+      )
       || U.pre_committed
         != (
           CE::<E>::commit(ck, &W.pre_committed.0, &E::Scalar::ZERO),
-          CE::<E>::commit(ck, &W.pre_committed.1, &E::Scalar::ZERO),
+          CE::<E>::commit_at(
+            ck,
+            &W.pre_committed.1,
+            &E::Scalar::ZERO,
+            self.num_precommitted.0,
+          ),
         )
     {
       return Err(NovaError::UnSat);
@@ -360,38 +390,38 @@ impl<E: Engine> R1CSShape<E> {
     let num_vars = self.num_vars + self.num_precommitted.0 + self.num_precommitted.1;
     assert_eq!(W.W().len(), num_vars);
     assert_eq!(U.X.len(), self.num_io);
-
     let (Az, Bz, Cz) = self.multiply_witness(&W.W(), &U.u, &U.X)?;
 
-    // Helper function for resizing polynomials
-    let pad_poly = |mut vec: Vec<E::Scalar>| {
+    // Helper functions for resizing polynomials and evaluating them
+    let eval_padded_poly = |mut vec: Vec<E::Scalar>| {
       vec.resize(self.num_cons.next_power_of_two(), E::Scalar::ZERO);
-      vec
+      MultilinearPolynomial::new(vec).evaluate(&U.rx)
     };
-    assert_eq!(
-      U.vs[0],
-      MultilinearPolynomial::new(pad_poly(Az)).evaluate(&U.rx)
-    );
-    assert_eq!(
-      U.vs[1],
-      MultilinearPolynomial::new(pad_poly(Bz)).evaluate(&U.rx)
-    );
-    assert_eq!(
-      U.vs[2],
-      MultilinearPolynomial::new(pad_poly(Cz)).evaluate(&U.rx)
-    );
+    assert_eq!(U.vs[0], eval_padded_poly(Az));
+    assert_eq!(U.vs[1], eval_padded_poly(Bz));
+    assert_eq!(U.vs[2], eval_padded_poly(Cz));
 
     // verify if comm_W is a commitment to W
-    if U.comm_W != CE::<E>::commit(ck, &W.aux.W, &W.aux.r_W)
+    if U.comm_W
+      != CE::<E>::commit_at(
+        ck,
+        &W.aux.W,
+        &W.aux.r_W,
+        self.num_precommitted.0 + self.num_precommitted.1,
+      )
       || U.pre_committed
         != (
           CE::<E>::commit(ck, &W.pre_committed.0, &E::Scalar::ZERO),
-          CE::<E>::commit(ck, &W.pre_committed.1, &E::Scalar::ZERO),
+          CE::<E>::commit_at(
+            ck,
+            &W.pre_committed.1,
+            &E::Scalar::ZERO,
+            self.num_precommitted.0,
+          ),
         )
     {
       return Err(NovaError::UnSat);
     }
-
     Ok(())
   }
 
@@ -490,7 +520,7 @@ impl<E: Engine> R1CSShape<E> {
   /// Pads the `R1CSShape` so that the shape passes `is_regular_shape`
   /// Renumbers variables to accommodate padded variables
   pub(crate) fn pad(&self) -> Self {
-    let num_vars = self.num_vars + self.num_precommitted.0 + self.num_precommitted.1;
+    let num_vars = self.total_num_vars();
     // check if the provided R1CSShape is already as required
     if self.is_regular_shape() {
       return self.clone();
@@ -520,7 +550,7 @@ impl<E: Engine> R1CSShape<E> {
 
     let apply_pad = |mut M: SparseMatrix<E::Scalar>| -> SparseMatrix<E::Scalar> {
       M.indices.par_iter_mut().for_each(|c| {
-        if *c >= self.num_vars {
+        if *c >= self.total_num_vars() {
           *c += num_vars_padded - num_vars
         }
       });
@@ -614,9 +644,20 @@ impl<E: Engine> R1CSWitness<E> {
     }
   }
 
+  /// Derandomizes the `R1CSWitness` using a `DerandKey`
+  pub(crate) fn derandomize(&self) -> (Self, E::Scalar) {
+    (
+      R1CSWitness {
+        W: self.W.clone(),
+        r_W: E::Scalar::ZERO,
+      },
+      self.r_W,
+    )
+  }
+
   /// Commits to the witness using the supplied generators
-  pub(crate) fn commit(&self, ck: &CommitmentKey<E>) -> Commitment<E> {
-    CE::<E>::commit(ck, &self.W, &self.r_W)
+  pub(crate) fn commit_at(&self, ck: &CommitmentKey<E>, idx: usize) -> Commitment<E> {
+    CE::<E>::commit_at(ck, &self.W, &self.r_W, idx)
   }
 
   /// Folds an incoming `R1CSWitness` into the current one

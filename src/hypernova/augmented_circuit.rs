@@ -813,7 +813,7 @@ mod tests {
   type F = <E as Engine>::Scalar;
 
   #[test]
-  fn test_circuit_constants_sumcheck1() {
+  fn test_circuit_constants_sumcheck() {
     // Get the round constants used in the Poseidon hash function circuit.
     let ro_consts_circuit = ROConstantsCircuit::<Dual<E>>::default();
     // Use a trivial circuit because it has 0 constraints.
