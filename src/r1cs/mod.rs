@@ -59,7 +59,9 @@ pub struct R1CSWitness<E: Engine> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct R1CSInstance<E: Engine> {
-  pub(crate) comm_W: Commitment<E>,
+  /// commitment to witness
+  pub comm_W: Commitment<E>,
+  /// public inputs
   pub(crate) X: Vec<E::Scalar>,
 }
 
@@ -76,10 +78,14 @@ pub struct RelaxedR1CSWitness<E: Engine> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct RelaxedR1CSInstance<E: Engine> {
-  pub(crate) comm_W: Commitment<E>,
-  pub(crate) comm_E: Commitment<E>,
-  pub(crate) X: Vec<E::Scalar>,
-  pub(crate) u: E::Scalar,
+  /// commitment to witness
+  pub comm_W: Commitment<E>,
+  /// commitment to error
+  pub comm_E: Commitment<E>,
+  /// public inputs
+  pub X: Vec<E::Scalar>,
+  /// relaxation
+  pub u: E::Scalar,
 }
 
 /// A type for functions that hints commitment key sizing by returning the floor of the number of required generators.
@@ -632,6 +638,14 @@ impl<E: Engine> R1CSShape<E> {
 }
 
 impl<E: Engine> R1CSWitness<E> {
+  /// Produces a default `R1CSWitness` given an `R1CSShape`
+  pub fn default(S: &R1CSShape<E>) -> Self {
+    Self {
+      W: vec![E::Scalar::ZERO; S.num_vars],
+      r_W: E::Scalar::ZERO,
+    }
+  }
+
   /// A method to create a witness object using a vector of scalars
   pub(crate) fn new(S: &R1CSShape<E>, W: Vec<E::Scalar>) -> Result<Self, NovaError> {
     if S.num_vars != W.len() {
@@ -668,17 +682,17 @@ impl<E: Engine> R1CSWitness<E> {
     let r_W = *r_W1 + rho * r_W2;
     Ok(Self { W, r_W })
   }
-
-  /// Produces a default `RelaxedR1CSWitness` given an `R1CSShape`
-  pub(crate) fn default(S: &R1CSShape<E>) -> Self {
-    Self {
-      W: vec![E::Scalar::ZERO; S.num_vars],
-      r_W: E::Scalar::ZERO,
-    }
-  }
 }
 
 impl<E: Engine> R1CSInstance<E> {
+  /// Produces a default `R1CSInstance` given an `R1CSShape`
+  pub fn default(S: &R1CSShape<E>) -> Self {
+    let comm_W = Commitment::<E>::default();
+    Self {
+      comm_W,
+      X: vec![E::Scalar::ZERO; S.num_io],
+    }
+  }
   /// A method to create an instance object using constituent elements
   pub(crate) fn new(
     S: &R1CSShape<E>,

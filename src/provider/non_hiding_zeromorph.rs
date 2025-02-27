@@ -3,20 +3,15 @@
 //!
 
 use crate::{
-  digest::SimpleDigestible,
-  errors::{NovaError, PCSError},
-  provider::{
+  digest::SimpleDigestible, errors::{NovaError, PCSError}, frontend::gpu::GpuName, provider::{
     kzg_commitment::{
       KZGCommitmentEngine, KZGProverKey, KZGVerifierKey, UVKZGCommitment, UniversalKZGParam,
     },
     traits::DlogGroup,
-  },
-  spartan::polys::{multilinear::MultilinearPolynomial, univariate::UniPoly},
-  traits::{
+  }, spartan::polys::{multilinear::MultilinearPolynomial, univariate::UniPoly}, traits::{
     commitment::Len, evaluation::EvaluationEngineTrait, Engine as NovaEngine, Group,
     TranscriptEngineTrait, TranscriptReprTrait,
-  },
-  Commitment,
+  }, Commitment
 };
 use ff::{BatchInvert, Field, PrimeField, PrimeFieldBits};
 use group::{Curve, Group as _};
@@ -556,7 +551,7 @@ where
   E::G1Affine: Serialize + for<'de> Deserialize<'de>,
   E::G2Affine: Serialize + for<'de> Deserialize<'de>,
   <E::G1 as Group>::Base: TranscriptReprTrait<E::G1>, // Note: due to the move of the bound TranscriptReprTrait<G> on G::Base from Group to Engine
-  E::Fr: PrimeFieldBits, // TODO due to use of gen_srs_for_testing, make optional
+  E::Fr: PrimeFieldBits + GpuName, // TODO due to use of gen_srs_for_testing, make optional
 {
   type ProverKey = ZMProverKey<E>;
   type VerifierKey = ZMVerifierKey<E>;

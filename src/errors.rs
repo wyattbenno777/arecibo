@@ -113,6 +113,9 @@ pub enum PCSError {
   /// returned when a length check fails in a PCS
   #[error("LengthError")]
   LengthError,
+  /// returned when a division fails in a PCS
+  #[error("DivisionError")]
+  DivisionError,
 }
 
 impl From<SynthesisError> for NovaError {

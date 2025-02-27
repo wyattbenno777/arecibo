@@ -60,6 +60,9 @@ pub enum SynthesisError {
   /// Incompatible vector length
   #[error("incompatible vector length: {0}")]
   IncompatibleLengthVector(String),
+  /// Malformed SRS
+  #[error("malformed srs")]
+  MalformedSrs,
 }
 
 /// Represents a constraint system which can have new variables

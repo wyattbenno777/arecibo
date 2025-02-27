@@ -76,7 +76,7 @@ where
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub(crate) struct FoldingData<E: Engine> {
+pub struct FoldingData<E: Engine> {
   pub U: RelaxedR1CSInstance<E>,
   pub u: R1CSInstance<E>,
   pub T: Commitment<E>,

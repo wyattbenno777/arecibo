@@ -7,8 +7,7 @@ use crate::{
   constants::{DEFAULT_ABSORBS, NUM_HASH_BITS},
   errors::NovaError,
   frontend::{
-    num::AllocatedNum, r1cs::NovaWitness, solver::SatisfyingAssignment,
-    test_cs::TestConstraintSystem, ConstraintSystem, SynthesisError,
+    num::AllocatedNum, r1cs::NovaWitness, solver::SatisfyingAssignment, test_cs::TestConstraintSystem, ConstraintSystem, SynthesisError
   },
   gadgets::scalar_as_base,
   hypernova::{

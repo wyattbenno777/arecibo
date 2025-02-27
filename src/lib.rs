@@ -35,6 +35,7 @@ pub mod traits;
 mod cyclefold;
 pub mod nebula;
 // pub mod supernova;
+pub mod onchain;
 pub use errors::NovaError;
 pub(crate) use nebula::AugmentedCircuitParams;
 use traits::ROConstants;

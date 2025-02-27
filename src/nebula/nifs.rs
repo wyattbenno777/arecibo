@@ -26,21 +26,31 @@ where
   E: CurveCycleEquipped,
 {
   // proof from primary fold
-  pub(super) nifs_primary: PrimaryNIFS<E>,
+  pub(crate) nifs_primary: PrimaryNIFS<E>,
 
   // proof from first cyclefold fold
-  pub(super) comm_T1: Commitment<Dual<E>>,
-  pub(super) l_u_cyclefold_E: R1CSInstance<Dual<E>>,
+  pub(crate) comm_T1: Commitment<Dual<E>>,
+  pub(crate) l_u_cyclefold_E: R1CSInstance<Dual<E>>,
 
   // proof from second cyclefold fold
-  pub(super) comm_T2: Commitment<Dual<E>>,
-  pub(super) l_u_cyclefold_W: R1CSInstance<Dual<E>>,
+  pub(crate) comm_T2: Commitment<Dual<E>>,
+  pub(crate) l_u_cyclefold_W: R1CSInstance<Dual<E>>,
 }
 
 impl<E> NIFS<E>
 where
   E: CurveCycleEquipped,
 {
+  /// Produces a default `NIFS`
+  pub fn default(S_secondary: &R1CSShape<Dual<E>>) -> Self {
+    Self {
+      nifs_primary: PrimaryNIFS::<E>::default(),
+      comm_T1: Commitment::<Dual<E>>::default(),
+      l_u_cyclefold_E: R1CSInstance::<Dual<E>>::default(S_secondary),
+      comm_T2: Commitment::<Dual<E>>::default(),
+      l_u_cyclefold_W: R1CSInstance::<Dual<E>>::default(S_secondary),
+    }
+}
   /// Prover algorithm for: CycleFold folding scheme applied to Nova
   pub fn prove(
     (ck, ck_secondary): (&CommitmentKey<E>, &CommitmentKey<Dual<E>>),
@@ -224,6 +234,13 @@ impl<E> PrimaryNIFS<E>
 where
   E: CurveCycleEquipped,
 {
+  /// Produces a default `PrimaryNIFS`
+  pub fn default() -> Self {
+    Self {
+      comm_T: Commitment::<E>::default(),
+    }
+  }
+
   /// Prover implementation for NIFS
   pub fn prove(
     ck: &CommitmentKey<E>,
@@ -256,7 +273,7 @@ where
     Ok((Self { comm_T }, (U, W), r))
   }
 
-  /// Verifier implementatin for NIFS
+  /// Verifier implementation for NIFS
   pub fn verify(
     &self,
     ro_consts: &ROConstants<Dual<E>>,
@@ -291,6 +308,7 @@ impl<E> PrimaryRelaxedNIFS<E>
 where
   E: CurveCycleEquipped,
 {
+  /// Prove the primary relaxed NIFS
   #[tracing::instrument(skip_all, name = "PrimaryRelaxedNIFS::prove", level = "debug")]
   pub fn prove(
     ck: &CommitmentKey<E>,
@@ -325,6 +343,7 @@ where
     Ok((Self { comm_T }, (U, W), r))
   }
 
+  /// Verify the primary relaxed NIFS
   pub fn verify(
     &self,
     ro_consts: &ROConstants<Dual<E>>,
