@@ -39,7 +39,7 @@ once_cell = "1.18.0"
 itertools = "0.13.0"                                                     # zip_eq
 rand = "0.8.5"
 ref-cast = "1.0.20"                                                      # allocation-less conversion in multilinear polys
-derive_more = "0.99.17"                                                  # lightens impl macros for pasta
+derive_more = { version = "1.0.0", features = ["full"] }
 static_assertions = "1.1.0"
 rayon-scan = "0.1.0"
 serde_json = { version = "1.0" }
