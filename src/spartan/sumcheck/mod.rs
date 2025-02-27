@@ -1,11 +1,11 @@
-use crate::errors::NovaError;
-
-use crate::spartan::polys::{
-  multilinear::MultilinearPolynomial,
-  univariate::{CompressedUniPoly, UniPoly},
+use crate::{
+  errors::NovaError,
+  spartan::polys::{
+    multilinear::MultilinearPolynomial,
+    univariate::{CompressedUniPoly, UniPoly},
+  },
+  traits::{Engine, TranscriptEngineTrait},
 };
-
-use crate::traits::{Engine, TranscriptEngineTrait};
 
 use ff::Field;
 

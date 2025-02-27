@@ -1,13 +1,12 @@
 //! Applies Spartan on top of the Layer 2 proofs.
 
 use super::{ShardingPublicParams, ShardingRecursiveSNARK};
-use crate::nebula::nifs::CycleFoldRelaxedNIFS;
-use crate::traits::commitment::CommitmentEngineTrait;
 use crate::{
   errors::NovaError,
-  nebula::nifs::{PrimaryNIFS, PrimaryRelaxedNIFS},
+  nebula::nifs::{CycleFoldRelaxedNIFS, PrimaryNIFS, PrimaryRelaxedNIFS},
   r1cs::{R1CSInstance, RelaxedR1CSInstance},
   traits::{
+    commitment::CommitmentEngineTrait,
     snark::{BatchedRelaxedR1CSSNARKTrait, RelaxedR1CSSNARKTrait},
     CurveCycleEquipped, Dual, Engine,
   },
@@ -179,10 +178,6 @@ where
       wit_blind_secondary,
       err_blind_secondary,
     ) = rs.fold_derandom_secondary(pp)?;
-    assert!(pp
-      .r1cs_shape_cyclefold()
-      .is_sat_relaxed(pp.ck_cyclefold(), &U_secondary, &W_secondary)
-      .is_ok());
     let snark_secondary = S2::prove(
       &pp.pp.ck_cyclefold,
       &pk.secondary,

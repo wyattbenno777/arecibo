@@ -1,10 +1,16 @@
 use crate::{
-  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_FE_IN_EMULATED_POINT}, cyclefold::gadgets::emulated::{
-    AllocatedEmulPoint, AllocatedEmulR1CSInstance, AllocatedEmulRelaxedR1CSInstance,
-  }, frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError}, nebula::nifs::NIFS, traits::{
+  constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NUM_FE_IN_EMULATED_POINT},
+  cyclefold::gadgets::emulated::{
+    AllocatedEmulR1CSInstance, AllocatedEmulRelaxedR1CSInstance,
+  },
+  frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
+  nebula::nifs::NIFS,
+  traits::{
     commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
     ROConstantsCircuit,
-  }, Commitment
+  },
+  gadgets::emulated::AllocatedEmulPoint,
+  Commitment,
 };
 /// A gadget for folding group elements.
 pub struct FoldGadget {}

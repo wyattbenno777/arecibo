@@ -258,15 +258,18 @@ where
     UniversalKZGParam::gen_srs_for_testing(rng, n.next_power_of_two())
   }
 
-  fn commit(
+  fn commit_at(
     ck: &Self::CommitmentKey,
     v: &[<E::G1 as Group>::Scalar],
     _r: &<E::G1 as Group>::Scalar,
+    idx: usize,
   ) -> Self::Commitment 
   where
   E::G1: DlogGroup<ScalarExt = E::Fr, AffineExt = E::G1Affine>,
   {
-    assert!(ck.length() >= v.len());
+
+    assert!(ck.length() > idx);
+    assert!(ck.length() - idx >= v.len());
     let mut domain =
     EvaluationDomain::from_coeffs(v.to_vec()).expect("Failed to creat
 e evaluation domain");
@@ -274,7 +277,7 @@ e evaluation domain");
     let worker = Worker::new();
     domain.ifft(&worker, &mut None).expect("FFT failed");
     let scalars = domain.into_coeffs();
-    let bases = ck.powers_of_g[..scalars.len()].to_vec();
+    let bases = ck.powers_of_g[idx..(idx + scalars.len())].to_vec();
     Commitment {
       comm: E::G1::vartime_multiscalar_mul(&scalars, &bases),
     }

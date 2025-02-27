@@ -23,8 +23,7 @@ use rayon::{
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::{borrow::Borrow, iter, marker::PhantomData};
+use std::{borrow::Borrow, iter, marker::PhantomData, sync::Arc};
 
 /// Polynomial Evaluation
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
@@ -122,7 +121,11 @@ where
 }
 
 /// `ZMProverKey` is used to generate a proof
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(bound(
+  serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",
+  deserialize = "E::G1Affine: Deserialize<'de>, E::G2Affine: Deserialize<'de>"
+))]
 pub struct ZMProverKey<E: Engine> {
   commit_pp: KZGProverKey<E>,
   open_pp: KZGProverKey<E>,
@@ -130,8 +133,11 @@ pub struct ZMProverKey<E: Engine> {
 
 /// `ZMVerifierKey` is used to check evaluation proofs for a given
 /// commitment.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(bound(serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",))]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(bound(
+  serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",
+  deserialize = "E::G1Affine: Deserialize<'de>, E::G2Affine: Deserialize<'de>"
+))]
 pub struct ZMVerifierKey<E: Engine> {
   vp: KZGVerifierKey<E>,
   s_offset_h: E::G2Affine,
@@ -595,19 +601,16 @@ where
 mod test {
   use ff::{Field, PrimeField, PrimeFieldBits};
   use group::Curve;
-  use halo2curves::bn256::Bn256;
-  use halo2curves::bn256::Fr as Scalar;
+  use halo2curves::bn256::{Bn256, Fr as Scalar};
   use itertools::Itertools as _;
   use pairing::MultiMillerLoop;
   use rand::thread_rng;
   use rand_chacha::ChaCha20Rng;
   use rand_core::SeedableRng;
-  use std::borrow::Borrow;
-  use std::sync::Arc;
+  use std::{borrow::Borrow, sync::Arc};
 
   use super::{quotients, UVKZGPCS};
 
-  use crate::spartan::polys::univariate::UniPoly;
   use crate::{
     errors::PCSError,
     provider::{
@@ -617,7 +620,7 @@ mod test {
       util::test_utils::prove_verify_from_num_vars,
       Bn256EngineZM,
     },
-    spartan::polys::multilinear::MultilinearPolynomial,
+    spartan::polys::{multilinear::MultilinearPolynomial, univariate::UniPoly},
     NovaError,
   };
 

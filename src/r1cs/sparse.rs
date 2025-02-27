@@ -6,12 +6,10 @@
 
 use ff::PrimeField;
 use itertools::Itertools as _;
-use rand_core::{CryptoRng, RngCore};
 use rayon::prelude::*;
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
 
 /// CSR format sparse matrix, We follow the names used by scipy.
 /// Detailed explanation here: <https://stackoverflow.com/questions/52299420/scipy-csr-matrix-understand-indptr>
@@ -55,6 +53,7 @@ impl<F: PrimeField> SparseMatrix<F> {
     }
   }
 
+  #[cfg(test)]
   /// Construct from the COO representation; Vec<usize(row), usize(col), F>.
   /// We assume that the rows are sorted during construction.
   pub fn new(matrix: &[(usize, usize, F)], rows: usize, cols: usize) -> Self {
@@ -86,30 +85,6 @@ impl<F: PrimeField> SparseMatrix<F> {
       indptr,
       cols,
     }
-  }
-
-  /// Samples a new random matrix of size `rows` x `cols` with `num_entries` non-zero entries.
-  pub fn random<R: RngCore + CryptoRng>(
-    rows: usize,
-    cols: usize,
-    num_entries: usize,
-    mut rng: &mut R,
-  ) -> Self {
-    assert!(num_entries <= rows * cols);
-
-    let mut indices = BTreeSet::<(usize, usize)>::new();
-    while indices.len() < num_entries {
-      let row = rng.next_u32() as usize % rows;
-      let col = rng.next_u32() as usize % cols;
-      indices.insert((row, col));
-    }
-
-    let matrix = indices
-      .into_iter()
-      .map(|(row, col)| (row, col, F::random(&mut rng)))
-      .collect::<Vec<_>>();
-
-    Self::new(&matrix, rows, cols)
   }
 
   /// Returns an iterator into the rows
@@ -200,13 +175,6 @@ impl<F: PrimeField> SparseMatrix<F> {
   }
 
   /// Multiply by a witness representing a dense vector; uses rayon to parallelize.
-  pub fn multiply_witness_into(&self, W: &[F], u: &F, X: &[F], sink: &mut Vec<F>) {
-    assert_eq!(self.cols, W.len() + X.len() + 1, "invalid shape");
-
-    self.multiply_witness_into_unchecked(W, u, X, sink);
-  }
-
-  /// Multiply by a witness representing a dense vector; uses rayon to parallelize.
   /// This does not check that the shape of the matrix/vector are compatible.
   fn multiply_witness_into_unchecked(&self, W: &[F], u: &F, X: &[F], sink: &mut Vec<F>) {
     let num_vars = W.len();
@@ -233,11 +201,6 @@ impl<F: PrimeField> SparseMatrix<F> {
     *self.indptr.last().unwrap()
   }
 
-  /// empty matrix
-  pub fn is_empty(&self) -> bool {
-    self.len() == 0
-  }
-
   /// returns a custom iterator
   pub fn iter(&self) -> Iter<'_, F> {
     let mut row = 0;
@@ -250,14 +213,6 @@ impl<F: PrimeField> SparseMatrix<F> {
       i: 0,
       nnz: *self.indptr.last().unwrap(),
     }
-  }
-
-  pub fn num_rows(&self) -> usize {
-    self.indptr.len() - 1
-  }
-
-  pub fn num_cols(&self) -> usize {
-    self.cols
   }
 }
 

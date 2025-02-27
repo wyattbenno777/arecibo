@@ -13,7 +13,7 @@ use rand_core::RngCore;
 use super::{Parameters, VerifyingKey};
 
 use crate::frontend::domain::EvaluationDomain;
-use crate::frontend::gpu;
+use crate::frontend::{gpu, Split};
 use crate::frontend::{Circuit, ConstraintSystem, Index, LinearCombination, SynthesisError, Variable};
 use ec_gpu_gen::threadpool::Worker;
 
@@ -140,7 +140,7 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for KeypairAssembly<Scalar> {
                     Variable(Index::Input(id)) => inputs[id].push((*coeff, this_constraint)),
                     Variable(Index::Aux(id)) => aux[id].push((*coeff, this_constraint)),
                     Variable(Index::Precommitted(_id)) => unreachable!(),
-                    Variable(Index::Precommitted2(_id)) => unreachable!(),
+                    Variable(Index::Precommitted1(_id)) => unreachable!(),
                 }
             }
         }
@@ -187,6 +187,7 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for KeypairAssembly<Scalar> {
         &mut self,
         _: A,
         _: F,
+        _: Split,
     ) -> Result<Variable, SynthesisError>
     where
         F: FnOnce() -> Result<Scalar, SynthesisError>,
@@ -197,19 +198,6 @@ impl<Scalar: PrimeField> ConstraintSystem<Scalar> for KeypairAssembly<Scalar> {
         unimplemented!("Implement alloc_precommitted for KeypairAssembly.")
     }
 
-    fn alloc_precommitted2<F, A, AR>(
-        &mut self,
-        _: A,
-        _: F,
-    ) -> Result<Variable, SynthesisError>
-    where
-        F: FnOnce() -> Result<Scalar, SynthesisError>,
-        A: FnOnce() -> AR,
-        AR: Into<String>,
-    {
-        // Provide logic or a placeholder:
-        unimplemented!("Implement alloc_precommitted2 for KeypairAssembly.")
-    }
 }
 
 /// Create parameters for a circuit, given some toxic waste.

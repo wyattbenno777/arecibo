@@ -4,7 +4,8 @@ use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
   gadgets::{
     alloc_num_equals, alloc_scalar_as_base, alloc_zero, conditionally_select,
-    conditionally_select_vec, le_bits_to_num, AllocatedRelaxedR1CSInstance,
+    conditionally_select_vec, emulated::AllocatedEmulPoint, le_bits_to_num,
+    AllocatedRelaxedR1CSInstance,
   },
   traits::{
     commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
@@ -13,8 +14,10 @@ use crate::{
   Commitment,
 };
 
-use crate::frontend::gadgets::{boolean::Boolean, num::AllocatedNum, Assignment};
-use crate::frontend::{AllocatedBit, ConstraintSystem, SynthesisError};
+use crate::frontend::{
+  gadgets::{boolean::Boolean, num::AllocatedNum, Assignment},
+  AllocatedBit, ConstraintSystem, SynthesisError,
+};
 use ff::Field;
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +28,10 @@ use crate::cyclefold::{
 
 use super::rs::StepCircuit;
 
-/// Augmented circuit params
+
+/// The parameters for the [`AugmentedCircuit`]
+///
+/// Used for non-native arithmetic
 #[derive(Clone, Debug, PartialEq, Copy, Eq, Serialize, Deserialize)]
 pub struct AugmentedCircuitParams {
   /// how many bits in each limb
@@ -35,7 +41,7 @@ pub struct AugmentedCircuitParams {
 }
 
 impl AugmentedCircuitParams {
-  /// Create a new augmented circuit params
+  /// Create a new instance of the [`AugmentedCircuitParams`]
   pub const fn new(limb_width: usize, n_limbs: usize) -> Self {
     Self {
       limb_width,
@@ -146,19 +152,19 @@ where
     arity: usize,
   ) -> Result<
     (
-      AllocatedNum<E1::Scalar>,                               // pp_digest
-      AllocatedNum<E1::Scalar>,                               // i
-      Vec<AllocatedNum<E1::Scalar>>,                          // z0
-      Vec<AllocatedNum<E1::Scalar>>,                          // zi
-      emulated::AllocatedFoldingData<Dual<E1>>,               //data_p
-      AllocatedCycleFoldData<Dual<E1>>,                       // data_c_1
-      AllocatedCycleFoldData<Dual<E1>>,                       // data_c_2
-      emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // E_new
-      emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // W_new
-      AllocatedNum<E1::Scalar>,                               // prev_IC
-      emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // comm_omega_prev
-      AllocatedNum<E1::Scalar>,                               // r_i
-      AllocatedNum<E1::Scalar>,                               // r_i_next
+      AllocatedNum<E1::Scalar>,                     // pp_digest
+      AllocatedNum<E1::Scalar>,                     // i
+      Vec<AllocatedNum<E1::Scalar>>,                // z0
+      Vec<AllocatedNum<E1::Scalar>>,                // zi
+      emulated::AllocatedFoldingData<Dual<E1>>,     //data_p
+      AllocatedCycleFoldData<Dual<E1>>,             // data_c_1
+      AllocatedCycleFoldData<Dual<E1>>,             // data_c_2
+      AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // E_new
+      AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // W_new
+      AllocatedNum<E1::Scalar>,                     // prev_IC
+      AllocatedEmulPoint<<Dual<E1> as Engine>::GE>, // comm_omega_prev
+      AllocatedNum<E1::Scalar>,                     // r_i
+      AllocatedNum<E1::Scalar>,                     // r_i_next
     ),
     SynthesisError,
   > {
@@ -217,7 +223,7 @@ where
       self.params.n_limbs,
     )?;
 
-    let E_new = emulated::AllocatedEmulPoint::alloc(
+    let E_new = AllocatedEmulPoint::alloc(
       cs.namespace(|| "E_new"),
       self
         .inputs
@@ -228,7 +234,7 @@ where
       self.params.n_limbs,
     )?;
 
-    let W_new = emulated::AllocatedEmulPoint::alloc(
+    let W_new = AllocatedEmulPoint::alloc(
       cs.namespace(|| "W_new"),
       self
         .inputs
@@ -250,7 +256,7 @@ where
       )
     })?;
 
-    let comm_omega_prev = emulated::AllocatedEmulPoint::alloc(
+    let comm_omega_prev = AllocatedEmulPoint::alloc(
       cs.namespace(|| "comm_omega_prev"),
       self
         .inputs
@@ -324,8 +330,8 @@ where
     data_p: &emulated::AllocatedFoldingData<Dual<E1>>,
     data_c_1: &AllocatedCycleFoldData<Dual<E1>>,
     data_c_2: &AllocatedCycleFoldData<Dual<E1>>,
-    E_new: emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>,
-    W_new: emulated::AllocatedEmulPoint<<Dual<E1> as Engine>::GE>,
+    E_new: AllocatedEmulPoint<<Dual<E1> as Engine>::GE>,
+    W_new: AllocatedEmulPoint<<Dual<E1> as Engine>::GE>,
     arity: usize,
     prev_IC: &AllocatedNum<E1::Scalar>,
     r_i: &AllocatedNum<E1::Scalar>,
@@ -513,6 +519,7 @@ where
       &r_i,
     )?;
 
+    // Check that u references U in the output of the prior iteration
     let should_be_false = AllocatedBit::nor(
       cs.namespace(|| "check_non_base_pass nor base_case"),
       &check_non_base_pass,

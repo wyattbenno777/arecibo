@@ -4,14 +4,17 @@ use super::gadgets::{EvalGadget, FoldGadget, KZGChallengesGadget};
 use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
   cyclefold::gadgets::emulated::{
-    AllocatedEmulPoint, AllocatedEmulR1CSInstance, AllocatedEmulRelaxedR1CSInstance,
+    AllocatedEmulR1CSInstance, AllocatedEmulRelaxedR1CSInstance,
   },
   errors::NovaError,
   frontend::{
     gpu::GpuName, num::AllocatedNum, Circuit, ConstraintSystem,
     SynthesisError,
   },
-  gadgets::AllocatedRelaxedR1CSInstance,
+  gadgets::{
+    AllocatedRelaxedR1CSInstance,
+    emulated::AllocatedEmulPoint,
+  },
   nebula::{
     nifs::NIFS,
     rs::{PublicParams, RecursiveSNARK},

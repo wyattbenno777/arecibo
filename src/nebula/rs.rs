@@ -1,33 +1,37 @@
 //! This module implements a SNARK that proves the correct execution of an incremental computation
 use std::sync::Arc;
 
-use super::augmented_circuit::{AugmentedCircuit, AugmentedCircuitInputs, AugmentedCircuitParams};
-use super::ic::IC;
-use super::nifs::{PrimaryNIFS, PrimaryRelaxedNIFS, NIFS};
-use super::traits::impl_rs_fields_trait;
-use crate::cyclefold::util::{absorb_primary_relaxed_r1cs, FoldingData};
-use crate::digest::SimpleDigestible;
-use crate::frontend::num::AllocatedNum;
-use crate::frontend::{ConstraintSystem, SynthesisError};
-use crate::nebula::traits::RecursiveSNARKFieldsTrait;
-use crate::traits::commitment::CommitmentEngineTrait;
+use super::{
+  augmented_circuit::{AugmentedCircuit, AugmentedCircuitInputs, AugmentedCircuitParams},
+  ic::IC,
+  nifs::{PrimaryNIFS, PrimaryRelaxedNIFS, NIFS},
+  traits::impl_rs_fields_trait,
+};
 use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
-  cyclefold::circuit::CycleFoldCircuit,
+  cyclefold::{
+    circuit::CycleFoldCircuit,
+    util::{absorb_primary_relaxed_r1cs, FoldingData},
+  },
+  digest::SimpleDigestible,
   errors::NovaError,
   frontend::{
+    num::AllocatedNum,
     r1cs::{NovaShape, NovaWitness},
     shape_cs::ShapeCS,
     solver::SatisfyingAssignment,
+    ConstraintSystem, SynthesisError,
   },
   gadgets::scalar_as_base,
+  nebula::traits::RecursiveSNARKFieldsTrait,
   r1cs::{CommitmentKeyHint, R1CSInstance, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
-  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},
-  CommitmentKey, DigestComputer, ROConstants,
+  traits::{
+    commitment::CommitmentEngineTrait, AbsorbInROTrait, CurveCycleEquipped, Dual, Engine,
+    ROConstantsCircuit, ROTrait,
+  },
+  Commitment, CommitmentKey, DigestComputer, R1CSWithArity, ROConstants,
 };
-use crate::{Commitment, R1CSWithArity};
-use ff::Field;
-use ff::PrimeField;
+use ff::{Field, PrimeField};
 use once_cell::sync::OnceCell;
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
@@ -90,7 +94,7 @@ where
     );
     let mut cs: ShapeCS<E1> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
-    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape(ck_hint_primary);
+    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape_and_key(ck_hint_primary);
     let ck_primary = Arc::new(ck_primary);
     let circuit_shape_primary = R1CSWithArity::new(r1cs_shape_primary, F_arity_primary);
 
@@ -98,7 +102,7 @@ where
     let mut cs: ShapeCS<Dual<E1>> = ShapeCS::new();
     let circuit_cyclefold: CycleFoldCircuit<E1> = CycleFoldCircuit::default();
     let _ = circuit_cyclefold.synthesize(&mut cs);
-    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape(ck_hint_cyclefold);
+    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape_and_key(ck_hint_cyclefold);
     let ck_cyclefold = Arc::new(ck_cyclefold);
     let circuit_shape_cyclefold = R1CSWithArity::new(r1cs_shape_cyclefold, 0);
 
@@ -658,9 +662,44 @@ impl_rs_fields_trait!(RecursiveSNARK);
 #[cfg(test)]
 mod test {
   use super::*;
-  use crate::frontend::num::AllocatedNum;
-  use crate::{provider::Bn256EngineIPA, traits::snark::default_ck_hint};
+  use crate::{
+    frontend::num::AllocatedNum, provider::Bn256EngineIPA, traits::snark::default_ck_hint,
+  };
   use std::marker::PhantomData;
+
+  #[test]
+  fn test_rs() -> Result<(), NovaError> {
+    test_rs_with::<Bn256EngineIPA>()
+  }
+
+  #[test]
+  fn test_rs_pow() -> Result<(), NovaError> {
+    test_rs_pow_with::<Bn256EngineIPA>()
+  }
+
+  fn test_rs_with<E: CurveCycleEquipped>() -> Result<(), NovaError> {
+    let primary_circuit = SquareCircuit::<E::Scalar> { _p: PhantomData };
+    run_circuit::<E>(&primary_circuit)
+  }
+  fn test_rs_pow_with<E: CurveCycleEquipped>() -> Result<(), NovaError> {
+    let primary_circuit = PowCircuit::<E> {
+      _engine: PhantomData,
+    };
+    run_circuit::<E>(&primary_circuit)
+  }
+
+  fn run_circuit<E: CurveCycleEquipped>(c: &impl StepCircuit<E::Scalar>) -> Result<(), NovaError> {
+    let pp = PublicParams::<E>::setup(c, &*default_ck_hint(), &*default_ck_hint());
+    let z0 = vec![E::Scalar::from(2u64)];
+    let mut recursive_snark = RecursiveSNARK::new(&pp, c, &z0).unwrap();
+    let mut IC_i = E::Scalar::ZERO;
+    for i in 0..100 {
+      recursive_snark.prove_step(&pp, c, IC_i)?;
+      IC_i = recursive_snark.increment_commitment(&pp, c);
+      recursive_snark.verify(&pp, i + 1, &z0, IC_i).unwrap();
+    }
+    Ok(())
+  }
 
   #[derive(Clone)]
   struct SquareCircuit<F> {
@@ -688,30 +727,38 @@ mod test {
     }
   }
 
-  fn test_trivial_cyclefold_prove_verify_with<E: CurveCycleEquipped>() -> Result<(), NovaError> {
-    let primary_circuit = SquareCircuit::<E::Scalar> { _p: PhantomData };
-
-    let pp = PublicParams::<E>::setup(&primary_circuit, &*default_ck_hint(), &*default_ck_hint());
-
-    let z0 = vec![E::Scalar::from(2u64)];
-
-    let mut recursive_snark = RecursiveSNARK::new(&pp, &primary_circuit, &z0).unwrap();
-    let mut IC_i = E::Scalar::ZERO;
-
-    for i in 0..10 {
-      recursive_snark.prove_step(&pp, &primary_circuit, IC_i)?;
-
-      // TODO: figure out if i should put this in the rs API?
-      IC_i = recursive_snark.increment_commitment(&pp, &primary_circuit);
-
-      recursive_snark.verify(&pp, i + 1, &z0, IC_i).unwrap();
-    }
-
-    Ok(())
+  #[derive(Clone, Default)]
+  pub struct PowCircuit<E>
+  where
+    E: Engine,
+  {
+    _engine: PhantomData<E>,
   }
 
-  #[test]
-  fn test_cyclefold_prove_verify() -> Result<(), NovaError> {
-    test_trivial_cyclefold_prove_verify_with::<Bn256EngineIPA>()
+  impl<E> StepCircuit<E::Scalar> for PowCircuit<E>
+  where
+    E: Engine,
+  {
+    fn arity(&self) -> usize {
+      1
+    }
+
+    fn synthesize<CS: ConstraintSystem<E::Scalar>>(
+      &self,
+      cs: &mut CS,
+      z: &[AllocatedNum<E::Scalar>],
+    ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
+      let mut x = z[0].clone();
+      let mut y = x.clone();
+      for i in 0..10_000 {
+        y = x.square(cs.namespace(|| format!("x_sq_{i}")))?;
+        x = y.clone();
+      }
+      Ok(vec![y])
+    }
+
+    fn non_deterministic_advice(&self) -> Vec<E::Scalar> {
+      vec![]
+    }
   }
 }

@@ -21,7 +21,7 @@ mod tests {
       Circuit, ConstraintSystem, SynthesisError,
     },
     gadgets::nat_to_limbs,
-    nebula::rs::{PublicParams, RecursiveSNARK, StepCircuit},
+    nebula::rs::{PublicParams, RecursiveSNARK},
     onchain::{
       decider_circuit::DeciderCircuit,
       gadgets::{EvalGadget, FoldGadget, KZGChallengesGadget, KZGProof}, test::circuit::{BigNatCircuit, CubicFCircuit, TrivialCircuit},
@@ -55,7 +55,7 @@ use super::circuit::TestChallengeCircuit;
     let circuit = TestChallengeCircuit::default();
     let mut shape_cs = ShapeCS::new();
     let _ = circuit.synthesize(&mut shape_cs);
-    let (r1cs_shape, ck) = shape_cs.r1cs_shape(&*S1::ck_floor());
+    let (r1cs_shape, ck) = shape_cs.r1cs_shape_and_key(&*S1::ck_floor());
     let relaxed_instance = RelaxedR1CSInstance::default(&ck, &r1cs_shape);
 
     let (rw_native, re_native) =

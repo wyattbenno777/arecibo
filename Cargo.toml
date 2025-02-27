@@ -85,6 +85,7 @@ cuda = ["grumpkin-msm/cuda"]
 flamegraph = ["pprof/flamegraph", "pprof/criterion"]
 opencl = []
 light_onchain_prover = []
+nightly = []
 
 [profile.dev-ci]
 inherits = "dev"

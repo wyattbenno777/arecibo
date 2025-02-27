@@ -10,11 +10,12 @@ pub mod batched;
 pub mod batched_ppsnark;
 #[macro_use]
 mod macros;
+pub mod lin_snark;
 pub(crate) mod math;
 pub mod polys;
 pub mod ppsnark;
 pub mod snark;
-mod sumcheck;
+pub(crate) mod sumcheck;
 
 use crate::{
   r1cs::{R1CSShape, SparseMatrix},
@@ -169,36 +170,36 @@ impl<E: Engine> PolyEvalInstance<E> {
 }
 
 /// Binds "row" variables of (A, B, C) matrices viewed as 2d multilinear polynomials
-fn compute_eval_table_sparse<E: Engine>(
+pub fn compute_eval_table_sparse<E: Engine>(
   S: &R1CSShape<E>,
-  rx: &[E::Scalar],
+  eq_rx_evals: &[E::Scalar],
 ) -> (Vec<E::Scalar>, Vec<E::Scalar>, Vec<E::Scalar>) {
-  assert_eq!(rx.len(), S.num_cons);
+  assert_eq!(eq_rx_evals.len(), S.num_cons);
 
   let inner = |M: &SparseMatrix<E::Scalar>, M_evals: &mut Vec<E::Scalar>| {
     for (row_idx, row) in M.iter_rows().enumerate() {
       for (val, col_idx) in M.get_row(row) {
         // TODO(@winston-h-zhang): Parallelize? Will need more complicated locking
-        M_evals[*col_idx] += rx[row_idx] * val;
+        M_evals[*col_idx] += eq_rx_evals[row_idx] * val;
       }
     }
   };
 
   let (A_evals, (B_evals, C_evals)) = rayon::join(
     || {
-      let mut A_evals: Vec<E::Scalar> = vec![E::Scalar::ZERO; 2 * S.num_vars];
+      let mut A_evals: Vec<E::Scalar> = vec![E::Scalar::ZERO; 2 * S.total_num_vars()];
       inner(&S.A, &mut A_evals);
       A_evals
     },
     || {
       rayon::join(
         || {
-          let mut B_evals: Vec<E::Scalar> = vec![E::Scalar::ZERO; 2 * S.num_vars];
+          let mut B_evals: Vec<E::Scalar> = vec![E::Scalar::ZERO; 2 * S.total_num_vars()];
           inner(&S.B, &mut B_evals);
           B_evals
         },
         || {
-          let mut C_evals: Vec<E::Scalar> = vec![E::Scalar::ZERO; 2 * S.num_vars];
+          let mut C_evals: Vec<E::Scalar> = vec![E::Scalar::ZERO; 2 * S.total_num_vars()];
           inner(&S.C, &mut C_evals);
           C_evals
         },
@@ -212,12 +213,12 @@ fn compute_eval_table_sparse<E: Engine>(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
   use super::*;
-  use crate::provider::PallasEngine;
-  use crate::r1cs::util::{FWrap, GWrap};
-  use pasta_curves::pallas::Point as PallasPoint;
-  use pasta_curves::Fq as Scalar;
-  use proptest::collection::vec;
-  use proptest::prelude::*;
+  use crate::{
+    provider::PallasEngine,
+    r1cs::util::{FWrap, GWrap},
+  };
+  use pasta_curves::{pallas::Point as PallasPoint, Fq as Scalar};
+  use proptest::{collection::vec, prelude::*};
 
   impl<E: Engine> PolyEvalWitness<E> {
     fn alt_batch(p_vec: &[&Vec<E::Scalar>], s: &E::Scalar) -> Self {

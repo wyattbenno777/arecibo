@@ -1,16 +1,16 @@
 //! This module defines Cyclefold circuit
 
-use crate::frontend::gadgets::poseidon::poseidon_hash_allocated;
-use crate::frontend::{AllocatedBit, Boolean, ConstraintSystem, PoseidonConstants, SynthesisError};
-use crate::gadgets::conditionally_select;
-use ff::Field;
-
 use crate::{
   constants::NUM_CHALLENGE_BITS,
-  gadgets::{alloc_zero, le_bits_to_num, AllocatedPoint},
+  frontend::{
+    gadgets::poseidon::poseidon_hash_allocated, AllocatedBit, Boolean, ConstraintSystem,
+    PoseidonConstants, SynthesisError,
+  },
+  gadgets::{alloc_zero, conditionally_select, le_bits_to_num, AllocatedPoint},
   traits::{commitment::CommitmentTrait, Engine},
   Commitment,
 };
+use ff::Field;
 
 /// A structure containing the CycleFold circuit inputs and implementing the synthesize function
 pub struct CycleFoldCircuit<E: Engine> {

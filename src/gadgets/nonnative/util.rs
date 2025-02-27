@@ -5,8 +5,10 @@ use crate::frontend::{
 use byteorder::WriteBytesExt;
 use ff::PrimeField;
 use num_bigint::{BigInt, Sign};
-use std::convert::From;
-use std::io::{self, Write};
+use std::{
+  convert::From,
+  io::{self, Write},
+};
 
 #[derive(Clone)]
 /// A representation of a bit

@@ -4,33 +4,37 @@
 
 use std::sync::Arc;
 
-use super::augmented_circuit::AugmentedCircuitParams;
-use super::ic::IC;
-use super::nifs::{PrimaryNIFS, PrimaryRelaxedNIFS, NIFS};
-use super::traits::impl_rs_fields_trait;
-use crate::cyclefold::util::{absorb_primary_relaxed_r1cs, FoldingData};
-use crate::frontend::num::AllocatedNum;
-use crate::frontend::{ConstraintSystem, SynthesisError};
-use crate::nebula::traits::RecursiveSNARKFieldsTrait;
-use crate::traits::commitment::CommitmentEngineTrait;
-use crate::Commitment;
+use super::{
+  augmented_circuit::AugmentedCircuitParams,
+  ic::IC,
+  nifs::{PrimaryNIFS, PrimaryRelaxedNIFS, NIFS},
+  traits::impl_rs_fields_trait,
+};
 use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_FE_IN_EMULATED_POINT, NUM_HASH_BITS},
-  cyclefold::circuit::CycleFoldCircuit,
+  cyclefold::{
+    circuit::CycleFoldCircuit,
+    util::{absorb_primary_relaxed_r1cs, FoldingData},
+  },
   errors::NovaError,
   frontend::{
+    num::AllocatedNum,
     r1cs::{NovaShape, NovaWitness},
     shape_cs::ShapeCS,
     solver::SatisfyingAssignment,
+    ConstraintSystem, SynthesisError,
   },
   gadgets::scalar_as_base,
+  nebula::traits::RecursiveSNARKFieldsTrait,
   r1cs::{CommitmentKeyHint, R1CSInstance, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
-  traits::{AbsorbInROTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, ROTrait},
-  CommitmentKey, DigestComputer, R1CSWithArity, ROConstants, SimpleDigestible,
+  traits::{
+    commitment::CommitmentEngineTrait, AbsorbInROTrait, CurveCycleEquipped, Dual, Engine,
+    ROConstantsCircuit, ROTrait,
+  },
+  Commitment, CommitmentKey, DigestComputer, R1CSWithArity, ROConstants, SimpleDigestible,
 };
 use augmented_circuit::{AugmentedCircuit, AugmentedCircuitInputs};
-use ff::Field;
-use ff::PrimeField;
+use ff::{Field, PrimeField};
 use once_cell::sync::OnceCell;
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
@@ -95,7 +99,7 @@ where
     );
     let mut cs: ShapeCS<E1> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
-    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape(ck_hint_primary);
+    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape_and_key(ck_hint_primary);
     let ck_primary = Arc::new(ck_primary);
     let circuit_shape_primary = R1CSWithArity::new(r1cs_shape_primary, F_arity_primary);
 
@@ -103,7 +107,7 @@ where
     let mut cs: ShapeCS<Dual<E1>> = ShapeCS::new();
     let circuit_cyclefold: CycleFoldCircuit<E1> = CycleFoldCircuit::default();
     let _ = circuit_cyclefold.synthesize(&mut cs);
-    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape(ck_hint_cyclefold);
+    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape_and_key(ck_hint_cyclefold);
     let ck_cyclefold = Arc::new(ck_cyclefold);
     let circuit_shape_cyclefold = R1CSWithArity::new(r1cs_shape_cyclefold, 0);
 
@@ -684,14 +688,13 @@ pub trait AuditStepCircuit<F: PrimeField>: Send + Sync + Clone {
 #[cfg(test)]
 mod test {
   use super::{AuditPublicParams, AuditRecursiveSNARK, AuditStepCircuit};
-  use crate::frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError};
   use crate::{
     errors::NovaError,
+    frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
     provider::Bn256EngineIPA,
     traits::{snark::default_ck_hint, CurveCycleEquipped},
   };
-  use ff::Field;
-  use ff::PrimeField;
+  use ff::{Field, PrimeField};
   use std::marker::PhantomData;
 
   #[derive(Clone)]

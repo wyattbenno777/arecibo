@@ -114,7 +114,6 @@ mod test {
     use super::*;
     use halo2curves::bn256::{Bn256, G1Affine, G2Affine, Fr};
     use ff::Field;
-    use group::prime::PrimeCurveAffine;
     use pairing::{MillerLoopResult, MultiMillerLoop};
 
     #[test]

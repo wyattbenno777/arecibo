@@ -1,9 +1,10 @@
 use crate::traits::{Group, TranscriptReprTrait};
-use group::prime::PrimeCurveAffine;
-use group::{prime::PrimeCurve, GroupEncoding};
+use group::{
+  prime::{PrimeCurve, PrimeCurveAffine},
+  GroupEncoding,
+};
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
-use std::ops::Mul;
+use std::{fmt::Debug, ops::Mul};
 
 /// A trait that defines extensions to the Group trait
 pub trait DlogGroup:

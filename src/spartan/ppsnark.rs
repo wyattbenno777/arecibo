@@ -245,7 +245,8 @@ impl<E: Engine> R1CSShapeSparkRepr<E> {
 }
 
 /// A type that represents the prover's key
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "EE::VerifierKey: Serialize")]
 pub struct ProverKey<E: Engine, EE: EvaluationEngineTrait<E>> {
   pk_ee: EE::ProverKey,
   S_repr: R1CSShapeSparkRepr<E>,
@@ -254,7 +255,7 @@ pub struct ProverKey<E: Engine, EE: EvaluationEngineTrait<E>> {
 }
 
 /// A type that represents the verifier's key
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound = "EE::VerifierKey: Serialize")]
 pub struct VerifierKey<E: Engine, EE: EvaluationEngineTrait<E>> {
   num_cons: usize,
