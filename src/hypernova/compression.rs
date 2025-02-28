@@ -127,7 +127,7 @@ where
     vk: &VerifierKey<E, S1, S2>,
     z_0: &[E::Scalar],
     num_steps: usize,
-  ) -> Result<(), NovaError> {
+  ) -> Result<Vec<E::Scalar>, NovaError> {
     // --- Basic checks ---
     //
     // 1. check if the (relaxed) R1CS instances have two public outputs
@@ -156,7 +156,7 @@ where
     );
     res?;
     res_cyclefold?;
-    Ok(())
+    Ok(self.data.z_i.clone())
   }
 }
 

@@ -99,6 +99,9 @@ pub enum NovaError {
   /// returned when circuit for proving is not found
   #[error("NoCircuit")]
   NoCircuit,
+  /// returned when non-recursive SNARK is provided
+  #[error("NoCircuit")]
+  NotRecursive,
 }
 
 /// Errors specific to the Polynomial commitment scheme

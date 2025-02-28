@@ -9,12 +9,13 @@ use crate::{
   constants::{BN_LIMB_WIDTH, BN_N_LIMBS},
   digest::{DigestComputer, SimpleDigestible},
   hypernova::{
+    compression::{CompressedSNARK, ProverKey, VerifierKey},
     pp::{AuxPublicParams, PublicParamsTrait, R1CSPublicParams, SplitPublicParams},
     rs::{IncrementalCommitment, RecursiveSNARK, StepCircuit},
   },
   traits::{
-    snark::default_ck_hint, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit,
-    TranscriptEngineTrait,
+    snark::{default_ck_hint, LinearizedR1CSSNARKTrait, RelaxedR1CSSNARKTrait},
+    CurveCycleEquipped, Dual, Engine, ROConstantsCircuit, TranscriptEngineTrait,
   },
   AugmentedCircuitParams, NovaError,
 };
@@ -26,11 +27,13 @@ use serde::{Deserialize, Serialize};
 /// Public parameters for the Nebula SNARK
 ///
 /// /// The constant `M` is the number of memory operations per step in the vm.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct NebulaPublicParams<E, const M: usize>
+pub struct NebulaPublicParams<E, S1, S2, const M: usize>
 where
   E: CurveCycleEquipped,
+  S1: LinearizedR1CSSNARKTrait<E>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E>>,
 {
   aux: AuxPublicParams<E>,
   F: R1CSPublicParams<E>,
@@ -38,11 +41,15 @@ where
   scan: R1CSPublicParams<E>,
   #[serde(skip, default = "OnceCell::new")]
   digest: OnceCell<E::Scalar>,
+  #[serde(skip, default = "OnceCell::new")]
+  pk_and_vk: OnceCell<(NebulaProverKey<E, S1, S2>, NebulaVerifierKey<E, S1, S2>)>,
 }
 
-impl<E, const M: usize> NebulaPublicParams<E, M>
+impl<E, S1, S2, const M: usize> NebulaPublicParams<E, S1, S2, M>
 where
   E: CurveCycleEquipped,
+  S1: LinearizedR1CSSNARKTrait<E>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E>>,
 {
   fn F(&self) -> SplitPublicParams<'_, E> {
     (&self.aux, &self.F, self.digest())
@@ -64,9 +71,125 @@ where
       .cloned()
       .expect("Failure in retrieving digest")
   }
+
+  /// provides a reference to a ProverKey suitable for producing a CompressedProof
+  pub fn pk(&self) -> &NebulaProverKey<E, S1, S2> {
+    let (pk, _vk) = self
+      .pk_and_vk
+      .get_or_init(|| NebulaCompressedSNARK::<E, S1, S2>::setup(self).unwrap());
+    pk
+  }
+
+  /// provides a reference to a VerifierKey suitable for verifying a CompressedProof
+  pub fn vk(&self) -> &NebulaVerifierKey<E, S1, S2> {
+    let (_pk, vk) = self
+      .pk_and_vk
+      .get_or_init(|| NebulaCompressedSNARK::<E, S1, S2>::setup(self).unwrap());
+    vk
+  }
 }
 
-impl<E, const M: usize> SimpleDigestible for NebulaPublicParams<E, M> where E: CurveCycleEquipped {}
+impl<E, S1, S2, const M: usize> SimpleDigestible for NebulaPublicParams<E, S1, S2, M>
+where
+  E: CurveCycleEquipped,
+  S1: LinearizedR1CSSNARKTrait<E>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E>>,
+{
+}
+
+/// Nebula Prover key
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct NebulaProverKey<E, S1, S2>
+where
+  E: CurveCycleEquipped,
+  S1: LinearizedR1CSSNARKTrait<E>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E>>,
+{
+  F: ProverKey<E, S1, S2>,
+  ops: ProverKey<E, S1, S2>,
+  scan: ProverKey<E, S1, S2>,
+}
+
+/// Nebula Verifier key
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct NebulaVerifierKey<E, S1, S2>
+where
+  E: CurveCycleEquipped,
+  S1: LinearizedR1CSSNARKTrait<E>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E>>,
+{
+  F: VerifierKey<E, S1, S2>,
+  ops: VerifierKey<E, S1, S2>,
+  scan: VerifierKey<E, S1, S2>,
+}
+
+/// Apply Spartan to prove knowledge of a valid Nebula IVC proof
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct NebulaCompressedSNARK<E, S1, S2>
+where
+  E: CurveCycleEquipped,
+  S1: LinearizedR1CSSNARKTrait<E>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E>>,
+{
+  F: CompressedSNARK<E, S1, S2>,
+  ops: CompressedSNARK<E, S1, S2>,
+  scan: CompressedSNARK<E, S1, S2>,
+}
+
+impl<E, S1, S2> NebulaCompressedSNARK<E, S1, S2>
+where
+  E: CurveCycleEquipped,
+  S1: LinearizedR1CSSNARKTrait<E>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E>>,
+{
+  /// Setup the Prover and Verifier keys for the Nebula SNARK
+  pub fn setup<const M: usize>(
+    pp: &NebulaPublicParams<E, S1, S2, M>,
+  ) -> Result<(NebulaProverKey<E, S1, S2>, NebulaVerifierKey<E, S1, S2>), NovaError> {
+    let (F_pk, F_vk) = CompressedSNARK::<E, S1, S2>::setup(&pp.F())?;
+    let (ops_pk, ops_vk) = CompressedSNARK::<E, S1, S2>::setup(&pp.ops())?;
+    let (scan_pk, scan_vk) = CompressedSNARK::<E, S1, S2>::setup(&pp.scan())?;
+    Ok((
+      NebulaProverKey {
+        F: F_pk,
+        ops: ops_pk,
+        scan: scan_pk,
+      },
+      NebulaVerifierKey {
+        F: F_vk,
+        ops: ops_vk,
+        scan: scan_vk,
+      },
+    ))
+  }
+
+  /// produce a compressed proof for the Nebula SNARK
+  pub fn prove<const M: usize>(
+    pp: &NebulaPublicParams<E, S1, S2, M>,
+    pk: &NebulaProverKey<E, S1, S2>,
+    rs: &NebulaRecursiveSNARK<E>,
+  ) -> Result<NebulaCompressedSNARK<E, S1, S2>, NovaError> {
+    let F = CompressedSNARK::prove(&pp.F(), &pk.F, &rs.F)?;
+    let ops = CompressedSNARK::prove(&pp.ops(), &pk.ops, &rs.ops)?;
+    let scan = CompressedSNARK::prove(&pp.scan(), &pk.scan, &rs.scan)?;
+    Ok(NebulaCompressedSNARK { F, ops, scan })
+  }
+
+  /// verify a compressed proof for the Nebula SNARK
+  pub fn verify(
+    &self,
+    vk: &NebulaVerifierKey<E, S1, S2>,
+    U: &NebulaInstance<E>,
+  ) -> Result<(Vec<E::Scalar>, Vec<E::Scalar>), NovaError> {
+    self.F.verify(&vk.F, &U.F_z_0, U.F_num_steps)?;
+    let ops_z_i = self.ops.verify(&vk.ops, &U.ops_z_0, U.ops_num_steps)?;
+    let scan_z_i = self.scan.verify(&vk.scan, &U.scan_z_0, U.scan_num_steps)?;
+    Ok((ops_z_i, scan_z_i))
+  }
+}
 
 /// A SNARK that proves correct execution of a vm and that the vm maintained
 /// memory correctly.
@@ -74,7 +197,25 @@ impl<E, const M: usize> SimpleDigestible for NebulaPublicParams<E, M> where E: C
 /// The constant `M` is the number of memory operations per step in the vm.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct NebulaSNARK<E, const M: usize>
+pub enum NebulaSNARK<E, S1, S2, const M: usize>
+where
+  E: CurveCycleEquipped,
+  S1: LinearizedR1CSSNARKTrait<E>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E>>,
+{
+  /// RecursiveSNARK for vm execution
+  Recursive(Box<NebulaRecursiveSNARK<E>>),
+  /// CompressedSNARK for vm execution
+  Compressed(Box<NebulaCompressedSNARK<E, S1, S2>>),
+}
+
+/// A SNARK that proves correct execution of a vm and that the vm maintained
+/// memory correctly.
+///
+/// The constant `M` is the number of memory operations per step in the vm.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
+pub struct NebulaRecursiveSNARK<E>
 where
   E: CurveCycleEquipped,
 {
@@ -83,14 +224,19 @@ where
   scan: RecursiveSNARK<E>,
 }
 
-impl<E, const M: usize> NebulaSNARK<E, M>
+impl<E, S1, S2, const M: usize> NebulaSNARK<E, S1, S2, M>
 where
   E: CurveCycleEquipped,
   <E as Engine>::Scalar: PartialOrd,
+  S1: LinearizedR1CSSNARKTrait<E>,
+  S2: RelaxedR1CSSNARKTrait<Dual<E>>,
 {
   /// Fn used to obtain setup material for producing succinct arguments for
   /// WASM program executions
-  pub fn setup(F: &impl StepCircuit<E::Scalar>, step_size: StepSize) -> NebulaPublicParams<E, M> {
+  pub fn setup(
+    F: &impl StepCircuit<E::Scalar>,
+    step_size: StepSize,
+  ) -> NebulaPublicParams<E, S1, S2, M> {
     let ro_consts_circuit = ROConstantsCircuit::<Dual<E>>::default();
     let augmented_circuit_params = AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
     let F_pp = R1CSPublicParams::<E>::setup(F, &ro_consts_circuit, &augmented_circuit_params);
@@ -121,13 +267,14 @@ where
       ops: ops_pp,
       scan: scan_pp,
       digest: OnceCell::new(),
+      pk_and_vk: OnceCell::new(),
     }
   }
 
   /// Produce a SNARK that proves correct execution of a vm and that the vm maintained
   /// memory correctly.
   pub fn prove(
-    pp: &NebulaPublicParams<E, M>,
+    pp: &NebulaPublicParams<E, S1, S2, M>,
     step_size: StepSize,
     vm_multi_sets: VMMultiSets,
     F_engine: impl RecursiveSNARKEngine<E>,
@@ -162,44 +309,64 @@ where
       || ScanGrandProductEngine::new(init_memory, final_memory, gamma, alpha, step_size),
       &pp.scan(),
     )?;
+    let U = NebulaInstance {
+      F_z_0,
+      F_ic,
+      F_num_steps: F_rs.num_steps(),
+      ops_z_0,
+      ops_ic,
+      ops_num_steps: ops_rs.num_steps(),
+      scan_z_0,
+      scan_ic,
+      scan_num_steps: scan_rs.num_steps(),
+    };
     Ok((
-      Self {
+      Self::Recursive(Box::new(NebulaRecursiveSNARK {
         F: F_rs,
         ops: ops_rs,
         scan: scan_rs,
-      },
-      NebulaInstance {
-        F_z_0,
-        F_ic,
-        ops_z_0,
-        ops_ic,
-        scan_z_0,
-        scan_ic,
-      },
+      })),
+      U,
     ))
+  }
+
+  /// Apply Spartan on top of the Nebula IVC proofs
+  pub fn compress(&self, pp: &NebulaPublicParams<E, S1, S2, M>) -> Result<Self, NovaError> {
+    match self {
+      Self::Recursive(rs) => Ok(Self::Compressed(Box::new(NebulaCompressedSNARK::prove(
+        pp,
+        pp.pk(),
+        rs.as_ref(),
+      )?))),
+      Self::Compressed(..) => Err(NovaError::NotRecursive),
+    }
   }
 
   /// Verify the [`NebulaSNARK`]
   pub fn verify(
     &self,
-    pp: &NebulaPublicParams<E, M>,
+    pp: &NebulaPublicParams<E, S1, S2, M>,
     U: &NebulaInstance<E>,
   ) -> Result<(), NovaError> {
-    // verify F
-    self
-      .F
-      .verify(&pp.F(), self.F.num_steps(), &U.F_z_0, U.F_ic)?;
+    let (ops_z_i, scan_z_i) = match self {
+      Self::Recursive(rs) => {
+        // verify F
+        rs.F.verify(&pp.F(), rs.F.num_steps(), &U.F_z_0, U.F_ic)?;
 
-    // verify F_ops
-    let ops_z_i = self
-      .ops
-      .verify(&pp.ops(), self.ops.num_steps(), &U.ops_z_0, U.ops_ic)?;
+        // verify F_ops
+        let ops_z_i = rs
+          .ops
+          .verify(&pp.ops(), rs.ops.num_steps(), &U.ops_z_0, U.ops_ic)?;
 
-    // verify F_scan
-    let scan_z_i = self
-      .scan
-      .verify(&pp.scan(), self.scan.num_steps(), &U.scan_z_0, U.scan_ic)?;
+        // verify F_scan
+        let scan_z_i = rs
+          .scan
+          .verify(&pp.scan(), rs.scan.num_steps(), &U.scan_z_0, U.scan_ic)?;
 
+        (ops_z_i, scan_z_i)
+      }
+      Self::Compressed(spartan) => spartan.verify(pp.vk(), U)?,
+    };
     // 1. check h_IS = h_RS = h_WS = h_FS = 1 // initial values are correct
     let (init_h_is, init_h_rs, init_h_ws, init_h_fs) =
       { (U.scan_z_0[2], U.ops_z_0[3], U.ops_z_0[4], U.scan_z_0[3]) };
@@ -461,10 +628,13 @@ where
 {
   F_z_0: Vec<E::Scalar>,
   F_ic: IncrementalCommitment<E>,
+  F_num_steps: usize,
   ops_z_0: Vec<E::Scalar>,
   ops_ic: IncrementalCommitment<E>,
+  ops_num_steps: usize,
   scan_z_0: Vec<E::Scalar>,
   scan_ic: IncrementalCommitment<E>,
+  scan_num_steps: usize,
 }
 
 // IS, FS, RS, WS
