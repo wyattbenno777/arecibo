@@ -234,13 +234,6 @@ impl<E> PrimaryNIFS<E>
 where
   E: CurveCycleEquipped,
 {
-  /// Produces a default `PrimaryNIFS`
-  pub fn default() -> Self {
-    Self {
-      comm_T: Commitment::<E>::default(),
-    }
-  }
-
   /// Prover implementation for NIFS
   pub fn prove(
     ck: &CommitmentKey<E>,
@@ -294,6 +287,16 @@ where
   }
 }
 
+impl<E> Default for PrimaryNIFS<E>
+where
+  E: CurveCycleEquipped,
+{
+  fn default() -> Self {
+    Self {
+      comm_T: Commitment::<E>::default(),
+    }
+  }
+}
 /// NIFS for folding the primary relaxed r1cs instance and witness
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]

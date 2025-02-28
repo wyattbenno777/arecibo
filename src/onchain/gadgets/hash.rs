@@ -24,10 +24,10 @@ pub fn hash_U_i<E: CurveCycleEquipped, CS: ConstraintSystem<E::Scalar>>(
   ro.absorb(pp_hash);
   ro.absorb(i);
   for z in z_0 {
-    ro.absorb(&z);
+    ro.absorb(z);
   }
   for z in z_i {
-    ro.absorb(&z);
+    ro.absorb(z);
   }
   U_i.absorb_in_ro(cs.namespace(|| "U_i"), &mut ro)?;
   ro.absorb(prev_IC);

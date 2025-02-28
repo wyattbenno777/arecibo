@@ -62,8 +62,8 @@ pub fn get_decider_template_for_cyclefold_decider(
 
 impl From<NovaCycleFoldVerifierKey> for NovaCycleFoldDecider {
     fn from(value: NovaCycleFoldVerifierKey) -> Self {
-        let solidity_groth16_verifier_key = SolidityGroth16VerifierKey::from(value.g16_vk);
-        let solidity_kzg_verifier_key = SolidityKZGVerifierKey::from(value.kzg_vk);
+        let solidity_groth16_verifier_key = value.g16_vk;
+        let solidity_kzg_verifier_key = value.kzg_vk;
         let public_inputs_len = solidity_groth16_verifier_key.vk.ic.len();
         // let bits_per_limb = NonNativeUintVar::<Fq>::bits_per_limb();
         Self {

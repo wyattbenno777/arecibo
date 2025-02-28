@@ -21,8 +21,7 @@ impl EvalGadget {
     domain.ifft(&worker, &mut None).expect("FFT failed");
 
     // Evaluate the polynomial at the given point
-    let eval = domain.evaluate_at(point);
-    eval
+    domain.evaluate_at(point)
   }
 
   /// Evaluate a polynomial in circuit.

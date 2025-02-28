@@ -164,7 +164,7 @@ use super::circuit::TestChallengeCircuit;
     assert_eq!(circuit.U_i1.comm_W, U_i1_cmW);
     assert_eq!(circuit.U_i1.comm_E, U_i1_cmE);
 
-    let (kzg_challenges_w, kzg_challenges_e) = circuit.kzg_challenges.clone();
+    let (kzg_challenges_w, kzg_challenges_e) = circuit.kzg_challenges;
 
     let (kzg_proof_w, kzg_proof_e) = (
       KZGProof::prove(&kzg_pk, kzg_challenges_w, &circuit.W_i1.W[..]).unwrap(),
@@ -221,7 +221,7 @@ use super::circuit::TestChallengeCircuit;
     }
 
     let w = rs.r_U_primary.comm_W;
-    let circuit = BigNatCircuit { w: w.clone() };
+    let circuit = BigNatCircuit { w };
     let mut rng = thread_rng();
     let params = generate_random_parameters::<Bn256EngineKZG, _, _>(circuit.clone(), &mut rng)?;
     let groth16_proof = create_random_proof(circuit, &params, &mut rng)?;

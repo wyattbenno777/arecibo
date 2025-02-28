@@ -339,8 +339,8 @@ where
         assert_eq!(self.z_ab.len(), log_proofs);
         // z_ab
         for (x, y) in &self.z_ab {
-            write_gt::<E::Gt, _>(&mut out, &x)?;
-            write_gt::<E::Gt, _>(&mut out, &y)?;
+            write_gt::<E::Gt, _>(&mut out, x)?;
+            write_gt::<E::Gt, _>(&mut out, y)?;
         }
 
         assert_eq!(self.z_c.len(), log_proofs);

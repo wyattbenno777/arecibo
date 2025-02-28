@@ -38,9 +38,10 @@ impl TestChallengeCircuit {
       challenge_e,
     }
   }
+}
 
-  /// Create a new test challenge circuit with default values
-  pub fn default() -> Self {
+impl Default for TestChallengeCircuit {
+  fn default() -> Self {
     Self {
       relaxed_instance: RelaxedR1CSInstance {
         comm_W: Commitment::<Bn256EngineKZG>::default(),
@@ -53,6 +54,7 @@ impl TestChallengeCircuit {
     }
   }
 }
+
 impl Circuit<halo2curves::bn256::Fr> for TestChallengeCircuit {
   fn synthesize<CS: ConstraintSystem<halo2curves::bn256::Fr>>(
     self,
@@ -144,6 +146,13 @@ impl CubicFCircuit {
     Self {}
   }
 }
+
+impl Default for CubicFCircuit {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
 impl StepCircuit<halo2curves::bn256::Fr> for CubicFCircuit {
   fn arity(&self) -> usize {
     1

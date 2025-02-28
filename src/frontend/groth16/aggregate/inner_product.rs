@@ -23,7 +23,6 @@ pub(crate) fn pairing_miller_affine<E: MultiMillerLoop>(
     let pairs_ref: Vec<_> = left
         .iter()
         .zip(prepared.iter())
-        .map(|(a, b)| (a, b))
         .collect();
 
     Ok(E::multi_miller_loop(&pairs_ref))

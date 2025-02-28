@@ -30,7 +30,6 @@ impl FoldGadget {
   }
 
   /// Fold in-circuit field elements.
-
   pub fn fold_field_elements_gadget<CS, E: CurveCycleEquipped>(
     cs: &mut CS,
     pp_hash: AllocatedNum<<E as Engine>::Scalar>,

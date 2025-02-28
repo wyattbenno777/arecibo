@@ -154,7 +154,7 @@ where
     Ok(Self {
       arith: pp.circuit_shape_primary.r1cs_shape.clone(),
       cf_arith: pp.circuit_shape_cyclefold.r1cs_shape.clone(),
-      ro_consts: ro_consts,
+      ro_consts,
       pp_hash: pp.digest(),
       i: rs.i,
       prev_IC: rs.prev_IC,
