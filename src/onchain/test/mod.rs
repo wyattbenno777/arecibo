@@ -229,16 +229,12 @@ use super::circuit::TestChallengeCircuit;
 
     let (w_x, w_y) = {
       let (x, y, _id) = w.to_coordinates();
-      println!("x: {:?}", x);
-      println!("y: {:?}", y);
       let x_bignat = BigInt::from_bytes_le(Sign::Plus, &x.to_repr());
       let x_limbs = nat_to_limbs(&x_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
       let y_bignat = BigInt::from_bytes_le(Sign::Plus, &y.to_repr());
       let y_limbs = nat_to_limbs(&y_bignat, BN_LIMB_WIDTH, BN_N_LIMBS)?;
       (x_limbs, y_limbs)
     };
-    println!("w_x: {:?}", w_x);
-    println!("w_y: {:?}", w_y);
 
     let public_inputs = [&w_x[..], &w_y[..]].concat();
     let verified = verify_proof(&prepared_groth16_vk, &groth16_proof, &public_inputs)?;

@@ -86,6 +86,7 @@ flamegraph = ["pprof/flamegraph", "pprof/criterion"]
 opencl = []
 light_onchain_prover = []
 nightly = []
+solidity = []
 
 [profile.dev-ci]
 inherits = "dev"
