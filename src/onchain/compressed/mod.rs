@@ -133,7 +133,7 @@ impl CompressedSNARK {
     let circuit = VerifierCircuit::<Bn256EngineKZG>::new(pp, rs.clone())?;
     let rho = circuit.randomness;
     let nifs_proof = circuit.nifs_proof.clone();
-    let kzg_challenges = circuit.kzg_challenges.clone();
+    let kzg_challenges = circuit.kzg_challenges;
 
     let kzg_proofs = (
       KZGProof::prove(&pk.kzg_pk, kzg_challenges.0, &circuit.W_i1.W[..])?,

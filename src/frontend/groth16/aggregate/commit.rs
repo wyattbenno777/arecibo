@@ -2,23 +2,22 @@
 /// aggregation.
 /// The first one is a commitment scheme that commits to a single vector $a$ of
 /// length n in the second base group $G_1$ (for example):
-/// * it requires a structured SRS $v_1$ of the form $(h,h^u,h^{u^2}, ...
-/// ,g^{h^{n-1}})$ with $h \in G_2$ being a random generator of $G_2$ and $u$ a
-/// random scalar (coming from a power of tau ceremony for example)
+/// * it requires a structured SRS $v_1$ of the form $(h,h^u,h^{u^2}, 
+///   ...,g^{h^{n-1}})$ with $h \in G_2$ being a random generator of $G_2$ and $u$ a
+///   random scalar (coming from a power of tau ceremony for example)
 /// * it requires a second structured SRS $v_2$ of the form $(h,h^v,h^{v^2},
-/// ...$ with $v$ being a random scalar different than u (coming from another
-/// power of tau ceremony for example)
-/// The Commitment is a tuple $(\prod_{i=0}^{n-1} e(a_i,v_{1,i}),
-/// \prod_{i=0}^{n-1} e(a_i,v_{2,i}))$
+///   ...$ with $v$ being a random scalar different than u (coming from another
+///   power of tau ceremony for example)
+///   The Commitment is a tuple $(\prod_{i=0}^{n-1} e(a_i,v_{1,i}),
+///   \prod_{i=0}^{n-1} e(a_i,v_{2,i}))$
 ///
 /// The second one takes two vectors $a \in G_1^n$ and $b \in G_2^n$ and commits
 /// to them using a similar approach as above. It requires an additional SRS
 /// though:
 /// * $v_1$ and $v_2$ stay the same
 /// * An additional tuple $w_1 = (g^{u^n},g^{u^{n+1}},...g^{u^{2n-1}})$ and $w_2 =
-/// (g^{v^n},g^{v^{n+1},...,g^{v^{2n-1}})$ where $g$ is a random generator of
-/// $G_1$
-/// The commitment scheme returns a tuple:
+///   (g^{v^n},g^{v^{n+1},...,g^{v^{2n-1}})$ where $g$ is a random generator of $G_1$
+///   The commitment scheme returns a tuple:
 /// * $\prod_{i=0}^{n-1} e(a_i,v_{1,i})e(w_{1,i},b_i)$
 /// * $\prod_{i=0}^{n-1} e(a_i,v_{2,i})e(w_{2,i},b_i)$
 ///

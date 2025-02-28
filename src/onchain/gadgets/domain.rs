@@ -228,12 +228,11 @@ impl<F: PrimeField> VanishingPolynomial<F> {
   /// returns a VanishingPolynomial of coset `H = h<g>`.
   pub fn new(offset: F, dim_h: u64) -> Self {
     let order_h = 1 << dim_h;
-    let vp = VanishingPolynomial {
+    VanishingPolynomial {
       constant_term: offset.pow([order_h]),
       dim_h,
       order_h,
-    };
-    vp
+    }
   }
 
   /// Evaluates the vanishing polynomial without generating the constraints.
@@ -253,7 +252,7 @@ impl<F: PrimeField> VanishingPolynomial<F> {
   ) -> Result<AllocatedNum<F>, SynthesisError> {
     if self.dim_h == 1 {
       // Allocate the result
-      let res = AllocatedNum::alloc(cs.namespace(|| format!("trivial case")), || {
+      let res = AllocatedNum::alloc(cs.namespace(|| "trivial case"), || {
         Ok(F::ZERO)
       })?;
       return Ok(res);
@@ -408,8 +407,8 @@ impl<F: PrimeField> LagrangeInterpolator<F> {
   pub fn interpolate(&self, interpolation_point: F) -> F {
     let lagrange_coeffs = self.compute_lagrange_coefficients(interpolation_point);
     let mut interpolation = F::ZERO;
-    for i in 0..self.domain_order {
-      interpolation.add_assign(&(lagrange_coeffs[i] * self.poly_evaluations[i]));
+    for (i, coeff) in lagrange_coeffs.iter().enumerate().take(self.domain_order) {
+      interpolation.add_assign(&(*coeff * self.poly_evaluations[i]));
     }
     interpolation
   }

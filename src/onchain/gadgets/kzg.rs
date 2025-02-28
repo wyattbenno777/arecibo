@@ -112,7 +112,7 @@ e evaluation domain");
     };
 
     let proof = E::G1::vartime_multiscalar_mul(
-      &witness_poly.coeffs(),
+      witness_poly.coeffs(),
       &pk.powers_of_g()[..witness_poly.coeffs().len()],
     );
 

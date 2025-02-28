@@ -196,13 +196,13 @@ where
 
 /// PairingCheck represents a check of the form e(A,B)e(C,D)... = T. Checks can
 /// be aggregated together using random linear combination. The efficiency comes
-/// from keeping the results from the miller loop output before proceding to a final
+/// from keeping the results from the miller loop output before proceeding to a final
 /// exponentiation when verifying if all checks are verified.
 /// It is a tuple:
 /// - a miller loop result that is to be multiplied by other miller loop results
-/// before going into a final exponentiation result
+///   before going into a final exponentiation result
 /// - a right side result which is already in the right subgroup Gt which is to
-/// be compared to the left side when "final_exponentiatiat"-ed
+///   be compared to the left side when "final_exponentiatiat"-ed
 #[derive(Debug)]
 struct PairingCheck<E>
 where

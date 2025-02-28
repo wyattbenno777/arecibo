@@ -107,9 +107,7 @@ fn parse_hex_string_to_u8_vec(hex_str: &str) -> Vec<u8> {
     let hex_str = &hex_str[2..];
 
     // Convert the hex string to bytes
-    let bytes = hex::decode(hex_str).expect("Invalid hex string");
-
-    bytes
+    hex::decode(hex_str).expect("Invalid hex string")
 }
 /// Compute the n-th root of unity for a given field
 /// Returns None if the n-th root of unity doesn't exist
@@ -125,10 +123,10 @@ pub fn nth_root_of_unity<F: PrimeField>(n: usize) -> Option<F> {
     let cofactor = (modulus - BigUint::from(1u32)) / BigUint::from(n);
     
     // Compute generator^(modulus-1)/n
-    let root = F::MULTIPLICATIVE_GENERATOR.pow(&cofactor.to_u64_digits());
+    let root = F::MULTIPLICATIVE_GENERATOR.pow(cofactor.to_u64_digits());
 
     // Verify the order is correct: root^n should = 1 and root^(n-1) should != 1
-    if root.pow(&[n as u64]) != F::ONE || root.pow(&[(n-1) as u64]) == F::ONE {
+    if root.pow([n as u64]) != F::ONE || root.pow([(n-1) as u64]) == F::ONE {
         return None;
     }
 

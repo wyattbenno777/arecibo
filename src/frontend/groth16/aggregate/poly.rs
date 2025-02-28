@@ -63,7 +63,7 @@ impl<F: Field> DensePolynomial<F> {
             assert!(self
                 .coeffs
                 .last()
-                .map_or(false, |coeff| !bool::from(coeff.is_zero())));
+                .is_some_and(|coeff| !bool::from(coeff.is_zero())));
             self.coeffs.len() - 1
         }
     }
@@ -80,7 +80,7 @@ impl<F: Field> DensePolynomial<F> {
 
     /// Truncate leading zeros
     fn truncate_leading_zeros(&mut self) {
-        while self.coeffs.last().map_or(false, |c| c.is_zero().into()) {
+        while self.coeffs.last().is_some_and(|c| c.is_zero().into()) {
             self.coeffs.pop();
         }
     }
@@ -119,7 +119,7 @@ impl<F: Field> DensePolynomial<F> {
     }
 }
 
-impl<'a, 'b, F: Field> Sub<&'a DensePolynomial<F>> for &'b DensePolynomial<F> {
+impl<'a, F: Field> Sub<&'a DensePolynomial<F>> for DensePolynomial<F> {
     type Output = DensePolynomial<F>;
 
     fn sub(self, other: &'a DensePolynomial<F>) -> DensePolynomial<F> {
@@ -150,7 +150,7 @@ impl<'a, 'b, F: Field> Sub<&'a DensePolynomial<F>> for &'b DensePolynomial<F> {
     }
 }
 
-impl<'a, 'b, F: Field> Div<&'a DensePolynomial<F>> for &'b DensePolynomial<F> {
+impl<'a, F: Field> Div<&'a DensePolynomial<F>> for DensePolynomial<F> {
     type Output = DensePolynomial<F>;
 
     fn div(self, divisor: &'a DensePolynomial<F>) -> DensePolynomial<F> {

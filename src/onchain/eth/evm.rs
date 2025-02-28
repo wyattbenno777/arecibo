@@ -87,7 +87,7 @@ pub struct Evm<'a> {
 }
 
 
-impl<'a> Default for Evm<'a> {
+impl Default for Evm<'_> {
     fn default() -> Self {
         Self {
             evm: EvmBuilder::default().with_db(InMemoryDB::default()).build(),
@@ -95,7 +95,7 @@ impl<'a> Default for Evm<'a> {
     }
 }
 
-impl<'a> Evm<'a> {
+impl Evm<'_> {
     /// Apply create transaction with given `bytecode` as creation bytecode.
     /// Return created `address`.
     ///

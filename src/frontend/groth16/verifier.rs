@@ -12,8 +12,6 @@ use crate::frontend::{le_bytes_to_u64s, SynthesisError};
 pub fn prepare_verifying_key<E: Engine + MultiMillerLoop>(
     vk: &VerifyingKey<E>,
 ) -> PreparedVerifyingKey<E>
-where
-    E: MultiMillerLoop,
 {
     let neg_gamma = -vk.gamma_g2;
     let neg_delta = -vk.delta_g2;
@@ -148,7 +146,7 @@ where
         let mut repr_u64s = le_bytes_to_u64s(repr.as_ref());
         assert!(repr_u64s.len() > 1);
 
-        repr_u64s[0] = (t & (-1i64 as u128) >> 64) as u64;
+        repr_u64s[0] = (t & ((-1i64 as u128) >> 64)) as u64;
         repr_u64s[1] = (t >> 64) as u64;
 
         for (i, limb) in repr_u64s.iter().enumerate() {

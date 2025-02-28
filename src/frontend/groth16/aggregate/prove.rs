@@ -145,7 +145,7 @@ where
 }
 
 /// Aggregate `n` zkSnark proofs, where `n` must be a power of two.
-pub fn aggregate_proofs_and_instances<E: Engine + std::fmt::Debug>(
+pub fn aggregate_proofs_and_instances<E>(
     srs: &ProverSRSInputAggregation<E>,
     transcript_include: &[u8],
     statements: &[Vec<E::Fr>],
@@ -153,7 +153,7 @@ pub fn aggregate_proofs_and_instances<E: Engine + std::fmt::Debug>(
     version: AggregateVersion,
 ) -> Result<AggregateProofAndInstance<E>, SynthesisError>
 where
-    E: MultiMillerLoop + std::fmt::Debug,
+    E: Engine + MultiMillerLoop + std::fmt::Debug,
     E::Fr: Serialize,
     <E::Fr as PrimeField>::Repr: Send + Sync,
     <E as Engine>::Gt: GroupEncoding + Serialize,
@@ -680,7 +680,7 @@ fn create_kzg_opening_for_instance<E: Engine>(
     let neg_kzg_challenge = -*kzg_challenge;
 
     // f_v(X) - f_v(z) / (X - z)
-    let quotient_polynomial = &(&poly - &DensePolynomial::from_coeffs(vec![eval_poly]))
+    let quotient_polynomial = (poly - &DensePolynomial::from_coeffs(vec![eval_poly]))
         / &(DensePolynomial::from_coeffs(vec![neg_kzg_challenge, E::Fr::ONE]));
 
     let quotient_polynomial_coeffs = quotient_polynomial.into_coeffs();
@@ -721,7 +721,7 @@ where
     }
 
     // f_v(X) - f_v(z) / (X - z)
-    let quotient_polynomial = &(&poly - &DensePolynomial::from_coeffs(vec![eval_poly]))
+    let quotient_polynomial = (poly - &DensePolynomial::from_coeffs(vec![eval_poly]))
         / &(DensePolynomial::from_coeffs(vec![neg_kzg_challenge, G::Scalar::ONE]));
 
     let quotient_polynomial_coeffs = quotient_polynomial.into_coeffs();

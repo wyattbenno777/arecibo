@@ -13,8 +13,8 @@ pub enum ScalarList<'a, G: PrimeCurveAffine, F: Fn(usize) -> <G::Scalar as Prime
     Getter(F, usize),
 }
 
-impl<'a, G: PrimeCurveAffine, F: Fn(usize) -> <G::Scalar as PrimeField>::Repr>
-    ScalarList<'a, G, F>
+impl<G: PrimeCurveAffine, F: Fn(usize) -> <G::Scalar as PrimeField>::Repr>
+    ScalarList<'_, G, F>
 {
     pub fn len(&self) -> usize {
         match self {
@@ -173,7 +173,7 @@ pub fn multiscalar<G: PrimeCurveAffine>(
     let mut result = G::Curve::identity();
 
     // nbits must be evenly divided by window_size!
-    let num_windows = (nbits + precomp_table.window_size() - 1) / precomp_table.window_size();
+    let num_windows = nbits.div_ceil(precomp_table.window_size());
     let mut idx;
 
     // This version prefetches the next window and computes on the previous window.
@@ -191,7 +191,7 @@ pub fn multiscalar<G: PrimeCurveAffine>(
         for (m, point) in k.iter().enumerate() {
             let point_limb =
                 u64::from_le_bytes(point.as_ref()[limb * 8..(limb + 1) * 8].try_into().unwrap());
-            idx = point_limb >> (window_in_limb * precomp_table.window_size())
+            idx = (point_limb >> (window_in_limb * precomp_table.window_size()))
                 & precomp_table.window_mask();
             if idx > 0 {
                 table = &precomp_table.tables()[m];
@@ -238,7 +238,7 @@ where
         chunk_size = 1; // fallback for tests and tiny inputs
     }
 
-    let num_parts = (num_points + chunk_size - 1) / chunk_size;
+    let num_parts = num_points.div_ceil(chunk_size);
 
     (0..num_parts)
         .into_par_iter()
