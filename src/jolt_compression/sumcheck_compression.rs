@@ -196,13 +196,14 @@ mod tests {
       sumcheck::SumcheckProof,
     }, traits::{Engine, TranscriptEngineTrait}
   };
-  use halo2curves::bn256::Fr;
+  use group::{Curve, Group};
+  use halo2curves::bn256::{Fr, G1};
   use rand::{Rng, thread_rng};
 
   #[test]
   fn test_sumcheck_compression() {
     let ns = [2, 4, 8, 16];
-    let num_tries = 10;
+    let num_tries = 100;
 
     for &n in &ns {
       for t in 0..num_tries {
@@ -261,6 +262,95 @@ mod tests {
         let verified = verify_proof(&pvk, &compressed_proof.proof, &[claim]).unwrap();
 
         assert!(verified, "Compressed proof verification failed for n={}", n);
+      }
+    }
+  }
+
+  #[test]
+  fn test_sumcheck_compression_soundness() {
+    let ns = [2, 4, 8, 16];
+    let num_tries = 100;
+
+    for &n in &ns {
+      for t in 0..num_tries {
+        println!("Testing n={} ({}/{})...", n, t+1, num_tries);
+        // Generate random polynomials A and B
+        let mut rng = thread_rng();
+        let size = 1 << n;
+
+        let mut poly_a = MultilinearPolynomial::new(
+          (0..size).map(|_| Fr::from(rng.gen_range(1..10) as u64)).collect()
+        );
+
+        let mut poly_b = MultilinearPolynomial::new(
+          (0..size).map(|_| Fr::from(rng.gen_range(1..10) as u64)).collect()
+        );
+
+        // Define the combination function (a * b)
+        let comb_func = |a: &Fr, b: &Fr| *a * *b;
+
+        // Calculate the claim (sum of all a_i * b_i)
+        let claim = (0..size)
+          .map(|i| comb_func(&poly_a[i], &poly_b[i]))
+          .fold(Fr::zero(), |acc, val| acc + val);
+
+        let num_rounds = n;
+        let degree_bound = 2; // For quadratic polynomials
+
+        // Create a transcript for the proof
+        let mut transcript = <Bn256EngineKZG as Engine>::TE::new(b"test");
+
+        // Generate the sumcheck proof
+        let (proof, r, _) = SumcheckProof::prove_quad(
+          &claim,
+          num_rounds,
+          &mut poly_a,
+          &mut poly_b,
+          comb_func,
+          &mut transcript,
+        ).unwrap();
+
+        // Verify the original proof
+        let mut verify_transcript = <Bn256EngineKZG as Engine>::TE::new(b"test");
+        assert!(proof.verify(claim, num_rounds, degree_bound, &mut verify_transcript).is_ok());
+
+        // Compress the proof
+        let (compressed_proof, params) = SumcheckCompression::compress_proof(
+          &proof,
+          claim,
+          num_rounds,
+          degree_bound,
+          r.clone(),
+        ).unwrap();
+
+        // Verify the compressed proof for invalid claim
+        let pvk = prepare_verifying_key(&params.vk);
+        let invalid_claim = claim + Fr::one();
+        let invalid_claim_verified = verify_proof(&pvk, &compressed_proof.proof, &[invalid_claim]).unwrap();
+        assert!(!invalid_claim_verified, "Compressed proof verification should failed, but succeeded for n={}", n);
+
+        // Verify the compressed proof for invalid proof
+        let invalid_proof = Proof {
+          a: compressed_proof.proof.a,
+          b: compressed_proof.proof.b,
+          c: G1::random(&mut rng).to_affine(),
+        };
+        let invalid_proof_verified = verify_proof(&pvk, &invalid_proof, &[claim]).unwrap();
+        assert!(!invalid_proof_verified, "Compressed proof verification should failed, but succeeded for n={}", n);
+
+        // Try compressing to the invalid sumcheck proof and verify it
+        let invalid_sumcheck_proof = SumcheckProof::<Bn256EngineKZG>::new(proof.compressed_polys.clone().into_iter().map(|poly| {
+          poly.clone().decompress(&(claim + Fr::one())).compress()
+        }).collect());
+        let compressed_invalid_proof = SumcheckCompression::compress_proof(
+          &invalid_sumcheck_proof,
+          claim,
+          num_rounds,
+          degree_bound,
+          r,
+        ).unwrap();
+        let invalid_compressed_proof_verified = verify_proof(&pvk, &compressed_invalid_proof.0.proof, &[claim]).unwrap();
+        assert!(!invalid_compressed_proof_verified, "Compressed proof verification should failed, but succeeded for n={}", n);
       }
     }
   }
