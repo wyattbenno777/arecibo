@@ -199,25 +199,38 @@ mod tests {
   use group::{Curve, Group};
   use halo2curves::bn256::{Fr, G1};
   use rand::{Rng, thread_rng};
+  use rayon::prelude::*;
+  use std::time::Instant;
 
   #[test]
-  fn test_sumcheck_compression() {
+  fn test_sumcheck_compression_completeness() {
     let ns = [2, 4, 8, 16];
     let num_tries = 100;
 
     for &n in &ns {
       for t in 0..num_tries {
+        let start = Instant::now();
         println!("Testing n={} ({}/{})...", n, t+1, num_tries);
-        // Generate random polynomials A and B
-        let mut rng = thread_rng();
         let size = 1 << n;
 
         let mut poly_a = MultilinearPolynomial::new(
-          (0..size).map(|_| Fr::from(rng.gen_range(1..10) as u64)).collect()
+          (0..size)
+            .into_par_iter()
+            .map(|_| {
+                let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+                Fr::from(rng.gen_range(1..10) as u64)
+            })
+            .collect()
         );
 
         let mut poly_b = MultilinearPolynomial::new(
-          (0..size).map(|_| Fr::from(rng.gen_range(1..10) as u64)).collect()
+          (0..size)
+            .into_par_iter()
+            .map(|_| {
+                let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+                Fr::from(rng.gen_range(1..10) as u64)
+            })
+            .collect()
         );
 
         // Define the combination function (a * b)
@@ -225,8 +238,9 @@ mod tests {
 
         // Calculate the claim (sum of all a_i * b_i)
         let claim = (0..size)
+          .into_par_iter()
           .map(|i| comb_func(&poly_a[i], &poly_b[i]))
-          .fold(Fr::zero(), |acc, val| acc + val);
+          .reduce(|| Fr::zero(), |acc, val| acc + val);
 
         let num_rounds = n;
         let degree_bound = 2; // For quadratic polynomials
@@ -262,6 +276,8 @@ mod tests {
         let verified = verify_proof(&pvk, &compressed_proof.proof, &[claim]).unwrap();
 
         assert!(verified, "Compressed proof verification failed for n={}", n);
+        let end = Instant::now();
+        println!("Time elapsed: {:?}", end.duration_since(start));
       }
     }
   }
@@ -273,17 +289,30 @@ mod tests {
 
     for &n in &ns {
       for t in 0..num_tries {
+        let start = Instant::now();
         println!("Testing n={} ({}/{})...", n, t+1, num_tries);
         // Generate random polynomials A and B
         let mut rng = thread_rng();
         let size = 1 << n;
 
         let mut poly_a = MultilinearPolynomial::new(
-          (0..size).map(|_| Fr::from(rng.gen_range(1..10) as u64)).collect()
+          (0..size)
+            .into_par_iter()
+            .map(|_| {
+                let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+                Fr::from(rng.gen_range(1..10) as u64)
+            })
+            .collect()
         );
 
         let mut poly_b = MultilinearPolynomial::new(
-          (0..size).map(|_| Fr::from(rng.gen_range(1..10) as u64)).collect()
+          (0..size)
+            .into_par_iter()
+            .map(|_| {
+                let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+                Fr::from(rng.gen_range(1..10) as u64)
+            })
+            .collect()
         );
 
         // Define the combination function (a * b)
@@ -291,8 +320,9 @@ mod tests {
 
         // Calculate the claim (sum of all a_i * b_i)
         let claim = (0..size)
+          .into_par_iter()
           .map(|i| comb_func(&poly_a[i], &poly_b[i]))
-          .fold(Fr::zero(), |acc, val| acc + val);
+          .reduce(|| Fr::zero(), |acc, val| acc + val);
 
         let num_rounds = n;
         let degree_bound = 2; // For quadratic polynomials
@@ -339,7 +369,7 @@ mod tests {
         assert!(!invalid_proof_verified, "Compressed proof verification should failed, but succeeded for n={}", n);
 
         // Try compressing to the invalid sumcheck proof and verify it
-        let invalid_sumcheck_proof = SumcheckProof::<Bn256EngineKZG>::new(proof.compressed_polys.clone().into_iter().map(|poly| {
+        let invalid_sumcheck_proof = SumcheckProof::<Bn256EngineKZG>::new(proof.compressed_polys.clone().into_par_iter().map(|poly| {
           poly.clone().decompress(&(claim + Fr::one())).compress()
         }).collect());
         let compressed_invalid_proof = SumcheckCompression::compress_proof(
@@ -351,6 +381,8 @@ mod tests {
         ).unwrap();
         let invalid_compressed_proof_verified = verify_proof(&pvk, &compressed_invalid_proof.0.proof, &[claim]).unwrap();
         assert!(!invalid_compressed_proof_verified, "Compressed proof verification should failed, but succeeded for n={}", n);
+        let end = Instant::now();
+        println!("Time elapsed: {:?}", end.duration_since(start));
       }
     }
   }
