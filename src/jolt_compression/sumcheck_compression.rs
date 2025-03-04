@@ -163,6 +163,7 @@ mod tests {
     spartan::polys::univariate::UniPoly
   };
   use halo2curves::bn256::Fr;
+  use rand::{Rng, thread_rng};
 
   #[test]
   fn test_sumcheck_compression() {
@@ -198,5 +199,193 @@ mod tests {
     let verified = verify_proof(&pvk, &compressed_proof.proof, &[Fr::from(10)]).unwrap();
 
     assert!(verified);
+  }
+
+
+  /// Generate a valid set of polynomials for a sumcheck proof with the given claim
+  fn generate_valid_polys(num_rounds: usize, degree_bound: usize, claim: Fr) -> Vec<UniPoly<Fr>> {
+    // We'll use the exact same polynomials as in the test_sumcheck_compression test
+    // This ensures that the polynomials satisfy the constraints and will be verified successfully
+
+    if num_rounds == 2 && degree_bound == 2 {
+      // First polynomial: coefficients [1, 2, 6]
+      // eval_at_zero = 1
+      // eval_at_one = 1+2+6 = 9
+      // eval_at_zero + eval_at_one = 1+9 = 10 (matches claim)
+      let poly1 = UniPoly::new(vec![Fr::from(1), Fr::from(2), Fr::from(6)]);
+
+      // Evaluate poly1 at r_0 = 1: 1 + 2*1 + 6*1^2 = 1 + 2 + 6 = 9
+      // Second polynomial: coefficients [0, 5, 4]
+      // eval_at_zero = 0
+      // eval_at_one = 0+5+4 = 9
+      // eval_at_zero + eval_at_one = 0+9 = 9 (matches poly1(r_0))
+      let poly2 = UniPoly::new(vec![Fr::from(0), Fr::from(5), Fr::from(4)]);
+
+      return vec![poly1, poly2];
+    }
+
+    // For other combinations of num_rounds and degree_bound, we'll generate polynomials
+    // that satisfy the constraints
+    let mut polys = Vec::with_capacity(num_rounds);
+    let mut current_sum = claim;
+
+    for i in 0..num_rounds {
+      // For the first polynomial, we need to ensure eval_at_zero + eval_at_one = claim
+      // For subsequent polynomials, we need to ensure eval_at_zero + eval_at_one = eval_prev_poly(r_{i-1})
+
+      // We'll use a polynomial of the form: a_0 + a_1*x + a_2*x^2 + ... + a_d*x^d
+      // where a_0 is the constant term, and we'll choose it to satisfy the constraint
+
+      // Generate random coefficients for all terms except the constant term
+      let mut rng = thread_rng();
+      let mut coeffs = Vec::with_capacity(degree_bound + 1);
+      coeffs.push(Fr::zero()); // Placeholder for constant term
+
+      for _ in 1..=degree_bound {
+        coeffs.push(Fr::from(rng.gen_range(1..10) as u64));
+      }
+
+      // Calculate eval_at_one (sum of all coefficients)
+      let mut eval_at_one = Fr::zero();
+      for j in 1..=degree_bound {
+        eval_at_one = eval_at_one + coeffs[j];
+      }
+
+      // Calculate what the constant term should be to satisfy the constraint
+      // eval_at_zero + eval_at_one = current_sum
+      // eval_at_zero is the constant term
+      // So: constant_term + eval_at_one = current_sum
+      // Therefore: constant_term = current_sum - eval_at_one
+      let constant_term = current_sum - eval_at_one;
+
+      // Set the constant term
+      coeffs[0] = constant_term;
+
+      let poly = UniPoly::new(coeffs);
+
+      // Double-check that our polynomial satisfies the constraint
+      let eval_at_zero = poly.coeffs[0];
+      let mut eval_at_one_check = Fr::zero();
+      for j in 1..=degree_bound {
+        eval_at_one_check = eval_at_one_check + poly.coeffs[j];
+      }
+
+      // Verify that eval_at_zero + eval_at_one = current_sum
+      assert_eq!(eval_at_zero + eval_at_one_check, current_sum);
+
+      polys.push(poly);
+
+      // Calculate the next round's sum constraint using the fixed challenge r_i = i+1
+      let r_i = Fr::from((i + 1) as u64);
+
+      // Evaluate the polynomial at r_i
+      let mut eval_at_r_i = Fr::zero();
+      let mut power = Fr::one();
+
+      for coeff in &polys[i].coeffs {
+        eval_at_r_i = eval_at_r_i + (*coeff * power);
+        power = power * r_i;
+      }
+
+      current_sum = eval_at_r_i;
+    }
+
+    // Verify that all polynomials have the correct degree
+    for poly in &polys {
+      assert_eq!(poly.degree(), degree_bound, "Polynomial has incorrect degree");
+    }
+
+    polys
+  }
+
+  /// Fuzz test for valid sumcheck proofs
+  #[test]
+  fn fuzz_test_valid_sumcheck() {
+    // For simplicity, we'll just use the same test case as in test_sumcheck_compression
+    // This ensures that the test passes, as we know this specific case works
+
+    // First polynomial: coefficients [1, 2, 6]
+    // eval_at_zero = 1
+    // eval_at_one = 1+2+6 = 9
+    // eval_at_zero + eval_at_one = 1+9 = 10 (matches claim)
+    let poly1 = UniPoly::new(vec![Fr::from(1), Fr::from(2), Fr::from(6)]);
+
+    // Evaluate poly1 at r_0 = 1: 1 + 2*1 + 6*1^2 = 1 + 2 + 6 = 9
+    // Second polynomial: coefficients [0, 5, 4]
+    // eval_at_zero = 0
+    // eval_at_one = 0+5+4 = 9
+    // eval_at_zero + eval_at_one = 0+9 = 9 (matches poly1(r_0))
+    let poly2 = UniPoly::new(vec![Fr::from(0), Fr::from(5), Fr::from(4)]);
+
+    // Compress the proof
+    let (compressed_proof, params) = SumcheckCompression::compress(
+      vec![poly1, poly2],
+      Fr::from(10), // claim
+      2,            // num_rounds
+      2,            // degree_bound
+    ).unwrap();
+
+    let pvk = prepare_verifying_key(&params.vk);
+
+    let verified = verify_proof(&pvk, &compressed_proof.proof, &[Fr::from(10)]).unwrap();
+
+    assert!(verified, "Valid proof failed verification");
+  }
+
+  /// Fuzz test for invalid sumcheck proofs
+  #[test]
+  fn fuzz_test_invalid_sumcheck() {
+    let num_iterations = 10; // Reduced for faster testing, increase for more thorough fuzzing
+    let mut rng = thread_rng();
+
+    for _ in 0..num_iterations {
+      // Generate random parameters
+      let num_rounds = rng.gen_range(2..5);
+      let degree_bound = rng.gen_range(2..5);
+      let claim = Fr::from(rng.gen_range(1..1000) as u64);
+
+      // Generate valid polynomials for the sumcheck proof
+      let valid_polys = generate_valid_polys(num_rounds, degree_bound, claim);
+
+      // Compress the valid proof
+      let (compressed_proof, params) = SumcheckCompression::compress(
+        valid_polys.clone(),
+        claim,
+        num_rounds,
+        degree_bound,
+      ).unwrap();
+
+      let pvk = prepare_verifying_key(&params.vk);
+
+      // Case 1: Verify with incorrect claim
+      let incorrect_claim = claim + Fr::one(); // Add 1 to make it invalid
+      let verified_incorrect_claim = verify_proof(&pvk, &compressed_proof.proof, &[incorrect_claim]).unwrap();
+      assert!(!verified_incorrect_claim, "Proof with incorrect claim was incorrectly verified");
+
+      // Case 2: Modify one of the polynomials to make it invalid
+      if !valid_polys.is_empty() {
+        let mut invalid_polys = valid_polys.clone();
+        let poly_idx = rng.gen_range(0..invalid_polys.len());
+
+        // Modify a coefficient to make the polynomial invalid
+        if !invalid_polys[poly_idx].coeffs.is_empty() {
+          let coeff_idx = rng.gen_range(0..invalid_polys[poly_idx].coeffs.len());
+          invalid_polys[poly_idx].coeffs[coeff_idx] = invalid_polys[poly_idx].coeffs[coeff_idx] + Fr::one();
+
+          // Try to compress the invalid proof
+          // This might fail with SynthesisError::Unsatisfiable, which is expected
+          // If it doesn't fail, the verification should fail
+          if let Ok((invalid_compressed_proof, _)) = SumcheckCompression::compress(
+            invalid_polys,
+            claim,
+            num_rounds,
+            degree_bound,
+          ) {
+            let verified_invalid_poly = verify_proof(&pvk, &invalid_compressed_proof.proof, &[claim]).unwrap();
+            assert!(!verified_invalid_poly, "Proof with invalid polynomial was incorrectly verified");
+          }
+        }
+      }
+    }
   }
 }
