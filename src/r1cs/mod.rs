@@ -510,7 +510,6 @@ impl<E: Engine> R1CSShape<E> {
     );
 
     let comm_T = comm_AZ_1_circ_BZ_2 + comm_AZ_2_circ_BZ_1 - ((comm_CZ_2 * U1.u) + *comm_CZ_1);
-    assert!(comm_T == CE::<E>::commit(ck, &T, r_T));
     Ok((T, comm_T, comm_CZ_2))
   }
 
