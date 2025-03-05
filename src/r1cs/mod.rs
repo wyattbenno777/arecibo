@@ -493,9 +493,9 @@ impl<E: Engine> R1CSShape<E> {
     let u = U1.u;
     let T = AZ_1_circ_BZ_2
       .par_iter()
-      .zip(&AZ_2_circ_BZ_1)
-      .zip(&CZ_2)
-      .zip(&CZ_1)
+      .zip(AZ_2_circ_BZ_1.par_iter())
+      .zip(CZ_2.par_iter())
+      .zip(CZ_1.par_iter())
       .map(|(((az, bz), cz_2), cz_1)| *az + *bz - *cz_2 * u - *cz_1)
       .collect::<Vec<E::Scalar>>();
 
