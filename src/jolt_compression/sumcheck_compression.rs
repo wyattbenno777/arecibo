@@ -31,11 +31,6 @@ impl<E: Engine> Circuit<E::Scalar> for SumcheckVerifierCircuit<E> {
     let claim = AllocatedNum::alloc_input(cs.namespace(|| "claim"), || Ok(self.claim))?;
     let num_rounds = self.polys.len();
 
-    // Verify that there is a challenge for each round
-    if self.r.len() != num_rounds {
-      return Err(SynthesisError::Unsatisfiable);
-    }
-
     // Start with the initial claim
     let mut e = claim;
 
@@ -128,7 +123,6 @@ impl SumcheckCompression {
     polys: Vec<UniPoly<Fr>>,
     claim: Fr,
     degree_bound: usize,
-    r: Vec<Fr>,
   ) -> Result<(Self, Parameters<Bn256EngineKZG>), SynthesisError> {
     // Create the circuit for verifying the sumcheck proof
     let circuit = SumcheckVerifierCircuit::<Bn256EngineKZG> {
@@ -174,7 +168,7 @@ impl SumcheckCompression {
       polys.push(poly.clone());
     }
 
-    Self::compress(polys, claim, degree_bound, r)
+    Self::compress(polys, claim, degree_bound)
   }
 }
 
