@@ -479,7 +479,7 @@ impl<E: Engine> R1CSShape<E> {
       self.multiply_vec(&Z2)?
     };
 
-    let (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1, u_1_cdot_CZ_2, u_2_cdot_CZ_1) = {
+    let (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1) = {
       let AZ_1_circ_BZ_2 = (0..AZ_1.len())
         .into_par_iter()
         .map(|i| AZ_1[i] * BZ_2[i])
@@ -488,23 +488,15 @@ impl<E: Engine> R1CSShape<E> {
         .into_par_iter()
         .map(|i| AZ_2[i] * BZ_1[i])
         .collect::<Vec<E::Scalar>>();
-      let u_1_cdot_CZ_2 = (0..CZ_2.len())
-        .into_par_iter()
-        .map(|i| U1.u * CZ_2[i])
-        .collect::<Vec<E::Scalar>>();
-      let u_2_cdot_CZ_1 = (0..CZ_1.len())
-        .into_par_iter()
-        .map(|i| CZ_1[i])
-        .collect::<Vec<E::Scalar>>();
-      (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1, u_1_cdot_CZ_2, u_2_cdot_CZ_1)
+      (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1)
     };
-
+    let u = U1.u;
     let T = AZ_1_circ_BZ_2
       .par_iter()
       .zip(&AZ_2_circ_BZ_1)
-      .zip(&u_1_cdot_CZ_2)
-      .zip(&u_2_cdot_CZ_1)
-      .map(|(((a, b), c), d)| *a + *b - *c - *d)
+      .zip(&CZ_2)
+      .zip(&CZ_1)
+      .map(|(((az, bz), cz_2), cz_1)| *az + *bz - *cz_2 * u - *cz_1)
       .collect::<Vec<E::Scalar>>();
 
     let (comm_AZ_1_circ_BZ_2, (comm_AZ_2_circ_BZ_1, comm_CZ_2)) = rayon::join(
@@ -518,6 +510,7 @@ impl<E: Engine> R1CSShape<E> {
     );
 
     let comm_T = comm_AZ_1_circ_BZ_2 + comm_AZ_2_circ_BZ_1 - ((comm_CZ_2 * U1.u) + *comm_CZ_1);
+    assert!(comm_T == CE::<E>::commit(ck, &T, r_T));
     Ok((T, comm_T, comm_CZ_2))
   }
 
