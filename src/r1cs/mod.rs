@@ -430,42 +430,27 @@ impl<E: Engine> R1CSShape<E> {
     W2: &R1CSWitness<E>,
     r_T: &E::Scalar,
   ) -> Result<(Vec<E::Scalar>, Commitment<E>), NovaError> {
-    let (AZ_1, BZ_1, CZ_1) = tracing::trace_span!("AZ_1, BZ_1, CZ_1")
-      .in_scope(|| self.multiply_witness(&W1.W, &U1.u, &U1.X))?;
+    let Z1 = [W1.W.clone(), vec![U1.u], U1.X.clone()].concat();
+    let Z2 = [W2.W.clone(), vec![E::Scalar::ONE], U2.X.clone()].concat();
 
-    let (AZ_2, BZ_2, CZ_2) = tracing::trace_span!("AZ_2, BZ_2, CZ_2")
-      .in_scope(|| self.multiply_witness(&W2.W, &E::Scalar::ONE, &U2.X))?;
+    // The following code uses the optimization suggested in
+    // Section 5.2 of [Mova](https://eprint.iacr.org/2024/1220.pdf)
+    let Z = Z1
+      .into_par_iter()
+      .zip(Z2.into_par_iter())
+      .map(|(z1, z2)| z1 + z2)
+      .collect::<Vec<E::Scalar>>();
+    let u = U1.u + E::Scalar::ONE; // U2.u = 1
 
-    let (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1, u_1_cdot_CZ_2, u_2_cdot_CZ_1) =
-      tracing::trace_span!("cross terms").in_scope(|| {
-        let AZ_1_circ_BZ_2 = (0..AZ_1.len())
-          .into_par_iter()
-          .map(|i| AZ_1[i] * BZ_2[i])
-          .collect::<Vec<E::Scalar>>();
-        let AZ_2_circ_BZ_1 = (0..AZ_2.len())
-          .into_par_iter()
-          .map(|i| AZ_2[i] * BZ_1[i])
-          .collect::<Vec<E::Scalar>>();
-        let u_1_cdot_CZ_2 = (0..CZ_2.len())
-          .into_par_iter()
-          .map(|i| U1.u * CZ_2[i])
-          .collect::<Vec<E::Scalar>>();
-        let u_2_cdot_CZ_1 = (0..CZ_1.len())
-          .into_par_iter()
-          .map(|i| CZ_1[i])
-          .collect::<Vec<E::Scalar>>();
-        (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1, u_1_cdot_CZ_2, u_2_cdot_CZ_1)
-      });
+    let (AZ, BZ, CZ) = self.multiply_vec(&Z)?;
 
-    let T = tracing::trace_span!("T").in_scope(|| {
-      AZ_1_circ_BZ_2
-        .par_iter()
-        .zip_eq(&AZ_2_circ_BZ_1)
-        .zip_eq(&u_1_cdot_CZ_2)
-        .zip_eq(&u_2_cdot_CZ_1)
-        .map(|(((a, b), c), d)| *a + *b - *c - *d)
-        .collect::<Vec<E::Scalar>>()
-    });
+    let T = AZ
+      .par_iter()
+      .zip(BZ.par_iter())
+      .zip(CZ.par_iter())
+      .zip(W1.E.par_iter())
+      .map(|(((az, bz), cz), e)| *az * *bz - u * *cz - *e)
+      .collect::<Vec<E::Scalar>>();
 
     let comm_T = CE::<E>::commit(ck, &T, r_T);
 

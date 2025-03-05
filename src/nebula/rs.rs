@@ -193,6 +193,7 @@ where
 
   // makes Nova simulataable
   r_i: E1::Scalar,
+  CZ_1: Commitment<E1>,
 }
 
 impl<E1> RecursiveSNARK<E1>
@@ -283,6 +284,7 @@ where
 
       // makes Nova simulatable
       r_i,
+      CZ_1: Commitment::<E1>::default(),
     })
   }
 
