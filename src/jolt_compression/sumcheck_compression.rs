@@ -1,108 +1,61 @@
 //! Compression for sumcheck proofs using Groth16
 use crate::{
+  constants::{DEFAULT_ABSORBS, NUM_CHALLENGE_BITS},
   frontend::{
-    groth16::{create_random_proof, generate_random_parameters, Parameters, Proof},
-    num::AllocatedNum, Circuit, ConstraintSystem, SynthesisError,
-  }, gadgets::le_bits_to_num, provider::Bn256EngineKZG, spartan::{
+    groth16::{create_random_proof, generate_random_parameters, Parameters, Proof}, num::AllocatedNum, Circuit, ConstraintSystem, SynthesisError
+  }, gadgets::{hypernova::AllocatedUniPoly, int::enforce_equal, le_bits_to_num}, provider::Bn256EngineKZG, spartan::{
     polys::univariate::UniPoly,
     sumcheck::SumcheckProof,
-  }, traits::{Engine, ROCircuitTrait, ROConstants, ROConstantsCircuit}
+  },
+  traits::{
+    CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
+    ROConstantsCircuit,
+  },
 };
 use halo2curves::bn256::Fr;
 use rand::thread_rng;
 
 /// Circuit for verifying a sumcheck proof with provided challenges
 #[derive(Clone)]
-pub struct SumcheckVerifierCircuit<E: Engine> {
+pub struct SumcheckVerifierCircuit<E: Engine + CurveCycleEquipped> {
   /// The univariate polynomials from the sumcheck proof
   pub polys: Vec<UniPoly<E::Scalar>>,
   /// The claimed sum
   pub claim: E::Scalar,
   /// The degree bound for the univariate polynomials
   pub degree_bound: usize,
-  /// The random oracle constants
-  pub ro_constants: ROConstantsCircuit<E>,
 }
 
-impl<E: Engine> Circuit<E::Scalar> for SumcheckVerifierCircuit<E> {
+impl<E: Engine> Circuit<E::Scalar> for SumcheckVerifierCircuit<E> where E: CurveCycleEquipped {
   fn synthesize<CS: ConstraintSystem<E::Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
-    let mut ro = E::ROCircuit::new(self.ro_constants.clone(), 0);
     // Allocate the claim as a public input
-    let claim = AllocatedNum::alloc_input(cs.namespace(|| "claim"), || Ok(self.claim))?;
     let num_rounds = self.polys.len();
-
+    let polys = (0..num_rounds)
+      .map(|i| {
+        AllocatedUniPoly::alloc(cs.namespace(|| "polys"), Some(&self.polys[i].clone()))
+      }).collect::<Result<Vec<_>, _>>()?;
     // Start with the initial claim
-    let mut e = claim;
+    let mut e = AllocatedNum::alloc_input(cs.namespace(|| "claim"), || Ok(self.claim))?;
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(ROConstantsCircuit::<Dual<E>>::default(), DEFAULT_ABSORBS);
+    let mut rx = Vec::with_capacity(num_rounds);
 
     for i in 0..num_rounds {
       // Get the polynomial for this round
-      let poly = &self.polys[i];
-
-      // Verify degree bound
-      if poly.degree() != self.degree_bound {
-        return Err(SynthesisError::Unsatisfiable);
-      }
-
-      // Allocate the polynomial coefficients
-      let coeffs: Vec<AllocatedNum<E::Scalar>> = poly.coeffs
-        .iter()
-        .enumerate()
-        .map(|(j, coeff)| {
-          AllocatedNum::alloc(cs.namespace(|| format!("poly_{}_coeff_{}", i, j)), || Ok(*coeff))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-      // Verify that eval_at_zero + eval_at_one = e
-      let eval_at_zero = coeffs[0].clone();
-
-      // Calculate eval_at_one = sum of all coefficients
-      let mut eval_at_one = eval_at_zero.clone();
-      for j in 1..coeffs.len() {
-        eval_at_one = eval_at_one.add(
-          cs.namespace(|| format!("add_coeff_{}_{}", i, j)),
-          &coeffs[j],
-        )?;
-      }
-
-      // Enforce that eval_at_zero + eval_at_one = e
-      cs.enforce(
-        || format!("round_{}_constraint", i),
-        |lc| lc + eval_at_zero.get_variable() + eval_at_one.get_variable(),
-        |lc| lc + CS::one(),
-        |lc| lc + e.get_variable(),
+      let poly = &polys[i];
+      let s0 = poly.eval_at_zero();
+      let s1 = poly.eval_at_one(cs.namespace(|| format!("eval at one {i}")))?;
+      let s0_s1 = s0.add(cs.namespace(|| format!("s0 + s1 {i}")), &s1)?;
+      enforce_equal(
+        cs,
+        || format!("poly(0) + poly(1) = e {i}"),
+        &s0_s1,
+        &e,
       );
-
-      for coeff in &coeffs {
-        ro.absorb(&coeff);
-      }
-      let r_i_bits = ro.squeeze(cs.namespace(|| format!("challenge_{i}")), 256)?;
-      let r_i = le_bits_to_num(cs.namespace(|| format!("r_{}", i)), &r_i_bits)?;
-
-      // Evaluate the polynomial at r_i
-      let mut eval = coeffs[0].clone();
-      let mut power = r_i.clone();
-
-      for j in 1..coeffs.len() {
-        let term = power.mul(
-          cs.namespace(|| format!("term_{}_{}", i, j)),
-          &coeffs[j],
-        )?;
-
-        eval = eval.add(
-          cs.namespace(|| format!("eval_add_{}_{}", i, j)),
-          &term,
-        )?;
-
-        if j < coeffs.len() - 1 {
-          power = power.mul(
-            cs.namespace(|| format!("power_update_{}_{}", i, j)),
-            &r_i,
-          )?;
-        }
-      }
-
-      // Update e for the next round
-      e = eval;
+      poly.absorb_in_ro(&mut ro)?;
+      let r_i_bits = ro.squeeze(cs.namespace(|| format!("r_{i} bits")), NUM_CHALLENGE_BITS)?;
+      let r_i = le_bits_to_num(cs.namespace(|| format!("r_{i}")), &r_i_bits)?;
+      e = poly.eval(cs.namespace(|| format!("eval_{i}")), &r_i)?;
+      rx.push(r_i);
     }
 
     // The final value of e is the result of the sumcheck verification
@@ -129,7 +82,6 @@ impl SumcheckCompression {
       polys,
       claim,
       degree_bound,
-      ro_constants: ROConstants::<Bn256EngineKZG>::default(),
     };
 
     // Generate parameters for the Groth16 proof system
