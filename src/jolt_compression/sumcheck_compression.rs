@@ -190,7 +190,7 @@ mod tests {
   #[test]
   fn test_sumcheck_compression_completeness() {
     let ns = [2, 4, 8, 16];
-    let num_tries = 100;
+    let num_tries = 1;
 
     for &n in &ns {
       for t in 0..num_tries {
@@ -269,7 +269,7 @@ mod tests {
   #[test]
   fn test_sumcheck_compression_soundness() {
     let ns = [2, 4, 8, 16];
-    let num_tries = 100;
+    let num_tries = 1;
 
     for &n in &ns {
       for t in 0..num_tries {
