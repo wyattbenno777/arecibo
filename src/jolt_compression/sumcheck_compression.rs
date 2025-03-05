@@ -21,8 +21,6 @@ pub struct SumcheckVerifierCircuit<F: PrimeField> {
   pub polys: Vec<UniPoly<F>>,
   /// The claimed sum
   pub claim: F,
-  /// The number of rounds in the sumcheck protocol
-  pub num_rounds: usize,
   /// The degree bound for the univariate polynomials
   pub degree_bound: usize,
   /// The verifier's challenges
@@ -33,21 +31,17 @@ impl<F: PrimeField> Circuit<F> for SumcheckVerifierCircuit<F> {
   fn synthesize<CS: ConstraintSystem<F>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
     // Allocate the claim as a public input
     let claim = AllocatedNum::alloc_input(cs.namespace(|| "claim"), || Ok(self.claim))?;
-
-    // Verify that there is a univariate polynomial for each round
-    if self.polys.len() != self.num_rounds {
-      return Err(SynthesisError::Unsatisfiable);
-    }
+    let num_rounds = self.polys.len();
 
     // Verify that there is a challenge for each round
-    if self.r.len() != self.num_rounds {
+    if self.r.len() != num_rounds {
       return Err(SynthesisError::Unsatisfiable);
     }
 
     // Start with the initial claim
     let mut e = claim;
 
-    for i in 0..self.num_rounds {
+    for i in 0..num_rounds {
       // Get the polynomial for this round
       let poly = &self.polys[i];
 
@@ -134,7 +128,6 @@ impl SumcheckCompression {
   pub fn compress(
     polys: Vec<UniPoly<Fr>>,
     claim: Fr,
-    num_rounds: usize,
     degree_bound: usize,
     r: Vec<Fr>,
   ) -> Result<(Self, Parameters<Bn256EngineKZG>), SynthesisError> {
@@ -142,7 +135,6 @@ impl SumcheckCompression {
     let circuit = SumcheckVerifierCircuit::<Fr> {
       polys,
       claim,
-      num_rounds,
       degree_bound,
       r,
     };
@@ -161,11 +153,11 @@ impl SumcheckCompression {
   pub fn compress_proof(
     proof: &SumcheckProof<Bn256EngineKZG>,
     claim: Fr,
-    num_rounds: usize,
     degree_bound: usize,
     r: Vec<Fr>,
   ) -> Result<(Self, Parameters<Bn256EngineKZG>), SynthesisError> {
     // Convert SumcheckProof to Vec<UniPoly> using the correct claim value for each round
+    let num_rounds = proof.compressed_polys.len();
     let mut polys = Vec::with_capacity(num_rounds);
     let mut current_claim = claim;
 
@@ -183,7 +175,7 @@ impl SumcheckCompression {
       polys.push(poly.clone());
     }
 
-    Self::compress(polys, claim, num_rounds, degree_bound, r)
+    Self::compress(polys, claim, degree_bound, r)
   }
 }
 
@@ -266,7 +258,6 @@ mod tests {
         let (compressed_proof, params) = SumcheckCompression::compress_proof(
           &proof,
           claim,
-          num_rounds,
           degree_bound,
           r,
         ).unwrap();
@@ -348,7 +339,6 @@ mod tests {
         let (compressed_proof, params) = SumcheckCompression::compress_proof(
           &proof,
           claim,
-          num_rounds,
           degree_bound,
           r.clone(),
         ).unwrap();
@@ -375,7 +365,6 @@ mod tests {
         let compressed_invalid_proof = SumcheckCompression::compress_proof(
           &invalid_sumcheck_proof,
           claim,
-          num_rounds,
           degree_bound,
           r,
         ).unwrap();
