@@ -2,10 +2,9 @@
 use crate::{constants::{BN_LIMB_WIDTH, BN_N_LIMBS}, gadgets::nat_to_limbs, onchain::verifiers::{GPL3_SDPX_IDENTIFIER, PRAGMA_GROTH16_VERIFIER}, provider::Bn256EngineKZG, traits::commitment::CommitmentTrait, Commitment, NovaError};
 use askama::Template;
 use halo2curves::bn256::Fr;
-// use sha3::{Digest, Keccak256};
+use sha3::{Digest, Keccak256};
 use num_bigint::{BigInt, BigUint, Sign};
 use ff::PrimeField;
-use crypto::{digest::Digest, sha3::Sha3};
 pub mod encoding;
 
 /// Formats call data from a vec of bytes to a hashmap
@@ -25,11 +24,10 @@ pub fn get_formatted_calldata(calldata: Vec<u8>) -> Vec<String> {
 pub fn get_function_selector_for_nova_cyclefold_verifier(
     first_param_array_length: usize,
 ) -> [u8; 4] {
-    let mut hasher = Sha3::keccak256();
     let fn_sig = format!("verifyNovaProof(uint256[{}],uint256[4],uint256[2],uint256[3],uint256[2],uint256[2][2],uint256[2],uint256[4],uint256[2][2])", first_param_array_length);
-    hasher.input_str(&fn_sig);
-    let hash = &mut [0u8; 32];
-    hasher.result(hash);
+    let mut hasher = Keccak256::new();
+    hasher.update(fn_sig.as_bytes());
+    let hash = hasher.finalize();
     [hash[0], hash[1], hash[2], hash[3]]
 }
 
