@@ -3,32 +3,30 @@ use crate::{
   frontend::{
     groth16::{create_random_proof, generate_random_parameters, Parameters, Proof},
     num::AllocatedNum, Circuit, ConstraintSystem, SynthesisError,
-  },
-  spartan::{
+  }, gadgets::le_bits_to_num, provider::Bn256EngineKZG, spartan::{
     polys::univariate::UniPoly,
     sumcheck::SumcheckProof,
-  },
-  provider::Bn256EngineKZG,
+  }, traits::{Engine, ROCircuitTrait, ROConstants, ROConstantsCircuit}
 };
-use ff::PrimeField;
 use halo2curves::bn256::Fr;
 use rand::thread_rng;
 
 /// Circuit for verifying a sumcheck proof with provided challenges
 #[derive(Clone)]
-pub struct SumcheckVerifierCircuit<F: PrimeField> {
+pub struct SumcheckVerifierCircuit<E: Engine> {
   /// The univariate polynomials from the sumcheck proof
-  pub polys: Vec<UniPoly<F>>,
+  pub polys: Vec<UniPoly<E::Scalar>>,
   /// The claimed sum
-  pub claim: F,
+  pub claim: E::Scalar,
   /// The degree bound for the univariate polynomials
   pub degree_bound: usize,
-  /// The verifier's challenges
-  pub r: Vec<F>,
+  /// The random oracle constants
+  pub ro_constants: ROConstantsCircuit<E>,
 }
 
-impl<F: PrimeField> Circuit<F> for SumcheckVerifierCircuit<F> {
-  fn synthesize<CS: ConstraintSystem<F>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+impl<E: Engine> Circuit<E::Scalar> for SumcheckVerifierCircuit<E> {
+  fn synthesize<CS: ConstraintSystem<E::Scalar>>(self, cs: &mut CS) -> Result<(), SynthesisError> {
+    let mut ro = E::ROCircuit::new(self.ro_constants.clone(), 0);
     // Allocate the claim as a public input
     let claim = AllocatedNum::alloc_input(cs.namespace(|| "claim"), || Ok(self.claim))?;
     let num_rounds = self.polys.len();
@@ -51,7 +49,7 @@ impl<F: PrimeField> Circuit<F> for SumcheckVerifierCircuit<F> {
       }
 
       // Allocate the polynomial coefficients
-      let coeffs: Vec<AllocatedNum<F>> = poly.coeffs
+      let coeffs: Vec<AllocatedNum<E::Scalar>> = poly.coeffs
         .iter()
         .enumerate()
         .map(|(j, coeff)| {
@@ -79,10 +77,11 @@ impl<F: PrimeField> Circuit<F> for SumcheckVerifierCircuit<F> {
         |lc| lc + e.get_variable(),
       );
 
-      // Allocate the verifier's challenge for this round
-      let r_i = AllocatedNum::alloc(cs.namespace(|| format!("challenge_{}", i)), || {
-        Ok(self.r[i])
-      })?;
+      for coeff in &coeffs {
+        ro.absorb(&coeff);
+      }
+      let r_i_bits = ro.squeeze(cs.namespace(|| format!("challenge_{i}")), 256)?;
+      let r_i = le_bits_to_num(cs.namespace(|| format!("r_{}", i)), &r_i_bits)?;
 
       // Evaluate the polynomial at r_i
       let mut eval = coeffs[0].clone();
@@ -132,11 +131,11 @@ impl SumcheckCompression {
     r: Vec<Fr>,
   ) -> Result<(Self, Parameters<Bn256EngineKZG>), SynthesisError> {
     // Create the circuit for verifying the sumcheck proof
-    let circuit = SumcheckVerifierCircuit::<Fr> {
+    let circuit = SumcheckVerifierCircuit::<Bn256EngineKZG> {
       polys,
       claim,
       degree_bound,
-      r,
+      ro_constants: ROConstants::<Bn256EngineKZG>::default(),
     };
 
     // Generate parameters for the Groth16 proof system
