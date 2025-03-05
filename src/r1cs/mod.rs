@@ -457,6 +457,70 @@ impl<E: Engine> R1CSShape<E> {
     Ok((T, comm_T))
   }
 
+  /// A method to compute a commitment to the cross-term `T` given a
+  /// Relaxed R1CS instance-witness pair and an R1CS instance-witness pair
+  pub fn commit_T_nebula(
+    &self,
+    ck: &CommitmentKey<E>,
+    U1: &RelaxedR1CSInstance<E>,
+    W1: &RelaxedR1CSWitness<E>,
+    U2: &R1CSInstance<E>,
+    W2: &R1CSWitness<E>,
+    r_T: &E::Scalar,
+    comm_CZ_1: &Commitment<E>,
+  ) -> Result<(Vec<E::Scalar>, Commitment<E>, Commitment<E>), NovaError> {
+    let (AZ_1, BZ_1, CZ_1) = {
+      let Z1 = [W1.W.clone(), vec![U1.u], U1.X.clone()].concat();
+      self.multiply_vec(&Z1)?
+    };
+
+    let (AZ_2, BZ_2, CZ_2) = {
+      let Z2 = [W2.W.clone(), vec![E::Scalar::ONE], U2.X.clone()].concat();
+      self.multiply_vec(&Z2)?
+    };
+
+    let (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1, u_1_cdot_CZ_2, u_2_cdot_CZ_1) = {
+      let AZ_1_circ_BZ_2 = (0..AZ_1.len())
+        .into_par_iter()
+        .map(|i| AZ_1[i] * BZ_2[i])
+        .collect::<Vec<E::Scalar>>();
+      let AZ_2_circ_BZ_1 = (0..AZ_2.len())
+        .into_par_iter()
+        .map(|i| AZ_2[i] * BZ_1[i])
+        .collect::<Vec<E::Scalar>>();
+      let u_1_cdot_CZ_2 = (0..CZ_2.len())
+        .into_par_iter()
+        .map(|i| U1.u * CZ_2[i])
+        .collect::<Vec<E::Scalar>>();
+      let u_2_cdot_CZ_1 = (0..CZ_1.len())
+        .into_par_iter()
+        .map(|i| CZ_1[i])
+        .collect::<Vec<E::Scalar>>();
+      (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1, u_1_cdot_CZ_2, u_2_cdot_CZ_1)
+    };
+
+    let T = AZ_1_circ_BZ_2
+      .par_iter()
+      .zip(&AZ_2_circ_BZ_1)
+      .zip(&u_1_cdot_CZ_2)
+      .zip(&u_2_cdot_CZ_1)
+      .map(|(((a, b), c), d)| *a + *b - *c - *d)
+      .collect::<Vec<E::Scalar>>();
+
+    let (comm_AZ_1_circ_BZ_2, (comm_AZ_2_circ_BZ_1, comm_CZ_2)) = rayon::join(
+      || CE::<E>::commit(ck, &AZ_1_circ_BZ_2, &E::Scalar::ZERO),
+      || {
+        rayon::join(
+          || CE::<E>::commit(ck, &AZ_2_circ_BZ_1, &E::Scalar::ZERO),
+          || CE::<E>::commit(ck, &CZ_2, &E::Scalar::ZERO),
+        )
+      },
+    );
+
+    let comm_T = comm_AZ_1_circ_BZ_2 + comm_AZ_2_circ_BZ_1 - ((comm_CZ_2 * U1.u) + *comm_CZ_1);
+    Ok((T, comm_T, comm_CZ_2))
+  }
+
   /// A method to compute a commitment to the cross-term `T` given two
   /// Relaxed R1CS instance-witness pair
   pub fn commit_T_relaxed(

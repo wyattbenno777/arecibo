@@ -327,6 +327,7 @@ where
         (&self.r_U_primary, &self.r_W_primary),
         (&self.l_u_primary, &self.l_w_primary),
         (&self.r_U_cyclefold, &self.r_W_cyclefold),
+        &mut self.CZ_1,
       )?;
 
     // Get advice to pass into verifier circuit
@@ -586,6 +587,7 @@ where
       &pp.circuit_shape_primary.r1cs_shape,
       (&self.r_U_primary, &self.r_W_primary),
       (&self.l_u_primary, &self.l_w_primary),
+      &mut Commitment::<E1>::default(),
     )?;
 
     // Fold random instance and witness

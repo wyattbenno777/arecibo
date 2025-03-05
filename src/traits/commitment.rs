@@ -11,6 +11,7 @@ use core::{
 };
 use group::prime::PrimeCurve;
 use serde::{Deserialize, Serialize};
+use std::ops::Sub;
 
 /// A helper trait for types implementing scalar multiplication.
 pub trait ScalarMul<Rhs, Output = Self>: Mul<Rhs, Output = Output> + MulAssign<Rhs> {}
@@ -33,6 +34,7 @@ pub trait CommitmentTrait<E: Engine>:
   + for<'de> Deserialize<'de>
   + AbsorbInROTrait<E>
   + Add<Self, Output = Self>
+  + Sub<Self, Output = Self>
   + ScalarMul<E::Scalar>
 {
   /// Holds the type of the compressed commitment

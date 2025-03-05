@@ -20,6 +20,7 @@ use group::{
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::ops::Sub;
 
 /// A type that holds commitment generators
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,6 +160,20 @@ where
     *self = Self {
       comm: self.comm * scalar,
     };
+  }
+}
+
+impl<E> Sub for Commitment<E>
+where
+  E: Engine,
+  E::GE: DlogGroup<ScalarExt = E::Scalar>,
+{
+  type Output = Self;
+
+  fn sub(self, other: Self) -> Self {
+    Self {
+      comm: self.comm - other.comm,
+    }
   }
 }
 

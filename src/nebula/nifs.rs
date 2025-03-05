@@ -50,6 +50,7 @@ where
     (U1, W1): (&RelaxedR1CSInstance<E>, &RelaxedR1CSWitness<E>),
     (U2, W2): (&R1CSInstance<E>, &R1CSWitness<E>),
     (U1_secondary, W1_secondary): (&RelaxedR1CSInstance<Dual<E>>, &RelaxedR1CSWitness<Dual<E>>),
+    comm_CZ_1: &mut Commitment<E>,
   ) -> Result<
     (
       Self,
@@ -65,7 +66,7 @@ where
      * Primary Fold
      */
     let (nifs_primary, (U, W), r) =
-      PrimaryNIFS::prove(ck, ro_consts, pp_digest, S, (U1, W1), (U2, W2))?;
+      PrimaryNIFS::prove(ck, ro_consts, pp_digest, S, (U1, W1), (U2, W2), comm_CZ_1)?;
 
     /*
      * CycleFold instances
@@ -232,6 +233,7 @@ where
     S: &R1CSShape<E>,
     (U1, W1): (&RelaxedR1CSInstance<E>, &RelaxedR1CSWitness<E>),
     (U2, W2): (&R1CSInstance<E>, &R1CSWitness<E>),
+    comm_CZ_1: &mut Commitment<E>,
   ) -> Result<
     (
       Self,
@@ -247,12 +249,14 @@ where
     );
     ro.absorb(*pp_digest);
     absorb_primary_r1cs::<E, Dual<E>>(U2, &mut ro);
-    let r_T = E::Scalar::random(&mut OsRng);
-    let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2, &r_T)?;
+    let r_T = E::Scalar::ZERO;
+    let (T, comm_T, comm_CZ_2) = S.commit_T_nebula(ck, U1, W1, U2, W2, &r_T, comm_CZ_1)?;
     absorb_primary_commitment::<E, Dual<E>>(&comm_T, &mut ro);
     let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
     let U = U1.fold(U2, &comm_T, &r);
     let W = W1.fold(W2, &T, &r_T, &r)?;
+    // update comm_CZ_1
+    *comm_CZ_1 = *comm_CZ_1 + (comm_CZ_2 * r);
     Ok((Self { comm_T }, (U, W), r))
   }
 
