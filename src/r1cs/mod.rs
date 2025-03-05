@@ -504,15 +504,15 @@ impl<E: Engine> R1CSShape<E> {
     let CZ_2_num_zeros = CZ_2.par_iter().filter(|x| **x == E::Scalar::ZERO).count();
     println!(
       "sparsity of AZ_1_circ_BZ_2: {}",
-      (AZ_1_circ_BZ_2.len() as f64 / AZ_1_circ_BZ_2_num_zeros as f64) * 100.0
+      (AZ_1_circ_BZ_2_num_zeros as f64 / AZ_1_circ_BZ_2.len() as f64) * 100.0
     );
     println!(
       "sparsity of AZ_2_circ_BZ_1: {}",
-      (AZ_2_circ_BZ_1.len() as f64 / AZ_2_circ_BZ_1_num_zeros as f64) * 100.0
+      (AZ_2_circ_BZ_1_num_zeros as f64 / AZ_2_circ_BZ_1.len() as f64) * 100.0
     );
     println!(
       "sparsity of CZ_2: {}",
-      (CZ_2.len() as f64 / CZ_2_num_zeros as f64) * 100.0
+      (CZ_2_num_zeros as f64 / CZ_2.len() as f64) * 100.0
     );
     let u = U1.u;
     let T = AZ_1_circ_BZ_2
