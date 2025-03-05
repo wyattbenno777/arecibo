@@ -504,7 +504,6 @@ impl<E: Engine> R1CSShape<E> {
       .map(|(((az, bz), cz_2), cz_1)| *az + *bz - *cz_2 * u - *cz_1)
       .collect::<Vec<E::Scalar>>();
 
-    let time = Instant::now();
     let (comm_AZ_1_circ_BZ_2, (comm_AZ_2_circ_BZ_1, comm_CZ_2)) = rayon::join(
       || CE::<E>::commit(ck, &AZ_1_circ_BZ_2, &E::Scalar::ZERO),
       || {
@@ -515,14 +514,6 @@ impl<E: Engine> R1CSShape<E> {
       },
     );
     let comm_T = comm_AZ_1_circ_BZ_2 + comm_AZ_2_circ_BZ_1 - ((comm_CZ_2 * U1.u) + *comm_CZ_1);
-    println!(
-      "Time taken for sparse comm_T computation: {:?}",
-      time.elapsed()
-    );
-
-    let time = Instant::now();
-    let comm_T = CE::<E>::commit(ck, &T, r_T);
-    println!("Time taken for comm_T: {:?}", time.elapsed());
     Ok((T, comm_T, comm_CZ_2))
   }
 
