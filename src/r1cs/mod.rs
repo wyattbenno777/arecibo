@@ -475,10 +475,14 @@ impl<E: Engine> R1CSShape<E> {
       self.multiply_vec(&Z1)?
     };
 
-    let (AZ_2, BZ_2, CZ_2) = {
-      let Z2 = [W2.W.clone(), vec![E::Scalar::ONE], U2.X.clone()].concat();
-      self.multiply_vec(&Z2)?
-    };
+    let Z2 = [W2.W.clone(), vec![E::Scalar::ONE], U2.X.clone()].concat();
+
+    let (AZ_2, BZ_2, CZ_2) = self.multiply_vec(&Z2)?;
+
+    println!("Z2.len(): {}", Z2.len());
+    // count how many zeros are in the Z2 vector
+    let zeros = Z2.iter().filter(|z| **z == E::Scalar::ZERO).count();
+    println!("Z2 zeros: {}", zeros);
 
     let (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1) = {
       let AZ_1_circ_BZ_2 = (0..AZ_1.len())
