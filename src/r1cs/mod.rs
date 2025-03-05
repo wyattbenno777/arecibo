@@ -479,11 +479,6 @@ impl<E: Engine> R1CSShape<E> {
 
     let (AZ_2, BZ_2, CZ_2) = self.multiply_vec(&Z2)?;
 
-    println!("Z2.len(): {}", Z2.len());
-    // count how many zeros are in the Z2 vector
-    let zeros = Z2.iter().filter(|z| **z == E::Scalar::ZERO).count();
-    println!("Z2 zeros: {}", zeros);
-
     let (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1) = {
       let AZ_1_circ_BZ_2 = (0..AZ_1.len())
         .into_par_iter()
@@ -495,6 +490,27 @@ impl<E: Engine> R1CSShape<E> {
         .collect::<Vec<E::Scalar>>();
       (AZ_1_circ_BZ_2, AZ_2_circ_BZ_1)
     };
+    // count how many zeros in AZ_1_circ_BZ_2
+    let AZ_1_circ_BZ_2_num_zeros = AZ_1_circ_BZ_2
+      .par_iter()
+      .filter(|x| **x == E::Scalar::ZERO)
+      .count();
+    // count how many zeros in AZ_2_circ_BZ_1
+    let AZ_2_circ_BZ_1_num_zeros = AZ_2_circ_BZ_1
+      .par_iter()
+      .filter(|x| **x == E::Scalar::ZERO)
+      .count();
+    // count how many zeros in CZ_2
+    let CZ_2_num_zeros = CZ_2.par_iter().filter(|x| **x == E::Scalar::ZERO).count();
+    println!(
+      "sparsity of AZ_1_circ_BZ_2: {}",
+      (AZ_1_circ_BZ_2.len() / AZ_1_circ_BZ_2_num_zeros) * 100
+    );
+    println!(
+      "sparsity of AZ_2_circ_BZ_1: {}",
+      (AZ_2_circ_BZ_1.len() / AZ_2_circ_BZ_1_num_zeros) * 100
+    );
+    println!("sparsity of CZ_2: {}", (CZ_2.len() / CZ_2_num_zeros) * 100);
     let u = U1.u;
     let T = AZ_1_circ_BZ_2
       .par_iter()
