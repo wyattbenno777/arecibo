@@ -131,7 +131,7 @@ mod tests {
     frontend::groth16::{prepare_verifying_key, verify_proof}, provider::Bn256EngineKZG, spartan::{
       polys::multilinear::MultilinearPolynomial,
       sumcheck::SumcheckProof,
-    }, traits::{Engine, TranscriptEngineTrait}
+    }, traits::{Engine, ROConstants, TranscriptEngineTrait}
   };
   use group::{Curve, Group};
   use halo2curves::bn256::{Fr, G1};
@@ -265,6 +265,8 @@ mod tests {
 
         // Create a transcript for the proof
         let mut transcript = <Bn256EngineKZG as Engine>::TE::new(b"test");
+        let ro_consts = ROConstants::<Dual<Bn256EngineKZG> as Engine>::default();
+        let mut ro = <Dual<Bn256EngineKZG> as Engine>::RO::new(&ro_consts, DEFAULT_ABSORBS);
 
         // Generate the sumcheck proof
         let (proof, r, _) = SumcheckProof::prove_quad(
