@@ -22,7 +22,7 @@ use crate::{
   onchain::gadgets::hash::{hash_U_i, hash_cf_U_i},
   r1cs::{R1CSInstance, R1CSShape, R1CSWitness, RelaxedR1CSInstance, RelaxedR1CSWitness},
   traits::{
-    commitment::CommitmentTrait,
+    commitment::{CommitmentTrait, CommitmentEngineTrait},
     CurveCycleEquipped, Dual, Engine, ROConstants,
   },
   CommitmentKey,
@@ -303,21 +303,21 @@ where
     // --------------------------------------------------------------------------------------------
     // Step 4: Commitments verification for U_{EC,n}.{E, W} with respect to W_{EC,n}.{E, W}.
     // --------------------------------------------------------------------------------------------
-    // #[cfg(not(feature = "light_onchain_prover"))]
-    // {
-    //   let cf_W_i_commit = <Dual<E> as Engine>::CE::commit_gadget(
-    //     cs,
-    //     &*self.cf_ck,
-    //     &self.cf_W_i.W[..],
-    //     &self.cf_W_i.r_W,
-    //   )?;
+    #[cfg(not(feature = "light_onchain_prover"))]
+    {
+      let cf_W_i_commit = <Dual<E> as Engine>::CE::commit_gadget(
+        cs,
+        &*self.cf_ck,
+        &self.cf_W_i.W[..],
+        &self.cf_W_i.r_W,
+      )?;
 
-    //   // Check that Commit(cf_W_i.W) == cf_U_i.cmW
-    //   cf_W_i_commit.check_equal(
-    //     cs.namespace(|| "check that cf_W_i.W == cf_U_i.cmW"),
-    //     &cf_U_i.W,
-    //   )?;
-    // }
+      // Check that Commit(cf_W_i.W) == cf_U_i.cmW
+      cf_W_i_commit.check_equal(
+        cs.namespace(|| "check that cf_W_i.W == cf_U_i.cmW"),
+        &cf_U_i.W,
+      )?;
+    }
 
     // -------------------------------------------------------------------------------------------- 
     // Step 5: Enforce U_{EC,n} and W_{EC,n} satisfy r1cs_{EC}, the Relaxed R1CS relation of the CycleFoldCircuit.
