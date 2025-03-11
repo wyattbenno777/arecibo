@@ -1,12 +1,69 @@
 //! Utilities for provider module.
 pub(in crate::provider) mod fb_msm;
+pub mod web_gpu_msm;
 pub mod msm {
   use halo2curves::{msm::best_multiexp, CurveAffine};
+
+  use crate::provider::util::web_gpu_msm::{curve_to_js_point, jsvalue_to_primefield};
 
   // this argument swap is useful until Rust gets named arguments
   // and saves significant complexity in macro code
   pub fn cpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
     best_multiexp(scalars, bases)
+  }
+
+  pub fn web_gpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
+    use crate::provider::util::web_gpu_msm::{primefield_to_bigint_js, run_gpu_msm};
+    use std::sync::mpsc;
+    use wasm_bindgen_futures::spawn_local;
+
+    // Mock data for testing with BigInt
+    let js_scalars = scalars
+      .iter()
+      .map(|s| primefield_to_bigint_js(*s))
+      .collect(); // vec![JsValue::bigint_from_str("1")]; // Use JsValue to represent BigInt
+    let js_bases = bases.iter().map(|b| curve_to_js_point(*b)).collect(); // vec![U32ArrayPoint::new(
+
+    // Create a channel to communicate between the async task and the caller
+    let (tx, rx) = mpsc::channel();
+
+    // Spawn the async task
+    spawn_local(async move {
+      if let Ok(result) = run_gpu_msm(js_bases, js_scalars).await {
+        let x = jsvalue_to_primefield::<C::Base>(result.x()).unwrap();
+        let y = jsvalue_to_primefield::<C::Base>(result.y()).unwrap();
+
+        let curve_result = C::from_xy(x, y).unwrap().into();
+
+        // Send the result back to the caller
+        tx.send(curve_result).unwrap();
+      }
+    });
+
+    // Block until the result is received
+    rx.recv().unwrap()
+  }
+
+  pub async fn web_gpu_best_msm_async<C: CurveAffine>(
+    bases: &[C],
+    scalars: &[C::Scalar],
+  ) -> C::Curve {
+    use crate::provider::util::web_gpu_msm::{primefield_to_bigint_js, run_gpu_msm};
+
+    // Mock data for testing with BigInt
+    let js_scalars = scalars
+      .iter()
+      .map(|s| primefield_to_bigint_js(*s))
+      .collect(); // vec![JsValue::bigint_from_str("1")]; // Use JsValue to represent BigInt
+    let js_bases = bases.iter().map(|b| curve_to_js_point(*b)).collect(); // vec![U32ArrayPoint::new(
+
+    let result = run_gpu_msm(js_bases, js_scalars).await;
+    assert!(result.is_ok());
+    let msm_result = result.unwrap();
+    let x = jsvalue_to_primefield::<C::Base>(msm_result.x()).unwrap();
+    let y = jsvalue_to_primefield::<C::Base>(msm_result.y()).unwrap();
+
+    C::from_xy(x, y).unwrap().into()
   }
 }
 
@@ -224,5 +281,55 @@ pub mod test_utils {
       )
       .is_err());
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use crate::{
+    provider::{
+      util::msm::{cpu_best_msm, web_gpu_best_msm_async},
+      Bn256EngineKZG,
+    },
+    traits::Engine,
+  };
+
+  use group::{Curve, Group};
+  use halo2curves::bn256::{Fr, G1Affine};
+  use rand::Rng;
+  use wasm_bindgen_test::*;
+  use web_sys::console;
+
+  wasm_bindgen_test_configure!(run_in_browser);
+
+  type E = Bn256EngineKZG;
+
+  // #[wasm_bindgen]
+  // extern "C" {
+  //   #[wasm_bindgen(js_namespace = performance)]
+  //   fn now() -> f64;
+  // }
+
+  #[wasm_bindgen_test]
+  async fn test_run_gpu_msm() {
+    use rand::thread_rng;
+    // Create a vector of random Fr elements
+    let mut rng = thread_rng();
+    let scalars: Vec<Fr> = (0..4)
+      .map(|_| {
+        let random_u64: u64 = rng.gen();
+        Fr::from(random_u64)
+      })
+      .collect();
+    let bases: Vec<G1Affine> = (0..4)
+      .map(|_| <E as Engine>::GE::random(&mut rng).to_affine())
+      .collect();
+
+    let cpu_msm_result = cpu_best_msm(&bases, &scalars);
+    let gpu_msm_result = web_gpu_best_msm_async(&bases, &scalars).await;
+
+    console::log_1(&format!("cpu_msm_result: {:?}", cpu_msm_result).into());
+    console::log_1(&format!("gpu_msm_result: {:?}", gpu_msm_result).into());
+    assert_eq!(cpu_msm_result, gpu_msm_result);
   }
 }

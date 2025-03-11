@@ -1,0 +1,3 @@
+[submodule "js/webgpu-msm"]
+	path = js/webgpu-msm
+	url = https://github.com/demox-labs/webgpu-msm.git

@@ -16,6 +16,8 @@ use num_traits::Num;
 use rayon::prelude::*;
 use sha3::Shake256;
 use std::io::Read;
+#[cfg(target_arch = "wasm32")]
+use crate::provider::util::msm::web_gpu_best_msm;
 
 // Thus compile-time assertions checks important assumptions in the memory representation
 // of group data that supports the use of Abomonation.
@@ -35,28 +37,28 @@ pub mod grumpkin {
   };
 }
 
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "wasm32"))]
 impl_traits!(
   bn256,
   "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
   "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47",
   bn256_msm
 );
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "wasm32")))]
 impl_traits!(
   bn256,
   "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
   "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47"
 );
 
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "wasm32"))]
 impl_traits!(
   grumpkin,
   "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47",
   "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
   grumpkin_msm
 );
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "wasm32")))]
 impl_traits!(
   grumpkin,
   "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47",

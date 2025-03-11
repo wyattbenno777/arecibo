@@ -100,7 +100,11 @@ macro_rules! impl_traits {
         } else {
           cpu_best_msm(bases, scalars)
         }
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+
+        #[cfg(target_arch = "wasm32")]
+        return web_gpu_best_msm(bases, scalars);
+
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "wasm32")))]
         cpu_best_msm(bases, scalars)
       }
 
