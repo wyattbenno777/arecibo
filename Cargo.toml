@@ -52,10 +52,27 @@ hex = "0.4"
 askama = { version = "0.12.0", features = ["config"], default-features = false }
 revm = {version="19.5.0", default-features=false, features=["std"]}
 
+# TODO: Move to wasm32
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3.77"
+web-sys = { version = "0.3", features = ["console"] }
+wgpu = "24.0.1"
+bytemuck = "1.22.0"
+pollster = "0.4.0"
+oneshot = "0.1.11"
+
 [target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
 # grumpkin-msm has been patched to support MSMs for the pasta curve cycle
 # see: https://github.com/lurk-lab/grumpkin-msm/pull/3
 grumpkin-msm = { git = "https://github.com/ICME-Lab/grumpkin-msm", branch = "dev" }
+
+
+
+[dependencies.console_error_panic_hook]
+version = "0.1.7"
+optional = true
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2.0", default-features = false, features = ["js"] }
 
@@ -73,6 +90,7 @@ tracing-texray = "0.2.0"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 rand_xorshift = "0.3.0"
 env_logger = "0.11.6"
+wasm-bindgen-test = "0.3.50"
 
 [features]
 default = []
