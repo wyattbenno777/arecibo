@@ -297,6 +297,7 @@ mod tests {
   use group::{Curve, Group};
   use halo2curves::bn256::{Fr, G1Affine};
   use rand::Rng;
+  use wasm_bindgen::prelude::wasm_bindgen;
   use wasm_bindgen_test::*;
   use web_sys::console;
 
@@ -304,11 +305,11 @@ mod tests {
 
   type E = Bn256EngineKZG;
 
-  // #[wasm_bindgen]
-  // extern "C" {
-  //   #[wasm_bindgen(js_namespace = performance)]
-  //   fn now() -> f64;
-  // }
+  #[wasm_bindgen]
+  extern "C" {
+    #[wasm_bindgen(js_namespace = performance)]
+    fn now() -> f64;
+  }
 
   #[wasm_bindgen_test]
   async fn test_run_gpu_msm() {
@@ -325,8 +326,16 @@ mod tests {
       .map(|_| <E as Engine>::GE::random(&mut rng).to_affine())
       .collect();
 
+    let start = now();
     let cpu_msm_result = cpu_best_msm(&bases, &scalars);
+    console::log_1(&format!("cpu_msm_result: {:?}", cpu_msm_result).into());
+    let end = now();
+    console::log_1(&format!("cpu_msm_time: {:?}", end - start).into());
+
+    let start = now();
     let gpu_msm_result = web_gpu_best_msm_async(&bases, &scalars).await;
+    let end = now();
+    console::log_1(&format!("gpu_msm_time: {:?}", end - start).into());
 
     console::log_1(&format!("cpu_msm_result: {:?}", cpu_msm_result).into());
     console::log_1(&format!("gpu_msm_result: {:?}", gpu_msm_result).into());
