@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::console;
 
-#[wasm_bindgen(module = "/src/provider/util/bestMSM.js")]
+#[wasm_bindgen(module = "/src/provider/util/msm.js")]
 extern "C" {
   #[wasm_bindgen(catch)]
   fn webgpu_best_msm(bases: Vec<JsValue>, scalars: Vec<JsValue>) -> Result<Promise, JsValue>;
