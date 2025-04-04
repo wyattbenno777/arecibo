@@ -16,7 +16,7 @@ rust-version = "1.74.1"
 
 [dependencies]
 # ff = { version = "0.13.0", features = ["derive"] }
-ff = { path = "../ff", default-features = false, features = ["std"] }
+ff = { git = "https://github.com/ICME-Lab/ff", branch = "main", default-features = false, features = ["std"] }
 
 digest = "0.10"
 ec-gpu-gen = "0.7.1"
@@ -115,8 +115,6 @@ opt-level = 3
 lto = "thin"
 incremental = false
 codegen-units = 16
-
-
 
 [lib]
 crate-type = ["cdylib", "rlib"]
