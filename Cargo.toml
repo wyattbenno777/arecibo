@@ -16,11 +16,11 @@ rust-version = "1.74.1"
 
 [dependencies]
 # ff = { version = "0.13.0", features = ["derive"] }
-ff = { git = "https://github.com/ICME-Lab/ff", branch = "main", default-features = false, features = ["std"] }
+ff = { git = "https://github.com/ICME-Lab/ff", branch = "montgomery-repr", default-features = false, features = ["std"] }
 
 digest = "0.10"
 ec-gpu-gen = "0.7.1"
-halo2curves = { git = "https://github.com/ICME-Lab/halo2curves", branch = "main", features = ["bits", "derive_serde"] }
+halo2curves = { git = "https://github.com/ICME-Lab/halo2curves", branch = "montgomery", features = ["bits", "derive_serde"] }
 # halo2curves = { path = "../halo2curves", features = ["bits", "derive_serde"] }
 sha3 = "0.10"
 rayon = "1.7"
@@ -74,8 +74,8 @@ web-sys = { version = "0.3", features = ["console"] }
 wgpu = "24.0.1"
 pollster = "0.4.0"
 oneshot = "0.1.11"
-# msm-webgpu = { git = "https://github.com/ICME-Lab/msm-webgpu", branch = "master" }
-msm-webgpu = { path = "../icme-msm-webgpu" }
+msm-webgpu = { git = "https://github.com/ICME-Lab/msm-webgpu", branch = "generic-msm" }
+# msm-webgpu = { path = "../icme-msm-webgpu" }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3.50"
@@ -118,3 +118,6 @@ codegen-units = 16
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[patch.crates-io]
+ff = { git = "https://github.com/ICME-Lab/ff", branch = "montgomery-repr" }
