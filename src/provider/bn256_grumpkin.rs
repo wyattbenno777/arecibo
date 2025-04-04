@@ -9,6 +9,10 @@ use ff::{FromUniformBytes, PrimeField};
 use group::{cofactor::CofactorCurveAffine, Curve, Group as AnotherGroup};
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use grumpkin_msm::{bn256 as bn256_msm, grumpkin as grumpkin_msm};
+
+#[cfg(target_arch = "wasm32")]
+use crate::provider::util::msm::web_gpu_best_msm;
+
 // Remove this when https://github.com/zcash/pasta_curves/issues/41 resolves
 use halo2curves::{bn256::G2Affine, CurveAffine, CurveExt};
 use num_bigint::BigInt;
@@ -41,6 +45,14 @@ impl_traits!(
   "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
   "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47",
   bn256_msm
+);
+#[cfg(target_arch = "wasm32")]
+impl_traits!(
+  bn256,
+  "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
+  "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47",
+  bn256_msm,
+  web_gpu_best_msm
 );
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 impl_traits!(

@@ -1,12 +1,11 @@
 //! Utilities for provider module.
 
 
-pub mod web_gpu_msm;
 pub(in crate::provider) mod fb_msm;
 pub mod msm {
   use halo2curves::{msm::best_multiexp, CurveAffine};
-
-use super::web_gpu_msm::{bytes_to_point, field_to_bytes, point_to_bytes, run_webgpu};
+  #[cfg(target_arch = "wasm32")]
+  use msm_webgpu::halo2curves::run_webgpu_msm_browser;
 
   // this argument swap is useful until Rust gets named arguments
   // and saves significant complexity in macro code
@@ -14,13 +13,9 @@ use super::web_gpu_msm::{bytes_to_point, field_to_bytes, point_to_bytes, run_web
     best_multiexp(scalars, bases)
   }
 
+  #[cfg(target_arch = "wasm32")]
   pub fn web_gpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
-    let bases_bytes = bases.iter().flat_map(|b| point_to_bytes(*b)).collect::<Vec<_>>();
-    let scalars_bytes = scalars.iter().flat_map(|s| field_to_bytes(*s)).collect::<Vec<_>>();
-    let result = pollster::block_on(
-      run_webgpu(bases_bytes, scalars_bytes)
-    ).unwrap();
-    bytes_to_point::<C>(&result[..])
+    run_webgpu_msm_browser(bases, scalars)
   }
 }
 
@@ -248,22 +243,28 @@ pub mod test_utils {
 mod tests {
   use crate::{
     provider::{
-      util::{msm::{cpu_best_msm, web_gpu_best_msm}, web_gpu_msm::{bytes_to_point, field_to_bytes, point_to_bytes, run_webgpu}},
+      util::msm::cpu_best_msm,
       Bn256EngineKZG,
     },
     traits::Engine,
   };
 
+  #[cfg(target_arch = "wasm32")]
+  use crate::provider::util::msm::web_gpu_best_msm;
+
   use group::{Curve, Group};
   use halo2curves::bn256::{Fr, G1Affine};
   use rand::Rng;
+  #[cfg(target_arch = "wasm32")]
   use wasm_bindgen_test::*;
+  #[cfg(target_arch = "wasm32")]
   use web_sys::console;
-
+  #[cfg(target_arch = "wasm32")]
   wasm_bindgen_test_configure!(run_in_browser);
 
   type E = Bn256EngineKZG;
 
+  #[cfg(target_arch = "wasm32")]
   #[wasm_bindgen_test]
   async fn test_run_gpu_msm() {
     use rand::thread_rng;
@@ -280,17 +281,8 @@ mod tests {
       .collect();
 
       
-    let bases_bytes = bases.iter().flat_map(|b| point_to_bytes(*b)).collect::<Vec<_>>();
-    console::log_1(&format!("bases_bytes: {:?}", bases_bytes).into());
-    let scalars_bytes = scalars.iter().flat_map(|s| field_to_bytes(*s)).collect::<Vec<_>>();
-    console::log_1(&format!("scalars_bytes: {:?}", scalars_bytes).into());
     let cpu_msm_result = cpu_best_msm(&bases, &scalars);
-    let bytes = run_webgpu(bases_bytes, scalars_bytes).await.unwrap();
-    let gpu_msm_result = bytes_to_point::<G1Affine>(
-      &bytes[..]
-    );
-
-
+    let gpu_msm_result = web_gpu_best_msm(&bases, &scalars);
 
     console::log_1(&format!("cpu_msm_result: {:?}", cpu_msm_result).into());
     console::log_1(&format!("gpu_msm_result: {:?}", gpu_msm_result).into());

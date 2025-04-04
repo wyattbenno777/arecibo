@@ -4,6 +4,7 @@ use crate::{
   provider::{traits::DlogGroup, util::msm::cpu_best_msm},
   traits::{Group, PrimeFieldExt, TranscriptReprTrait},
 };
+
 use digest::{ExtendableOutput, Update};
 use ff::{FromUniformBytes, PrimeField};
 use group::{cofactor::CofactorCurveAffine, Curve, Group as AnotherGroup};

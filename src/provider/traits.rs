@@ -67,6 +67,15 @@ macro_rules! impl_traits {
     $base_str:literal,
     $large_msm_method: ident
   ) => {
+    $crate::impl_traits!($name, $order_str, $base_str, $large_msm_method, $large_msm_method);
+  };
+  (
+    $name:ident,
+    $order_str:literal,
+    $base_str:literal,
+    $large_msm_method: ident,
+    $web_gpu_msm_method: ident
+  ) => {
     // These compile-time assertions check important assumptions in the memory representation
     // of group data that supports the use of Abomonation.
     static_assertions::assert_eq_size!($name::Affine, [u64; 8]);
@@ -100,8 +109,15 @@ macro_rules! impl_traits {
         } else {
           cpu_best_msm(bases, scalars)
         }
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        #[cfg(target_arch = "wasm32")]
+        if scalars.len() >= 128 {
+          $web_gpu_msm_method(bases, scalars)
+        } else {
+          cpu_best_msm(bases, scalars)
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "wasm32")))]
         cpu_best_msm(bases, scalars)
+
       }
 
       fn group(p: &Self::AffineExt) -> Self {
