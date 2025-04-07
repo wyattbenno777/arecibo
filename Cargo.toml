@@ -121,3 +121,4 @@ crate-type = ["cdylib", "rlib"]
 
 [patch.crates-io]
 ff = { git = "https://github.com/ICME-Lab/ff", branch = "montgomery-repr" }
+halo2curves = { git = "https://github.com/ICME-Lab/halo2curves", branch = "montgomery" }

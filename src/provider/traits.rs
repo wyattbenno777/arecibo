@@ -59,22 +59,13 @@ macro_rules! impl_traits {
     $order_str:literal,
     $base_str:literal
   ) => {
-    $crate::impl_traits!($name, $order_str, $base_str, cpu_best_msm);
-  };
-  (
-    $name:ident,
-    $order_str:literal,
-    $base_str:literal,
-    $large_msm_method: ident
-  ) => {
-    $crate::impl_traits!($name, $order_str, $base_str, $large_msm_method, $large_msm_method);
+    $crate::impl_traits!($name, $order_str, $base_str, cpu_best_msm,);
   };
   (
     $name:ident,
     $order_str:literal,
     $base_str:literal,
     $large_msm_method: ident,
-    $web_gpu_msm_method: ident
   ) => {
     // These compile-time assertions check important assumptions in the memory representation
     // of group data that supports the use of Abomonation.
@@ -103,15 +94,9 @@ macro_rules! impl_traits {
       type Compressed = $name::Compressed;
 
       fn vartime_multiscalar_mul(scalars: &[Self::ScalarExt], bases: &[Self::AffineExt]) -> Self {
-        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "wasm32"))]
         if scalars.len() >= 128 {
           $large_msm_method(bases, scalars)
-        } else {
-          cpu_best_msm(bases, scalars)
-        }
-        #[cfg(target_arch = "wasm32")]
-        if scalars.len() >= 128 {
-          $web_gpu_msm_method(bases, scalars)
         } else {
           cpu_best_msm(bases, scalars)
         }
