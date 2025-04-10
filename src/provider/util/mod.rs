@@ -2,11 +2,15 @@
 pub(in crate::provider) mod fb_msm;
 pub mod msm {
   use halo2curves::{msm::best_multiexp, CurveAffine};
-
+  use msm_webgpu::halo2curves::run_webgpu_msm_browser;
   // this argument swap is useful until Rust gets named arguments
   // and saves significant complexity in macro code
   pub fn cpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
     best_multiexp(scalars, bases)
+  }
+
+  pub fn web_gpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
+    run_webgpu_msm_browser(&bases.to_vec(), &scalars.to_vec())
   }
 }
 
@@ -224,5 +228,146 @@ pub mod test_utils {
       )
       .is_err());
     }
+  }
+}
+
+#[cfg(test)]
+pub mod test_msm {
+  use halo2curves::{bn256::Bn256, msm::best_multiexp, CurveAffine};
+  use msm_webgpu::halo2curves::run_webgpu_msm_browser;
+
+  use crate::{
+    frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
+    nebula::rs::{PublicParams, RecursiveSNARK, StepCircuit},
+    provider::{
+      hyperkzg::EvaluationEngine as EvaluationEngineKZG,
+      ipa_pc::EvaluationEngine as EvaluationEngineIPA, Bn256EngineKZG, GrumpkinEngine,
+    },
+    spartan::snark::RelaxedR1CSSNARK,
+    traits::{snark::RelaxedR1CSSNARKTrait, Engine},
+  };
+  use ff::Field;
+  use halo2curves::bn256::{Fr, G1Affine};
+  use rand::thread_rng;
+  use wasm_bindgen::prelude::*;
+  use wasm_bindgen_test::*;
+  use web_sys::console;
+
+  wasm_bindgen_test_configure!(run_in_browser);
+
+  #[wasm_bindgen]
+  extern "C" {
+    #[wasm_bindgen(js_namespace = performance)]
+    fn now() -> f64;
+  }
+
+  #[derive(Clone, Copy, Debug)]
+  pub struct CubicFCircuit {}
+
+  impl CubicFCircuit {
+    /// Create a new circuit
+    pub fn new() -> Self {
+      Self {}
+    }
+  }
+
+  impl Default for CubicFCircuit {
+    fn default() -> Self {
+      Self::new()
+    }
+  }
+
+  impl StepCircuit<halo2curves::bn256::Fr> for CubicFCircuit {
+    fn arity(&self) -> usize {
+      1
+    }
+    fn synthesize<CS: ConstraintSystem<halo2curves::bn256::Fr>>(
+      &self,
+      cs: &mut CS,
+      z_in: &[AllocatedNum<halo2curves::bn256::Fr>],
+    ) -> Result<Vec<AllocatedNum<halo2curves::bn256::Fr>>, SynthesisError> {
+      let five = AllocatedNum::alloc(cs.namespace(|| "five"), || {
+        Ok(halo2curves::bn256::Fr::from(5u64))
+      })?;
+      let z_i = z_in[0].clone();
+      let z_i_sq = z_i.mul(cs.namespace(|| "z_i_sq"), &z_i)?;
+      let z_i_cube = z_i_sq.mul(cs.namespace(|| "z_i_cube"), &z_i)?;
+      let result = z_i_cube.add(cs.namespace(|| "add z_i"), &z_i)?;
+      let result = result.add(cs.namespace(|| "add five"), &five)?;
+
+      Ok(vec![result])
+    }
+    fn non_deterministic_advice(&self) -> Vec<halo2curves::bn256::Fr> {
+      vec![]
+    }
+  }
+
+  #[wasm_bindgen_test]
+  async fn test_webgpu_msm_bn254() {
+    type E1 = Bn256EngineKZG;
+    type E2 = GrumpkinEngine;
+    type EE1 = EvaluationEngineKZG<Bn256, E1>;
+    type EE2 = EvaluationEngineIPA<E2>;
+    type S1 = RelaxedR1CSSNARK<E1, EE1>; // non-preprocessing SNARK
+    type S2 = RelaxedR1CSSNARK<E2, EE2>; // non-preprocessing SNARK
+
+    let num_steps = 5;
+
+    let f_circuit = CubicFCircuit::new();
+
+    // produce public parameters
+    let start = now();
+    console::log_1(&format!("Producing public parameters...").into());
+    let rs_pp = PublicParams::<E1>::setup(&f_circuit, &*S1::ck_floor(), &*S2::ck_floor());
+    console::log_1(&format!("PublicParams::setup, took {:?} ", now() - start).into());
+    console::log_1(
+      &format!(
+        "Number of constraints per step (primary circuit): {}",
+        rs_pp.num_constraints().0
+      )
+      .into(),
+    );
+    console::log_1(
+      &format!(
+        "Number of constraints per step (secondary circuit): {}",
+        rs_pp.num_constraints().1
+      )
+      .into(),
+    );
+    console::log_1(
+      &format!(
+        "Number of variables per step (primary circuit): {}",
+        rs_pp.num_variables().0
+      )
+      .into(),
+    );
+    console::log_1(
+      &format!(
+        "Number of variables per step (secondary circuit): {}",
+        rs_pp.num_variables().1
+      )
+      .into(),
+    );
+
+    // produce a recursive SNARK
+    console::log_1(&format!("Generating a RecursiveSNARK...").into());
+
+    let mut IC_i = <E1 as Engine>::Scalar::ZERO;
+    let z0 = vec![<E1 as Engine>::Scalar::from(3u64)];
+    let mut rs: RecursiveSNARK<E1> = RecursiveSNARK::<E1>::new(&rs_pp, &f_circuit, &z0).unwrap();
+
+    for i in 0..num_steps {
+      let start = now();
+      rs.prove_step(&rs_pp, &f_circuit, IC_i).unwrap();
+
+      IC_i = rs.increment_commitment(&rs_pp, &f_circuit);
+      console::log_1(&format!("RecursiveSNARK::prove {} : took {:?} ", i, now() - start).into());
+    }
+
+    // verify the recursive SNARK
+    console::log_1(&format!("Verifying a RecursiveSNARK...").into());
+    let res = rs.verify(&rs_pp, num_steps, &z0, IC_i);
+    console::log_1(&format!("RecursiveSNARK::verify: {:?}", res.is_ok()).into());
+    res.unwrap();
   }
 }

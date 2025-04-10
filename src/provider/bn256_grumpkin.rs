@@ -42,11 +42,18 @@ impl_traits!(
   "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47",
   bn256_msm
 );
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "wasm32")))]
 impl_traits!(
   bn256,
   "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
   "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47"
+);
+#[cfg(any(target_arch = "wasm32"))]
+impl_traits!(
+  bn256,
+  "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
+  "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47",
+  web_gpu_best_msm
 );
 
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -56,12 +63,15 @@ impl_traits!(
   "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
   grumpkin_msm
 );
+
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 impl_traits!(
   grumpkin,
   "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47",
   "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001"
 );
+
+
 
 #[cfg(test)]
 mod tests {
