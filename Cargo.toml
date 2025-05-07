@@ -104,8 +104,5 @@ lto = "thin"
 incremental = false
 codegen-units = 16
 
-[patch.crates-io]
-ff = { git = "https://github.com/ICME-Lab/ff", branch = "main" }
-
 [lib]
 crate-type = ["cdylib"]
