@@ -4,6 +4,10 @@ use crate::{
   provider::{traits::DlogGroup, util::msm::cpu_best_msm},
   traits::{Group, PrimeFieldExt, TranscriptReprTrait},
 };
+
+#[cfg(target_arch = "wasm32")]
+use crate::provider::util::msm::web_gpu_best_msm;
+
 use digest::{ExtendableOutput, Update};
 use ff::{FromUniformBytes, PrimeField};
 use group::{cofactor::CofactorCurveAffine, Curve, Group as AnotherGroup};
@@ -48,7 +52,7 @@ impl_traits!(
   "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
   "30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47"
 );
-#[cfg(any(target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 impl_traits!(
   bn256,
   "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",

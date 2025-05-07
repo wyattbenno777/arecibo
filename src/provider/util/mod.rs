@@ -2,7 +2,7 @@
 pub(in crate::provider) mod fb_msm;
 pub mod msm {
   use halo2curves::{msm::best_multiexp, CurveAffine};
-  use msm_webgpu::halo2curves::run_webgpu_msm_browser;
+  use msm_webgpu::run_webgpu_msm;
   // this argument swap is useful until Rust gets named arguments
   // and saves significant complexity in macro code
   pub fn cpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
@@ -10,7 +10,7 @@ pub mod msm {
   }
 
   pub fn web_gpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
-    run_webgpu_msm_browser(&bases.to_vec(), &scalars.to_vec())
+    run_webgpu_msm(bases, scalars)
   }
 }
 
@@ -234,7 +234,7 @@ pub mod test_utils {
 #[cfg(test)]
 pub mod test_msm {
   use halo2curves::{bn256::Bn256, msm::best_multiexp, CurveAffine};
-  use msm_webgpu::halo2curves::run_webgpu_msm_browser;
+  use msm_webgpu::run_webgpu_msm;
 
   use crate::{
     frontend::{num::AllocatedNum, ConstraintSystem, SynthesisError},
