@@ -161,8 +161,10 @@ where
         fb_msm::multi_scalar_mul::<E::G1>(scalar_bits, window_size, &g_table, &nz_powers_of_beta)
       },
       || {
-        let h_table = fb_msm::get_window_table(scalar_bits, window_size, h);
-        fb_msm::multi_scalar_mul::<E::G2>(scalar_bits, window_size, &h_table, &nz_powers_of_beta)
+        let mut h_vec = vec![E::G2::identity(); max_degree + 1];
+        h_vec[0] = h;
+        h_vec[1] = h * beta;
+        h_vec
       },
     );
 
