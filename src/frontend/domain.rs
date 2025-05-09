@@ -314,18 +314,19 @@ fn best_fft<F: PrimeField + gpu::GpuName>(
             return;
         }
     }
-
-    #[cfg(target_arch = "wasm32")]
-    fft_cpu::serial_fft::<F>(a, omega, *log_n);
-
-    #[cfg(not(target_arch = "wasm32"))]
+    
     {
       let log_cpus = worker.log_num_threads();
         for ((a, omega), log_n) in coeffs.iter_mut().zip(omegas.iter()).zip(log_ns.iter()) {
-            if *log_n <= log_cpus {
-                fft_cpu::serial_fft::<F>(a, omega, *log_n);
-            } else {
-                fft_cpu::parallel_fft::<F>(a, worker, omega, *log_n, log_cpus);
+            #[cfg(target_arch = "wasm32")]
+            fft_cpu::serial_fft::<F>(a, omega, *log_n);
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                if *log_n <= log_cpus {
+                    fft_cpu::serial_fft::<F>(a, omega, *log_n);
+                } else {
+                    fft_cpu::parallel_fft::<F>(a, worker, omega, *log_n, log_cpus);
+                }
             }
         }
     }
