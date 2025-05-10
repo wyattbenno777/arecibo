@@ -5,7 +5,9 @@ use crate::{
     gadgets::Assignment, num::AllocatedNum, AllocatedBit, Boolean, ConstraintSystem,
     LinearCombination, SynthesisError,
   },
-  traits::Engine,
+  gadgets::emulated::AllocatedEmulPoint,
+  traits::{commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine},
+  Commitment,
 };
 use ff::{Field, PrimeField, PrimeFieldBits};
 use num_bigint::BigInt;
@@ -451,14 +453,23 @@ pub fn conditionally_select_vec<F: PrimeField, CS: ConstraintSystem<F>>(
 macro_rules! map_field {
   // This arm is used when you already have an Option<&T>
   // Usage: opt_field!(opt_instance, field_name)
-  ($inst:expr, $field:ident) => {
-    $inst.map(|i| &i.$field)
+  ($inst:expr, $($field:ident).+) => {
+    $inst.map(|i| &i$(.$field)+)
   };
   // This arm is used when you have an Option<T> (not already a reference)
   // and you want to call as_ref() first.
   // Usage: opt_field!(opt_instance, ref, field_name)
-  ($opt:expr, ref, $field:ident) => {
-    $opt.as_ref().map(|inst| &inst.$field)
+  ($opt:expr, ref, $($field:ident).+) => {
+    $opt.as_ref().map(|inst| &inst$(.$field)+)
+  };
+  // Arm for index notation (e.g. map_field!(inst, field1[i]))
+  ($inst:expr, $field:ident [$index:expr]) => {
+    $inst.map(|i| &i.$field[$index])
+  };
+  // Arm for method calls (non-reference)
+  // Example: map_field!(inst, field1.some_method())
+  ($inst:expr, $field:ident . $method:ident ( $($args:tt)* )) => {
+    $inst.map(|i| i.$field.$method($($args)*))
   };
 }
 
@@ -468,4 +479,49 @@ macro_rules! and_then_field {
   ($inst:expr, $field:ident) => {
     $inst.as_ref().and_then(|i| i.$field.as_ref())
   };
+}
+
+pub fn alloc_tuple<CS, F>(
+  mut cs: CS,
+  tuple: Option<(F, F)>,
+) -> Result<(AllocatedNum<F>, AllocatedNum<F>), SynthesisError>
+where
+  F: PrimeField,
+  CS: ConstraintSystem<F>,
+{
+  let (a, b) = tuple.unwrap_or((F::ZERO, F::ZERO));
+  let a = AllocatedNum::alloc(cs.namespace(|| "a"), || Ok(a))?;
+  let b = AllocatedNum::alloc(cs.namespace(|| "b"), || Ok(b))?;
+  Ok((a, b))
+}
+
+pub fn alloc_tuple_comms<CS, E>(
+  mut cs: CS,
+  tuple: Option<(Commitment<E>, Commitment<E>)>,
+  limb_width: usize,
+  n_limbs: usize,
+) -> Result<
+  (
+    AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+  ),
+  SynthesisError,
+>
+where
+  E: CurveCycleEquipped,
+  CS: ConstraintSystem<E::Scalar>,
+{
+  let point_0 = AllocatedEmulPoint::alloc(
+    cs.namespace(|| "allocate point 0"),
+    tuple.map(|(p, _)| p.to_coordinates()),
+    limb_width,
+    n_limbs,
+  )?;
+  let point_1 = AllocatedEmulPoint::alloc(
+    cs.namespace(|| "allocate point 1"),
+    tuple.map(|(_, p)| p.to_coordinates()),
+    limb_width,
+    n_limbs,
+  )?;
+  Ok((point_0, point_1))
 }

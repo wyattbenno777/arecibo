@@ -274,7 +274,7 @@ where
     );
     let mut cs: ShapeCS<E1> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
-    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape(ck_hint1);
+    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape_and_key(ck_hint1);
     let ck_primary = Arc::new(ck_primary);
 
     // Initialize ck for the secondary
@@ -286,7 +286,7 @@ where
     );
     let mut cs: ShapeCS<Dual<E1>> = ShapeCS::new();
     let _ = circuit_secondary.synthesize(&mut cs);
-    let (r1cs_shape_secondary, ck_secondary) = cs.r1cs_shape(ck_hint2);
+    let (r1cs_shape_secondary, ck_secondary) = cs.r1cs_shape_and_key(ck_hint2);
     let ck_secondary = Arc::new(ck_secondary);
 
     if r1cs_shape_primary.num_io != 2 || r1cs_shape_secondary.num_io != 2 {
@@ -1029,7 +1029,7 @@ pub fn circuit_digest<E1: CurveCycleEquipped, C: StepCircuit<E1::Scalar>>(
     NovaAugmentedCircuit::new(&augmented_circuit_params, None, circuit, ro_consts_circuit);
   let mut cs: ShapeCS<E1> = ShapeCS::new();
   let _ = augmented_circuit.synthesize(&mut cs);
-  cs.r1cs_shape().digest()
+  cs.r1cs_shape_and_key().digest()
 }
 
 #[cfg(test)]

@@ -1,7 +1,9 @@
+use crate::{zip_with, NovaError};
 use ff::PrimeField;
 use group::Group;
 #[cfg(not(target_arch = "wasm32"))]
 use proptest::prelude::*;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 /// Wrapper struct around a field element that implements additional traits
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,4 +49,11 @@ impl<G: Group> Arbitrary for GWrap<G> {
       .no_shrink();
     strategy.boxed()
   }
+}
+
+pub fn fold_witness<F: PrimeField>(W1: &[F], W2: &[F], rho: F) -> Result<Vec<F>, NovaError> {
+  if W1.len() != W2.len() {
+    return Err(NovaError::InvalidWitnessLength);
+  }
+  Ok(zip_with!((W1.par_iter(), W2), |a, b| *a + rho * *b).collect::<Vec<F>>())
 }

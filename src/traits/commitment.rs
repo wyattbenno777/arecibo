@@ -1,5 +1,7 @@
 //! This module defines a collection of traits that define the behavior of a commitment engine
 //! We require the commitment engine to provide a commitment to vectors with a single group element
+use crate::frontend::{ConstraintSystem, SynthesisError};
+use crate::gadgets::AllocatedPoint;
 use crate::{
   errors::NovaError,
   provider::traits::DlogGroup,
@@ -93,7 +95,21 @@ pub trait CommitmentEngineTrait<E: Engine>: Clone + Send + Sync {
   fn derand_key(ck: &Self::CommitmentKey) -> Self::DerandKey;
 
   /// Commits to the provided vector using the provided generators
-  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment;
+  fn commit(ck: &Self::CommitmentKey, v: &[E::Scalar], r: &E::Scalar) -> Self::Commitment {
+    Self::commit_at(ck, v, r, 0)
+  }
+
+  /// Commits to the provided vector using the provided generators
+  fn commit_at(
+    ck: &Self::CommitmentKey,
+    v: &[E::Scalar],
+    r: &E::Scalar,
+    idx: usize,
+  ) -> Self::Commitment;
+
+  /// Commits to the provided vector using the provided generators in circuit
+  // TODO: Maybe pass AllocatedRelaxedR1CSInstance instead of v and r
+  fn commit_gadget<CS: ConstraintSystem<E::Base>>(cs: &mut CS, _ck: &Self::CommitmentKey, _v: &[E::Scalar], _r: &E::Scalar) -> Result<AllocatedPoint<E::GE>, SynthesisError>;
 
   /// Remove given blind from commitment
   fn derandomize(

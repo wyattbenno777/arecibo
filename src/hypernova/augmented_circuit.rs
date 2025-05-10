@@ -1,28 +1,30 @@
 use super::{nifs::NIFS, rs::StepCircuit};
-use crate::cyclefold::gadgets::AllocatedCycleFoldData;
-use crate::cyclefold::util::FoldingData;
-use crate::frontend::AllocatedBit;
-use crate::gadgets::AllocatedRelaxedR1CSInstance;
-use crate::traits::ROCircuitTrait;
 use crate::{
   and_then_field,
   constants::{DEFAULT_ABSORBS, NIO_CYCLE_FOLD, NUM_HASH_BITS},
   frontend::{
-    gadgets::Assignment, num::AllocatedNum, shape_cs::ShapeCS, Boolean, ConstraintSystem,
-    SynthesisError,
+    gadgets::Assignment, num::AllocatedNum, shape_cs::ShapeCS, AllocatedBit, Boolean,
+    ConstraintSystem, SynthesisError,
   },
   gadgets::{
-    alloc_num_equals, alloc_zero, conditionally_select_vec,
+    alloc_num_equals, alloc_tuple, alloc_tuple_comms, alloc_zero, conditionally_select,
+    conditionally_select_vec,
     emulated::AllocatedEmulPoint,
     hypernova::{
-      alloc_sized_vec, increment, AllocatedLR1CSInstance, AllocatedNIFS, AllocatedR1CSInstance,
+      alloc_sized_vec, increment, AllocatedLR1CSInstance, AllocatedNIFS, AllocatedSplitR1CSInstance,
     },
-    le_bits_to_num,
+    le_bits_to_num, AllocatedRelaxedR1CSInstance,
   },
   map_field,
-  r1cs::{LR1CSInstance, R1CSInstance},
+  r1cs::{
+    split::{LR1CSInstance, SplitR1CSInstance},
+    RelaxedR1CSInstance,
+  },
   spartan::math::Math,
-  traits::{commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
+  traits::{
+    commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROCircuitTrait,
+    ROConstantsCircuit,
+  },
   AugmentedCircuitParams, Commitment,
 };
 use itertools::Itertools;
@@ -53,9 +55,11 @@ where
   z_i: Option<Vec<E::Scalar>>,
   nifs: Option<NIFS<E>>,
   U: Option<LR1CSInstance<E>>,
-  u: Option<R1CSInstance<E>>,
+  u: Option<SplitR1CSInstance<E>>,
   W_new: Option<Commitment<E>>,
-  data_cyclefold: Option<FoldingData<Dual<E>>>,
+  U_cyclefold: Option<RelaxedR1CSInstance<Dual<E>>>,
+  pre_committed: Option<(Commitment<E>, Commitment<E>)>,
+  prev_IC: Option<(E::Scalar, E::Scalar)>,
 }
 
 impl<E> AugmentedCircuitInputs<E>
@@ -69,9 +73,11 @@ where
     z_i: Option<Vec<E::Scalar>>,
     nifs: Option<NIFS<E>>,
     U: Option<LR1CSInstance<E>>,
-    u: Option<R1CSInstance<E>>,
+    u: Option<SplitR1CSInstance<E>>,
     W_new: Option<Commitment<E>>,
-    data_cyclefold: Option<FoldingData<Dual<E>>>,
+    U_cyclefold: Option<RelaxedR1CSInstance<Dual<E>>>,
+    pre_committed: Option<(Commitment<E>, Commitment<E>)>,
+    prev_IC: Option<(E::Scalar, E::Scalar)>,
   ) -> Self {
     Self {
       pp_digest,
@@ -82,7 +88,9 @@ where
       U,
       u,
       W_new,
-      data_cyclefold,
+      U_cyclefold,
+      pre_committed,
+      prev_IC,
     }
   }
 }
@@ -98,25 +106,21 @@ where
   ) -> Result<Vec<AllocatedNum<E::Scalar>>, SynthesisError> {
     // Allocate the witness
     let arity = self.step_circuit.arity();
-    let (pp_digest, i, z_0, z_i, nifs, U, u, W_new, data_cyclefold) =
+    let (pp_digest, i, z_0, z_i, nifs, U, u, W_new, U_cyclefold, pre_committed, prev_IC) =
       self.alloc_witness(cs.namespace(|| "alloc_witness"), arity)?;
 
-    // Base case: i = 0
-    // ////////////////
+    // --- Base case: i = 0 ---
     //
     // 1. Check if this is the base case
     let zero = alloc_zero(cs.namespace(|| "zero"));
     let is_base_case = alloc_num_equals(cs.namespace(|| "is base case"), &i, &zero)?;
-    // ////////////////////////////////////
     // 2. Get the default running instance.
     let (U_default, U_cyclefold_default) =
       self.synthesize_base_case(cs.namespace(|| "base case"))?;
 
-    // Non-base case: i > 0
-    // ////////////////////
+    // --- Non-base case: i > 0 ---
     //
-    // 1. Compute Hash check
-    // 2. U <- NIFS.V
+    // Compute Hash check and U <- NIFS.V
     let (U_non_base_case, U_cyclefold_non_base_case, check_non_base_pass) = self
       .synthesize_non_base_case(
         cs.namespace(|| "non base case"),
@@ -129,67 +133,68 @@ where
         &U,
         &u,
         W_new,
-        &data_cyclefold,
+        &U_cyclefold,
+        pre_committed,
+        (&prev_IC.0, &prev_IC.1),
       )?;
 
-    // Check that u references U in the output of the prior iteration
+    // --- Check that u references U in the output of the prior iteration ---
     //
-    // Hash check: u.X[0] = H(pp, i, z0, zi, U) && u.X[1] = H(pp, i, U_cyclefold)
-    let should_be_false = AllocatedBit::nor(
-      cs.namespace(|| "check_non_base_pass nor base_case"),
+    // Hash check: u.X[0] = H(pp, i, z_0, z_i, U) && u.X[1] = H(pp, i, U_cyclefold)
+    self.enforce_hash_check(
+      cs.namespace(|| "enforce_hash_check"),
       &check_non_base_pass,
       &is_base_case,
     )?;
-    cs.enforce(
-      || "check_non_base_pass nor base_case = false",
-      |lc| lc + should_be_false.get_variable(),
-      |lc| lc + CS::one(),
-      |lc| lc,
-    );
 
-    // Select the new running instances.
-    // /////////////////////////////////
+    // --- Select the new running instances. ---
     //
     // 1. Select the new U based on whether this is the base case
-    // 2. Select the new U_cyclefold based on whether this is the base case
     let U_new = U_default.conditionally_select(
       cs.namespace(|| "compute U_new"),
       &U_non_base_case,
       &Boolean::from(is_base_case.clone()),
     )?;
+    // 2. Select the new U_cyclefold based on whether this is the base case
     let U_new_cyclefold = U_cyclefold_default.conditionally_select(
       cs.namespace(|| "compute U_new_cyclefold"),
       &U_cyclefold_non_base_case,
       &Boolean::from(is_base_case.clone()),
     )?;
 
-    // Synthesize the step circuit (F) and compute the next output.
-    // ///////////////////////////////////////////////////////////
+    // --- Synthesize the step circuit (F) and compute the next output. ---
     //
-    // 1. Select the z input based on whether this is the base case
-    // 2. Compute the next output z_next ← F(z_input)
+    // 1.  Select the z input based on whether this is the base case
     let z_input = conditionally_select_vec(
       cs.namespace(|| "select input to F"),
       &z_0,
       &z_i,
       &Boolean::from(is_base_case.clone()),
     )?;
+    // 2. Compute the next output z_next ← F(z_input)
     let z_next = self
       .step_circuit
       .synthesize(&mut cs.namespace(|| "F"), &z_input)?;
-    // //////////////////////////////////////////////////
-    // Check step_circuit_i (F_i) conforms to structure F
+    // 3. Check step_circuit_i (F_i) conforms to structure F
     if z_next.len() != arity {
       return Err(SynthesisError::IncompatibleLengthVector(
         "z_next".to_string(),
       ));
     }
-    // Compute i++
+    // 4. Compute i++
     let i_new = increment(cs.namespace(|| "i++"), &i)?;
 
-    // Output hash
-    // ///////////
-    // u.X[0] = H(pp, i, z0, zi, U)
+    // If i = 0 then C_i ← ⊥, else C_i ← hash(C_i−1, C_ωi−1)
+    let IC = self.increment_ic(
+      cs.namespace(|| "increment IC"),
+      prev_IC,
+      (&u.pre_committed.0, &u.pre_committed.1),
+      &is_base_case,
+    )?;
+
+    // --- Output hash ---
+    //
+    // 1. u.X[0] = H(pp, i, z_0, z_i, U)
     let hash = self.calculate_hash(
       cs.namespace(|| "calculate_hash"),
       &pp_digest,
@@ -197,13 +202,13 @@ where
       &z_0,
       &z_next,
       &U_new,
+      (&IC.0, &IC.1),
     )?;
     hash.inputize(cs.namespace(|| "u.x[0] = hash"))?;
-    // //////////////////////////////////////////////////////////////////
-    // Calculate the second component of the public IO as the hash of the
-    // calculated CycleFold running instance
+    // 2. Calculate the second component of the public IO as the hash of the
+    //    calculated CycleFold running instance
     //
-    // u.X[1] = H(pp, i, U_cyclefold)
+    //    u.X[1] = H(pp, i, U_cyclefold)
     let hash_cyclefold = self.calculate_hash_cyclefold(
       cs.namespace(|| "calculate_hash_cyclefold"),
       &pp_digest,
@@ -224,9 +229,14 @@ where
     ro_consts: &ROConstantsCircuit<Dual<E>>,
     nifs: &AllocatedNIFS<E>,
     U: &AllocatedLR1CSInstance<E>,
-    u: &AllocatedR1CSInstance<E>,
+    u: &AllocatedSplitR1CSInstance<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
-    data_cyclefold: &AllocatedCycleFoldData<Dual<E>>,
+    U_cyclefold: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+    pre_committed: (
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    ),
+    prev_IC: (&AllocatedNum<E::Scalar>, &AllocatedNum<E::Scalar>),
   ) -> Result<
     (
       AllocatedLR1CSInstance<E>,
@@ -235,7 +245,7 @@ where
     ),
     SynthesisError,
   > {
-    // Hash check: u.X[0] = H(pp, i, z0, zi, U)
+    // Hash check: u.X[0] = H(pp, i, z_0, z_i, U)
     //             u.X[1] = H(pp, i, U_cyclefold)
     let io_check = self.io_check(
       cs.namespace(|| "io_check"),
@@ -245,28 +255,150 @@ where
       z_i,
       U,
       u,
-      &data_cyclefold.U,
+      U_cyclefold,
+      prev_IC,
     )?;
 
     // # NIFS.V
     //
     // Compute folded U and U_cyclefold
-    let U = nifs.verify(
+    let (U, U_cyclefold) = nifs.verify(
       cs.namespace(|| "NIFS.V"),
       pp_digest,
       ro_consts,
       U,
       u,
       W_new,
+      pre_committed,
+      U_cyclefold,
       self.num_rounds,
-    )?;
-    let U_cyclefold = data_cyclefold.apply_fold(
-      cs.namespace(|| "fold u_cyclefold into U_cyclefold"),
-      self.ro_consts.clone(),
       self.params.limb_width,
       self.params.n_limbs,
     )?;
     Ok((U, U_cyclefold, io_check))
+  }
+
+  pub fn synthesize_base_case<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+  ) -> Result<
+    (
+      AllocatedLR1CSInstance<E>,
+      AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+    ),
+    SynthesisError,
+  > {
+    let U_default = AllocatedLR1CSInstance::default(
+      cs.namespace(|| "Allocated U_default"),
+      self.params.limb_width,
+      self.params.n_limbs,
+      self.num_rounds,
+    )?;
+    let U_cyclefold_default = AllocatedRelaxedR1CSInstance::default(
+      cs.namespace(|| "Allocate U_c_default"),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    Ok((U_default, U_cyclefold_default))
+  }
+
+  fn alloc_witness<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+    arity: usize,
+  ) -> Result<
+    (
+      AllocatedNum<E::Scalar>,                               // pp_digest
+      AllocatedNum<E::Scalar>,                               // i
+      Vec<AllocatedNum<E::Scalar>>,                          // z_0
+      Vec<AllocatedNum<E::Scalar>>,                          // z_i
+      AllocatedNIFS<E>,                                      // nifs
+      AllocatedLR1CSInstance<E>,                             // U
+      AllocatedSplitR1CSInstance<E>,                         // u
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,           // W_new
+      AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>, // U_cyclefold
+      (
+        AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+        AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+      ), // pre_committed
+      (AllocatedNum<E::Scalar>, AllocatedNum<E::Scalar>),    // prev_IC
+    ),
+    SynthesisError,
+  > {
+    // Allocate primitives: pp_digest, i, z_0
+    let pp_digest = AllocatedNum::alloc(cs.namespace(|| "pp_digest"), || {
+      Ok(self.inputs.get()?.pp_digest)
+    })?;
+    let i = AllocatedNum::alloc(cs.namespace(|| "i"), || Ok(self.inputs.get()?.i))?;
+    let z_0 = alloc_sized_vec(
+      cs.namespace(|| "z_0"),
+      map_field!(self.inputs, ref, z_0),
+      arity,
+    )?;
+
+    // Allocate z_i. If inputs.z_i is not provided (base case) allocate default value 0
+    let z_i = alloc_sized_vec(
+      cs.namespace(|| "z_i"),
+      and_then_field!(self.inputs, z_i),
+      arity,
+    )?;
+
+    // Allocate primary folding data
+    let nifs = AllocatedNIFS::alloc(
+      cs.namespace(|| "nifs"),
+      and_then_field!(self.inputs, nifs),
+      self.num_rounds,
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    let U = AllocatedLR1CSInstance::alloc(
+      cs.namespace(|| "allocate U"),
+      and_then_field!(self.inputs, U),
+      self.params.limb_width,
+      self.params.n_limbs,
+      self.num_rounds,
+    )?;
+    let u = AllocatedSplitR1CSInstance::alloc(
+      cs.namespace(|| "allocate u"),
+      and_then_field!(self.inputs, u),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    let W_new = AllocatedEmulPoint::alloc(
+      cs.namespace(|| "allocate W_new"),
+      and_then_field!(self.inputs, W_new).map(|W_new| W_new.to_coordinates()),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    let U_cyclefold = AllocatedRelaxedR1CSInstance::alloc(
+      cs.namespace(|| "allocate U_cyclefold"),
+      and_then_field!(self.inputs, U_cyclefold),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    let pre_committed = alloc_tuple_comms::<_, E>(
+      cs.namespace(|| "pre_committed"),
+      self.inputs.as_ref().and_then(|inputs| inputs.pre_committed),
+      self.params.limb_width,
+      self.params.n_limbs,
+    )?;
+    let prev_IC = alloc_tuple(
+      cs.namespace(|| "prev_IC"),
+      self.inputs.as_ref().and_then(|inputs| inputs.prev_IC),
+    )?;
+    Ok((
+      pp_digest,
+      i,
+      z_0,
+      z_i,
+      nifs,
+      U,
+      u,
+      W_new,
+      U_cyclefold,
+      pre_committed,
+      prev_IC,
+    ))
   }
 
   pub fn io_check<CS: ConstraintSystem<E::Scalar>>(
@@ -277,12 +409,21 @@ where
     z_0: &[AllocatedNum<E::Scalar>],
     z_i: &[AllocatedNum<E::Scalar>],
     U: &AllocatedLR1CSInstance<E>,
-    u: &AllocatedR1CSInstance<E>,
+    u: &AllocatedSplitR1CSInstance<E>,
     U_cyclefold: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+    prev_IC: (&AllocatedNum<E::Scalar>, &AllocatedNum<E::Scalar>),
   ) -> Result<AllocatedBit, SynthesisError> {
-    // Hash check: u.X[0] = H(pp, i, z0, zi, U)
-    let hash_check =
-      self.hash_check(cs.namespace(|| "hash_check"), pp_digest, i, z_0, z_i, U, u)?;
+    // Hash check: u.X[0] = H(pp, i, z_0, z_i, U)
+    let hash_check = self.hash_check(
+      cs.namespace(|| "hash_check"),
+      pp_digest,
+      i,
+      z_0,
+      z_i,
+      U,
+      u,
+      prev_IC,
+    )?;
 
     // Hash check: u.X[1] = H(pp, i, U_cyclefold)
     let hash_check_cyclefold = self.hash_check_cyclefold(
@@ -310,11 +451,20 @@ where
     z_0: &[AllocatedNum<E::Scalar>],
     z_i: &[AllocatedNum<E::Scalar>],
     U: &AllocatedLR1CSInstance<E>,
-    u: &AllocatedR1CSInstance<E>,
+    u: &AllocatedSplitR1CSInstance<E>,
+    prev_IC: (&AllocatedNum<E::Scalar>, &AllocatedNum<E::Scalar>),
   ) -> Result<AllocatedBit, SynthesisError> {
-    let hash = self.calculate_hash(cs.namespace(|| "calculate_hash"), pp_digest, i, z_0, z_i, U)?;
+    let hash = self.calculate_hash(
+      cs.namespace(|| "calculate_hash"),
+      pp_digest,
+      i,
+      z_0,
+      z_i,
+      U,
+      prev_IC,
+    )?;
     let hash_check = alloc_num_equals(
-      cs.namespace(|| "u.X[0] = H(params, i, z0, zi, U)"),
+      cs.namespace(|| "u.X[0] = H(params, i, z_0, z_i, U)"),
       &u.x0,
       &hash,
     )?;
@@ -327,7 +477,7 @@ where
     pp_digest: &AllocatedNum<E::Scalar>,
     i: &AllocatedNum<E::Scalar>,
     U: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
-    u: &AllocatedR1CSInstance<E>,
+    u: &AllocatedSplitR1CSInstance<E>,
   ) -> Result<AllocatedBit, SynthesisError> {
     let hash = self.calculate_hash_cyclefold(cs.namespace(|| "calculate_hash"), pp_digest, i, U)?;
     let hash_check = alloc_num_equals(
@@ -338,6 +488,26 @@ where
     Ok(hash_check)
   }
 
+  pub fn enforce_hash_check<CS: ConstraintSystem<E::Scalar>>(
+    &self,
+    mut cs: CS,
+    check_non_base_pass: &AllocatedBit,
+    is_base_case: &AllocatedBit,
+  ) -> Result<(), SynthesisError> {
+    let should_be_false = AllocatedBit::nor(
+      cs.namespace(|| "check_non_base_pass nor base_case"),
+      check_non_base_pass,
+      is_base_case,
+    )?;
+    cs.enforce(
+      || "check_non_base_pass nor base_case = false",
+      |lc| lc + should_be_false.get_variable(),
+      |lc| lc + CS::one(),
+      |lc| lc,
+    );
+    Ok(())
+  }
+
   pub fn calculate_hash<CS: ConstraintSystem<E::Scalar>>(
     &self,
     mut cs: CS,
@@ -346,6 +516,7 @@ where
     z_0: &[AllocatedNum<E::Scalar>],
     z_i: &[AllocatedNum<E::Scalar>],
     U: &AllocatedLR1CSInstance<E>,
+    IC: (&AllocatedNum<E::Scalar>, &AllocatedNum<E::Scalar>),
   ) -> Result<AllocatedNum<E::Scalar>, SynthesisError> {
     let mut ro = <Dual<E> as Engine>::ROCircuit::new(self.ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(pp_digest);
@@ -357,6 +528,8 @@ where
       ro.absorb(e)
     }
     U.absorb_in_ro(cs.namespace(|| "absorb U"), &mut ro)?;
+    ro.absorb(IC.0);
+    ro.absorb(IC.1);
     let hash_bits = ro.squeeze(cs.namespace(|| "primary hash bits"), NUM_HASH_BITS)?;
     let hash = le_bits_to_num(cs.namespace(|| "primary hash"), &hash_bits)?;
     Ok(hash)
@@ -378,99 +551,52 @@ where
     Ok(hash)
   }
 
-  fn alloc_witness<CS: ConstraintSystem<E::Scalar>>(
+  pub fn increment_ic<CS: ConstraintSystem<E::Scalar>>(
     &self,
     mut cs: CS,
-    arity: usize,
-  ) -> Result<
-    (
-      AllocatedNum<E::Scalar>,                     // pp_digest
-      AllocatedNum<E::Scalar>,                     // i
-      Vec<AllocatedNum<E::Scalar>>,                // z0
-      Vec<AllocatedNum<E::Scalar>>,                // zi
-      AllocatedNIFS<E>,                            // nifs
-      AllocatedLR1CSInstance<E>,                   // U
-      AllocatedR1CSInstance<E>,                    // u
-      AllocatedEmulPoint<<Dual<E> as Engine>::GE>, // W_new
-      AllocatedCycleFoldData<Dual<E>>,             // data_cyclefold
+    prev_IC: (AllocatedNum<E::Scalar>, AllocatedNum<E::Scalar>),
+    comm_advice: (
+      &AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+      &AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
     ),
-    SynthesisError,
-  > {
-    // Allocate primitives: pp_digest, i, z_0
-    let pp_digest = AllocatedNum::alloc(cs.namespace(|| "pp_digest"), || {
-      Ok(self.inputs.get()?.pp_digest)
-    })?;
-    let i = AllocatedNum::alloc(cs.namespace(|| "i"), || Ok(self.inputs.get()?.i))?;
-    let z_0 = alloc_sized_vec(
-      cs.namespace(|| "z_0"),
-      map_field!(self.inputs, ref, z_0),
-      arity,
-    )?;
-
-    // Allocate zi. If inputs.zi is not provided (base case) allocate default value 0
-    let z_i = alloc_sized_vec(
-      cs.namespace(|| "z_i"),
-      and_then_field!(self.inputs, z_i),
-      arity,
-    )?;
-
-    // Allocate primary folding data
-    let nifs = AllocatedNIFS::alloc(
-      cs.namespace(|| "nifs"),
-      and_then_field!(self.inputs, nifs),
-      self.num_rounds,
-    )?;
-    let U = AllocatedLR1CSInstance::alloc(
-      cs.namespace(|| "allocate U"),
-      and_then_field!(self.inputs, U),
-      self.params.limb_width,
-      self.params.n_limbs,
-      self.num_rounds,
-    )?;
-    let u = AllocatedR1CSInstance::alloc(
-      cs.namespace(|| "allocate u"),
-      and_then_field!(self.inputs, u),
-      self.params.limb_width,
-      self.params.n_limbs,
-    )?;
-    let W_new = AllocatedEmulPoint::alloc(
-      cs.namespace(|| "allocate W_new"),
-      and_then_field!(self.inputs, W_new).map(|W_new| W_new.to_coordinates()),
-      self.params.limb_width,
-      self.params.n_limbs,
-    )?;
-
-    let data_cyclefold = AllocatedCycleFoldData::alloc(
-      cs.namespace(|| "data_c_1"),
-      and_then_field!(self.inputs, data_cyclefold),
-      self.params.limb_width,
-      self.params.n_limbs,
-    )?;
-    Ok((pp_digest, i, z_0, z_i, nifs, U, u, W_new, data_cyclefold))
+    is_base_case: &AllocatedBit,
+  ) -> Result<(AllocatedNum<E::Scalar>, AllocatedNum<E::Scalar>), SynthesisError> {
+    Ok((
+      self.increment_ic_sole(
+        cs.namespace(|| "increment IC0"),
+        prev_IC.0,
+        comm_advice.0,
+        is_base_case,
+      )?,
+      self.increment_ic_sole(
+        cs.namespace(|| "increment IC1"),
+        prev_IC.1,
+        comm_advice.1,
+        is_base_case,
+      )?,
+    ))
   }
 
-  pub fn synthesize_base_case<CS: ConstraintSystem<E::Scalar>>(
+  pub fn increment_ic_sole<CS: ConstraintSystem<E::Scalar>>(
     &self,
     mut cs: CS,
-  ) -> Result<
-    (
-      AllocatedLR1CSInstance<E>,
-      AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
-    ),
-    SynthesisError,
-  > {
-    let U_default = AllocatedLR1CSInstance::default(
-      cs.namespace(|| "Allocated U_default"),
-      self.params.limb_width,
-      self.params.n_limbs,
-      self.num_rounds,
-    )?;
-    let U_cyclefold_default = AllocatedRelaxedR1CSInstance::default(
-      cs.namespace(|| "Allocate U_c_default"),
-      self.params.limb_width,
-      self.params.n_limbs,
-    )?;
-    Ok((U_default, U_cyclefold_default))
+    prev_IC: AllocatedNum<E::Scalar>,
+    comm_advice: &AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    is_base_case: &AllocatedBit,
+  ) -> Result<AllocatedNum<E::Scalar>, SynthesisError> {
+    let IC = {
+      let mut ro = <Dual<E> as Engine>::ROCircuit::new(self.ro_consts.clone(), DEFAULT_ABSORBS);
+      ro.absorb(&prev_IC);
+      comm_advice.absorb_in_ro(cs.namespace(|| "absorb pre_committed0"), &mut ro)?;
+      let IC_bits = ro.squeeze(cs.namespace(|| "IC_bits_IS"), NUM_HASH_BITS)?;
+      le_bits_to_num(cs.namespace(|| "IC"), &IC_bits)?
+    };
+    conditionally_select(
+      cs.namespace(|| "select IC"),
+      &prev_IC,
+      &IC,
+      &Boolean::from(is_base_case.clone()),
+    )
   }
 
   pub const fn new(
@@ -527,10 +653,10 @@ where
 {
   let mut cs: ShapeCS<E> = ShapeCS::new();
   let zero: AllocatedNum<E::Scalar> = alloc_zero(cs.namespace(|| "zero"));
-  let z0 = (0..step_circuit.arity())
+  let z_0 = (0..step_circuit.arity())
     .map(|_| zero.clone())
     .collect_vec();
-  let _ = step_circuit.synthesize(&mut cs, &z0);
+  let _ = step_circuit.synthesize(&mut cs, &z_0);
   let step_circuit_cons = cs.num_constraints();
   let mut max_cons =
     base_cons + step_circuit_cons + (step_circuit.arity()).saturating_sub(1) * cons_per_input;
@@ -573,14 +699,15 @@ mod tests {
 
   use crate::{
     constants::{
-      BASE_CONSTRAINTS, BN_LIMB_WIDTH, BN_N_LIMBS, MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT,
-      MAX_CONSTRAINTS_PER_SUMCHECK_ROUND,
+      BASE_CONSTRAINTS, BN_LIMB_WIDTH, BN_N_LIMBS, EDGE_CASE_CONSTRAINTS,
+      MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT, MAX_CONSTRAINTS_PER_SUMCHECK_ROUND,
     },
     frontend::{num::AllocatedNum, shape_cs::ShapeCS, ConstraintSystem, SynthesisError},
     hypernova::{augmented_circuit::project_aug_circuit_size, rs::StepCircuit},
     provider::Bn256EngineIPA,
     spartan::math::Math,
-    traits::{Dual, ROConstantsCircuit},
+    traits::{Dual, Engine, ROConstantsCircuit},
+    AugmentedCircuitParams,
   };
 
   /// A trivial step circuit that simply returns the input
@@ -683,174 +810,141 @@ mod tests {
 
   use super::AugmentedCircuit;
   type E = Bn256EngineIPA;
+  type F = <E as Engine>::Scalar;
 
   #[test]
   fn test_circuit_constants_sumcheck() {
-    // Get the round constants used in the poseidon hash function and poseidon hash function circuit
+    // Get the round constants used in the Poseidon hash function circuit.
     let ro_consts_circuit = ROConstantsCircuit::<Dual<E>>::default();
+    // Use a trivial circuit because it has 0 constraints.
     let test_circuit = TrivialCircuit::default();
 
-    // Constraint Generation #1: No inputs and no sumcheck
+    // Augmented circuit parameters.
     let augmented_circuit_params = crate::AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
-    let num_rounds = project_aug_circuit_size::<E>(
+
+    // Helper closure to synthesize a circuit with a given number of sumcheck rounds,
+    // returning the total number of constraints.
+    let synthesize_constraints = |sumcheck_rounds: usize| -> usize {
+      let circuit: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
+        &augmented_circuit_params,
+        ro_consts_circuit.clone(),
+        None,
+        &test_circuit,
+        sumcheck_rounds,
+      );
+      let mut cs: ShapeCS<E> = ShapeCS::new();
+      let _ = circuit.synthesize(&mut cs);
+      cs.num_constraints()
+    };
+
+    // --- Constraint Generation ---
+    // Baseline: no sumcheck rounds.
+    let base_cons = synthesize_constraints(0);
+    println!("Base constraints: {}", base_cons);
+    assert_eq!(base_cons, BASE_CONSTRAINTS - EDGE_CASE_CONSTRAINTS);
+
+    // 1 sumcheck round.
+    let cons_1 = synthesize_constraints(1);
+    println!(
+      "Additional sumcheck constraints for one round: {}",
+      cons_1 - base_cons
+    );
+    assert_eq!(
+      cons_1 - base_cons - EDGE_CASE_CONSTRAINTS,
+      MAX_CONSTRAINTS_PER_SUMCHECK_ROUND
+    );
+
+    // 2 sumcheck rounds.
+    let cons_2 = synthesize_constraints(2);
+    println!(
+      "Additional sumcheck constraints for two rounds: {}",
+      cons_2 - cons_1
+    );
+    assert_eq!(cons_2 - cons_1, MAX_CONSTRAINTS_PER_SUMCHECK_ROUND);
+
+    // 3 sumcheck rounds.
+    let cons_3 = synthesize_constraints(3);
+    println!(
+      "Additional sumcheck constraints for three rounds: {}",
+      cons_3 - cons_2
+    );
+    assert_eq!(cons_3 - cons_2, cons_2 - cons_1);
+
+    // 17 sumcheck rounds.
+    const SUMCHECK_ROUNDS: usize = 17;
+    let cons_rounds = synthesize_constraints(SUMCHECK_ROUNDS);
+
+    // --- Estimate the number of rounds ---
+    let estimated_rounds = project_aug_circuit_size::<E>(
       BASE_CONSTRAINTS,
       MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT,
       MAX_CONSTRAINTS_PER_SUMCHECK_ROUND,
       &test_circuit,
     );
-    let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
-      &augmented_circuit_params,
-      ro_consts_circuit.clone(),
-      None,
-      &test_circuit,
-      0,
-    );
-    let mut cs: ShapeCS<E> = ShapeCS::new();
-    let _ = circuit_primary.synthesize(&mut cs);
-    let base_cons = cs.num_constraints();
-    println!("Base constraints: {}", base_cons);
+    println!("Estimated number of rounds: {}", estimated_rounds);
 
-    // Constraint Generation #1: No inputs and 1 sumcheck round
-    let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
-      &augmented_circuit_params,
-      ro_consts_circuit.clone(),
-      None,
-      &test_circuit,
-      1,
-    );
-    let mut cs: ShapeCS<E> = ShapeCS::new();
-    let _ = circuit_primary.synthesize(&mut cs);
-    let base_with_sumcheck = cs.num_constraints();
-    println!(
-      "Constraints with one sumcheck round: {}",
-      base_with_sumcheck
-    );
-    let num_sumcheck_constraints = base_with_sumcheck - base_cons;
-    println!(
-      "Num sumcheck constraints for one round: {}",
-      num_sumcheck_constraints
-    );
-
-    // Constraint Generation #3: No inputs and 2 sumcheck rounds
-    let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
-      &augmented_circuit_params,
-      ro_consts_circuit.clone(),
-      None,
-      &test_circuit,
-      2,
-    );
-    let mut cs: ShapeCS<E> = ShapeCS::new();
-    let _ = circuit_primary.synthesize(&mut cs);
-    let base_with_sumcheck2 = cs.num_constraints();
-    println!(
-      "Constraints with two sumcheck rounds: {}",
-      base_with_sumcheck2
-    );
-    let num_sumcheck_constraints = base_with_sumcheck2 - base_with_sumcheck;
-    println!(
-      "Num sumcheck constraints for two round: {}",
-      num_sumcheck_constraints
-    );
-
-    // Constraint Generation #4: No inputs and 3 sumcheck round
-    let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
-      &augmented_circuit_params,
-      ro_consts_circuit.clone(),
-      None,
-      &test_circuit,
-      3,
-    );
-    let mut cs: ShapeCS<E> = ShapeCS::new();
-    let _ = circuit_primary.synthesize(&mut cs);
-    let base_with_sumcheck3 = cs.num_constraints();
-    println!(
-      "Constraints with three sumcheck rounds: {}",
-      base_with_sumcheck3
-    );
-    let num_sumcheck_constraints = base_with_sumcheck3 - base_with_sumcheck2;
-    println!(
-      "Num sumcheck constraints for three round: {}",
-      num_sumcheck_constraints
-    );
-
-    // Constraint Generation #5: No inputs and 15 sumcheck round
-    let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
-      &augmented_circuit_params,
-      ro_consts_circuit.clone(),
-      None,
-      &test_circuit,
-      15,
-    );
-    let mut cs: ShapeCS<E> = ShapeCS::new();
-    let _ = circuit_primary.synthesize(&mut cs);
-    let base_with_sumcheck15 = cs.num_constraints();
-    println!(
-      "Constraints with 15 sumcheck rounds: {}",
-      base_with_sumcheck15
-    );
-    let num_sumcheck_constraints = base_with_sumcheck15 - base_cons;
-    println!(
-      "Num sumcheck constraints for 15 rounds: {}",
-      num_sumcheck_constraints
-    );
-
-    println!("estimated num rounds: {}", num_rounds);
-    println!(
-      "actual num rounds: {}",
-      base_with_sumcheck15.next_power_of_two().log_2()
-    );
+    // Calculate the actual rounds by taking the next power of two of the 15-round constraint count.
+    let actual_rounds = cons_rounds.next_power_of_two().log_2();
+    println!("Actual number of rounds: {}", actual_rounds);
+    assert_eq!(actual_rounds, estimated_rounds);
+    assert_eq!(actual_rounds, SUMCHECK_ROUNDS);
   }
 
   #[test]
   fn test_circuit_constants_inputs() {
-    // Get the round constants used in the poseidon hash function and poseidon hash function circuit
+    // Get the round constants used in the Poseidon hash function circuit.
     let ro_consts_circuit = ROConstantsCircuit::<Dual<E>>::default();
+    // Augmented circuit parameters.
+    let augmented_circuit_params = AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
 
-    // Constraint Generation #1: The Step Circuit with 0 inputs
-    let test_circuit = TrivialCircuit::default();
-    let augmented_circuit_params = crate::AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
-    let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
-      &augmented_circuit_params,
-      ro_consts_circuit.clone(),
-      None,
-      &test_circuit,
-      0,
-    );
-    let mut cs: ShapeCS<E> = ShapeCS::new();
-    let _ = circuit_primary.synthesize(&mut cs);
-    let base_cons = cs.num_constraints();
-    println!("Constraints: {}", base_cons);
+    // Helper closure to synthesize a circuit with a given number of sumcheck rounds,
+    // returning the total number of constraints.
+    fn synthesize_constraints(
+      circuit: &impl StepCircuit<F>,
+      sumcheck_rounds: usize,
+      params: &AugmentedCircuitParams,
+      ro_consts: &ROConstantsCircuit<Dual<E>>,
+    ) -> usize {
+      let circuit_primary: AugmentedCircuit<'_, E, _> =
+        AugmentedCircuit::new(params, ro_consts.clone(), None, circuit, sumcheck_rounds);
+      let mut cs: ShapeCS<E> = ShapeCS::new();
+      let _ = circuit_primary.synthesize(&mut cs);
+      cs.num_constraints()
+    }
 
-    // Constraint Generation #2: The Step Circuit with 1 inputs
-    let test_circuit = TrivialCircuit2::default();
-    let augmented_circuit_params = crate::AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
-    let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
-      &augmented_circuit_params,
-      ro_consts_circuit.clone(),
-      None,
-      &test_circuit,
-      0,
-    );
-    let mut cs: ShapeCS<E> = ShapeCS::new();
-    let _ = circuit_primary.synthesize(&mut cs);
-    let base_cons2 = cs.num_constraints();
-    println!("Constraints2: {}", base_cons2);
-    println!("Constraints per input2: {}", base_cons2 - base_cons);
+    // --- Constraint Generation with varying inputs ---
 
-    // Constraint Generation #3: The Step Circuit with 2 inputs
-    let test_circuit = TrivialCircuit3::default();
-    let augmented_circuit_params = crate::AugmentedCircuitParams::new(BN_LIMB_WIDTH, BN_N_LIMBS);
-    let circuit_primary: AugmentedCircuit<'_, E, _> = AugmentedCircuit::new(
-      &augmented_circuit_params,
-      ro_consts_circuit.clone(),
-      None,
-      &test_circuit,
+    // Case 1: The Step Circuit with 0 inputs.
+    let base_cons = synthesize_constraints(
+      &TrivialCircuit::default(),
       0,
+      &augmented_circuit_params,
+      &ro_consts_circuit,
     );
-    let mut cs: ShapeCS<E> = ShapeCS::new();
-    let _ = circuit_primary.synthesize(&mut cs);
-    let base_cons3 = cs.num_constraints();
-    println!("Constraints3: {}", base_cons3);
-    println!("Constraints per input3: {}", base_cons3 - base_cons2);
+
+    // Case 2: The Step Circuit with 1 input.
+    let cons1 = synthesize_constraints(
+      &TrivialCircuit2::default(),
+      0,
+      &augmented_circuit_params,
+      &ro_consts_circuit,
+    );
+    let input1_constraints = cons1 - base_cons;
+    println!("Constraints per input (1 input): {}", input1_constraints);
+    assert_eq!(input1_constraints, MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT);
+
+    // Case 3: The Step Circuit with 2 inputs.
+    let cons2 = synthesize_constraints(
+      &TrivialCircuit3::default(),
+      0,
+      &augmented_circuit_params,
+      &ro_consts_circuit,
+    );
+    let input2_constraints = cons2 - cons1;
+    println!(
+      "Constraints per additional input (2 inputs): {}",
+      input2_constraints
+    );
+    assert_eq!(input2_constraints, MAX_CONSTRAINTS_PER_STEP_CIRCUIT_INPUT);
   }
 }

@@ -271,7 +271,7 @@ where
           .expect("circuit synthesis failed");
 
         // We use the largest commitment_key for all instances
-        let r1cs_shape_primary = cs.r1cs_shape();
+        let r1cs_shape_primary = cs.r1cs_shape_and_key();
         R1CSWithArity::new(r1cs_shape_primary, F_arity)
       })
       .collect::<Vec<_>>();
@@ -298,7 +298,7 @@ where
     circuit_secondary
       .synthesize(&mut cs)
       .expect("circuit synthesis failed");
-    let (r1cs_shape_secondary, ck_secondary) = cs.r1cs_shape(ck_hint2);
+    let (r1cs_shape_secondary, ck_secondary) = cs.r1cs_shape_and_key(ck_hint2);
     let ck_secondary = Arc::new(ck_secondary);
     let circuit_shape_secondary = R1CSWithArity::new(r1cs_shape_secondary, F_arity_secondary);
 
@@ -458,7 +458,7 @@ where
     self
       .circuit_shapes
       .iter()
-      .map(|cs| &cs.r1cs_shape)
+      .map(|cs| &cs.r1cs_shape_and_key)
       .collect::<Vec<_>>()
   }
 }
@@ -1182,7 +1182,7 @@ pub fn circuit_digest<E1: CurveCycleEquipped, C: StepCircuit<E1::Scalar>>(
   let _ = augmented_circuit.synthesize(&mut cs);
 
   let F_arity = circuit.arity();
-  let circuit_params = R1CSWithArity::new(cs.r1cs_shape(), F_arity);
+  let circuit_params = R1CSWithArity::new(cs.r1cs_shape_and_key(), F_arity);
   circuit_params.digest()
 }
 

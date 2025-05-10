@@ -9,7 +9,7 @@ use crate::{
     select_num_or_zero, select_num_or_zero2, select_one_or_diff2, select_one_or_num2,
     select_zero_or_num2,
   },
-  traits::Group,
+  traits::{Group, ROCircuitTrait},
 };
 use ff::{Field, PrimeField};
 
@@ -109,6 +109,16 @@ impl<G: Group> AllocatedPoint<G> {
       y: zero,
       is_infinity: one,
     }
+  }
+
+  pub fn absorb_in_ro(
+    &self,
+    ro: &mut impl ROCircuitTrait<G::Base>,
+  ) -> Result<(), SynthesisError> {
+    ro.absorb(&self.x);
+    ro.absorb(&self.y);
+    ro.absorb(&self.is_infinity);
+    Ok(())
   }
 
   /// Returns coordinates associated with the point.
@@ -585,6 +595,35 @@ impl<G: Group> AllocatedPoint<G> {
 
     Ok(Self { x, y, is_infinity })
   }
+
+  /// Check that two points are equal
+  pub fn check_equal<CS: ConstraintSystem<G::Base>>(
+    &self,
+    mut cs: CS,
+    other: &Self,
+  ) -> Result<(), SynthesisError> {
+    let (self_x, self_y, self_is_infinity) = self.get_coordinates();
+    let (other_x, other_y, other_is_infinity) = other.get_coordinates();
+    cs.enforce(
+      || "check that x are equal",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + self_x.get_variable() - other_x.get_variable(),
+    );
+    cs.enforce(
+      || "check that y are equal",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + self_y.get_variable() - other_y.get_variable(),
+    );
+    cs.enforce(
+      || "check that is_infinity are equal",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + self_is_infinity.get_variable() - other_is_infinity.get_variable(),
+    );
+    Ok(())
+  }
 }
 
 #[derive(Clone, Debug)]
@@ -1036,7 +1075,7 @@ mod tests {
     let _ = synthesize_smul::<E1::GE, _>(cs.namespace(|| "synthesize"));
     expected_constraints.assert_eq(&cs.num_constraints().to_string());
     expected_variables.assert_eq(&cs.num_aux().to_string());
-    let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
+    let (shape, ck) = cs.r1cs_shape_and_key(&*default_ck_hint());
 
     // Then the satisfying assignment
     let mut cs = SatisfyingAssignment::<E2>::new();
@@ -1092,7 +1131,7 @@ mod tests {
     let mut cs: TestShapeCS<E2> = TestShapeCS::new();
     let _ = synthesize_add_equal::<E1::GE, _>(cs.namespace(|| "synthesize add equal"));
     println!("Number of constraints: {}", cs.num_constraints());
-    let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
+    let (shape, ck) = cs.r1cs_shape_and_key(&*default_ck_hint());
 
     // Then the satisfying assignment
     let mut cs = SatisfyingAssignment::<E2>::new();
@@ -1167,7 +1206,7 @@ mod tests {
     let _ = synthesize_add_negation::<E1::GE, _>(cs.namespace(|| "synthesize add equal"));
     expected_constraints.assert_eq(&cs.num_constraints().to_string());
     expected_variables.assert_eq(&cs.num_aux().to_string());
-    let (shape, ck) = cs.r1cs_shape(&*default_ck_hint());
+    let (shape, ck) = cs.r1cs_shape_and_key(&*default_ck_hint());
 
     // Then the satisfying assignment
     let mut cs = SatisfyingAssignment::<E2>::new();

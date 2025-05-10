@@ -1,8 +1,8 @@
 //! This module implements commitment-carrying NIVC
 
 // private modules
-mod augmented_circuit;
-mod nifs;
+pub mod augmented_circuit;
+pub mod nifs;
 
 // public modules
 pub mod audit_rs;

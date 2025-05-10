@@ -94,7 +94,7 @@ where
     );
     let mut cs: ShapeCS<E1> = ShapeCS::new();
     let _ = circuit_primary.synthesize(&mut cs);
-    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape(ck_hint_primary);
+    let (r1cs_shape_primary, ck_primary) = cs.r1cs_shape_and_key(ck_hint_primary);
     let ck_primary = Arc::new(ck_primary);
     let circuit_shape_primary = R1CSWithArity::new(r1cs_shape_primary, F_arity_primary);
 
@@ -102,7 +102,7 @@ where
     let mut cs: ShapeCS<Dual<E1>> = ShapeCS::new();
     let circuit_cyclefold: CycleFoldCircuit<E1> = CycleFoldCircuit::default();
     let _ = circuit_cyclefold.synthesize(&mut cs);
-    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape(ck_hint_cyclefold);
+    let (r1cs_shape_cyclefold, ck_cyclefold) = cs.r1cs_shape_and_key(ck_hint_cyclefold);
     let ck_cyclefold = Arc::new(ck_cyclefold);
     let circuit_shape_cyclefold = R1CSWithArity::new(r1cs_shape_cyclefold, 0);
 
@@ -166,33 +166,35 @@ pub struct RecursiveSNARK<E1>
 where
   E1: CurveCycleEquipped,
 {
-  // Input
-  z0: Vec<E1::Scalar>,
+  /// initial inputs
+  pub z0: Vec<E1::Scalar>,
 
-  // primary circuit data
-  r_W_primary: RelaxedR1CSWitness<E1>,
-  pub(crate) r_U_primary: RelaxedR1CSInstance<E1>,
-  l_w_primary: R1CSWitness<E1>,
-  pub(crate) l_u_primary: R1CSInstance<E1>,
+  // running witness
+  pub(crate) r_W_primary: RelaxedR1CSWitness<E1>,
+  /// running instance
+  pub r_U_primary: RelaxedR1CSInstance<E1>,
+  pub(crate) l_w_primary: R1CSWitness<E1>,
+  /// incoming instance
+  pub l_u_primary: R1CSInstance<E1>,
 
-  // Number of recursive steps proven
-  i: usize,
+  /// Number of recursive steps proven
+  pub i: usize,
 
   // incremental commitment of previous invokation of step circuit
-  pub(in crate::nebula) prev_IC: E1::Scalar,
+  pub(crate) prev_IC: E1::Scalar,
 
   // commitment to non-deterministic advice
-  pub(in crate::nebula) comm_omega_prev: Commitment<E1>, // supposed to be contained in self.l_u_primary // corresponds to comm_W in self.l_u_primary
+  pub(crate) comm_omega_prev: Commitment<E1>, // supposed to be contained in self.l_u_primary // corresponds to comm_W in self.l_u_primary
 
   // cyclefold circuit data
-  r_W_cyclefold: RelaxedR1CSWitness<Dual<E1>>,
-  pub(in crate::nebula) r_U_cyclefold: RelaxedR1CSInstance<Dual<E1>>,
+  pub(crate) r_W_cyclefold: RelaxedR1CSWitness<Dual<E1>>,
+  pub(crate) r_U_cyclefold: RelaxedR1CSInstance<Dual<E1>>,
 
-  // outputs
-  pub(in crate::nebula) zi: Vec<E1::Scalar>,
+  /// outputs
+  pub zi: Vec<E1::Scalar>,
 
-  // makes Nova simulataable
-  r_i: E1::Scalar,
+  /// makes Nova simulatable
+  pub r_i: E1::Scalar,
 }
 
 impl<E1> RecursiveSNARK<E1>

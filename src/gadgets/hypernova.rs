@@ -1,18 +1,26 @@
-use super::emulated::AllocatedEmulPoint;
-use super::utils::alloc_one;
-use super::{alloc_zero, conditionally_select};
-use crate::constants::NUM_CHALLENGE_BITS;
-use crate::frontend::Boolean;
-use crate::gadgets::le_bits_to_num;
-use crate::traits::ROCircuitTrait;
+use super::{
+  alloc_bignat_constant, alloc_tuple_comms, alloc_zero, conditionally_select,
+  emulated::AllocatedEmulPoint, int::enforce_equal, utils::alloc_one, AllocatedPoint,
+  AllocatedRelaxedR1CSInstance, BigNat, Num,
+};
 use crate::{
-  constants::{DEFAULT_ABSORBS, NUM_MATRICES, NUM_UNIVARIATE_COEFFS},
-  frontend::{gadgets::Assignment, num::AllocatedNum, ConstraintSystem, SynthesisError},
-  hypernova::{nifs::NIFS, ro_sumcheck::ROSumcheckProof},
+  constants::{
+    DEFAULT_ABSORBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS, NUM_MATRICES, NUM_UNIVARIATE_COEFFS,
+  },
+  cyclefold::gadgets::AllocatedCycleFoldInstance,
+  frontend::{gadgets::Assignment, num::AllocatedNum, Boolean, ConstraintSystem, SynthesisError},
+  gadgets::le_bits_to_num,
+  hypernova::{
+    nifs::{CycleFoldNIFS, NIFS},
+    ro_sumcheck::ROSumcheckProof,
+  },
   map_field,
-  r1cs::{LR1CSInstance, R1CSInstance},
+  r1cs::split::{LR1CSInstance, SplitR1CSInstance},
   spartan::polys::univariate::UniPoly,
-  traits::{commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, ROConstantsCircuit},
+  traits::{
+    commitment::CommitmentTrait, CurveCycleEquipped, Dual, Engine, Group, ROCircuitTrait,
+    ROConstantsCircuit,
+  },
   Commitment,
 };
 use ff::PrimeField;
@@ -25,6 +33,9 @@ where
   sc: AllocatedSumcheckProof<E>,
   sigmas: Vec<AllocatedNum<E::Scalar>>,
   thetas: Vec<AllocatedNum<E::Scalar>>,
+  cyclefold_nifs: AllocatedCycleFoldNIFS<E>,
+  cyclefold_nifs_1: AllocatedCycleFoldNIFS<E>,
+  cyclefold_nifs_2: AllocatedCycleFoldNIFS<E>,
 }
 
 impl<E> AllocatedNIFS<E>
@@ -35,26 +46,53 @@ where
     mut cs: CS,
     inst: Option<&NIFS<E>>,
     num_rounds: usize,
+    limb_width: usize,
+    n_limbs: usize,
   ) -> Result<Self, SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
   {
     let sc = AllocatedSumcheckProof::alloc(
       cs.namespace(|| "sumcheck proof"),
-      map_field!(inst, sc),
+      map_field!(inst, partial_nifs.sc),
       num_rounds,
     )?;
     let sigmas = alloc_sized_vec(
       cs.namespace(|| "sigmas"),
-      map_field!(inst, sigmas),
+      map_field!(inst, partial_nifs.sigmas),
       NUM_MATRICES,
     )?;
     let thetas = alloc_sized_vec(
       cs.namespace(|| "thetas"),
-      map_field!(inst, thetas),
+      map_field!(inst, partial_nifs.thetas),
       NUM_MATRICES,
     )?;
-    Ok(Self { sc, sigmas, thetas })
+    let cyclefold_nifs = AllocatedCycleFoldNIFS::alloc(
+      cs.namespace(|| "cyclefold_nifs"),
+      map_field!(inst, cyclefold_nifs),
+      limb_width,
+      n_limbs,
+    )?;
+    let cyclefold_nifs_1 = AllocatedCycleFoldNIFS::alloc(
+      cs.namespace(|| "cyclefold_nifs_1"),
+      map_field!(inst, cyclefold_nifs_1),
+      limb_width,
+      n_limbs,
+    )?;
+    let cyclefold_nifs_2 = AllocatedCycleFoldNIFS::alloc(
+      cs.namespace(|| "cyclefold_nifs_2"),
+      map_field!(inst, cyclefold_nifs_2),
+      limb_width,
+      n_limbs,
+    )?;
+    Ok(Self {
+      sc,
+      sigmas,
+      thetas,
+      cyclefold_nifs,
+      cyclefold_nifs_1,
+      cyclefold_nifs_2,
+    })
   }
 
   pub fn verify<CS>(
@@ -62,18 +100,31 @@ where
     mut cs: CS,
     pp_digest: &AllocatedNum<E::Scalar>,
     ro_consts: &ROConstantsCircuit<Dual<E>>,
-    U: &AllocatedLR1CSInstance<E>,
-    u: &AllocatedR1CSInstance<E>,
+    U1: &AllocatedLR1CSInstance<E>,
+    u1: &AllocatedSplitR1CSInstance<E>,
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    pre_committed: (
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    ),
+    U1_cyclefold: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
     num_rounds: usize,
-  ) -> Result<AllocatedLR1CSInstance<E>, SynthesisError>
+    limb_width: usize,
+    n_limbs: usize,
+  ) -> Result<
+    (
+      AllocatedLR1CSInstance<E>,
+      AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+    ),
+    SynthesisError,
+  >
   where
     CS: ConstraintSystem<E::Scalar>,
   {
     // Squeeze rho, gamma, beta
     let mut ro = <Dual<E> as Engine>::ROCircuit::new(ro_consts.clone(), DEFAULT_ABSORBS);
     ro.absorb(pp_digest);
-    u.absorb_in_ro(cs.namespace(|| "absorb u"), &mut ro)?;
+    u1.absorb_in_ro(cs.namespace(|| "absorb u"), &mut ro)?;
     let rho_bits = ro.squeeze(cs.namespace(|| "rho bits"), NUM_CHALLENGE_BITS)?;
     let rho = le_bits_to_num(cs.namespace(|| "rho"), &rho_bits)?;
     let mut ro = <Dual<E> as Engine>::ROCircuit::new(ro_consts.clone(), DEFAULT_ABSORBS);
@@ -93,19 +144,17 @@ where
       ro.absorb(b);
     }
 
-    // Verify sumcheck proof
-    // /////////////////////
+    // --- Verify sum-check proof ---
     //
     // claim <- U.vs[0] + gamma * U.vs[1] + gamma^2 * U.vs[2]
     let claim = Self::claim(
       cs.namespace(|| "claim"),
       &gamma,
-      &U.vs[0],
-      &U.vs[1],
-      &U.vs[2],
+      &U1.vs[0],
+      &U1.vs[1],
+      &U1.vs[2],
     )?;
-    // ///////////////
-    // verify sumcheck
+    // verify sum-check
     let (sub_claim, rx_p) = self.sc.verify(
       cs.namespace(|| "verify sumcheck"),
       ro_consts,
@@ -115,7 +164,7 @@ where
     )?;
 
     // Compute cl, cr from thetas and sigmas
-    let cl = self.cl(cs.namespace(|| "cl"), &gamma, &U.rx, &rx_p, num_rounds)?;
+    let cl = self.cl(cs.namespace(|| "cl"), &gamma, &U1.rx, &rx_p, num_rounds)?;
     let cr = self.cr(cs.namespace(|| "cr"), &gamma, &beta, &rx_p, num_rounds)?;
     let cl_add_cr = cl.add(cs.namespace(|| "cl + cr"), &cr)?;
 
@@ -123,15 +172,38 @@ where
     enforce_equal(&mut cs, || "cl + cr = sub_claim", &cl_add_cr, &sub_claim);
 
     // Output the folded instance
-    U.fold(
+    let U = U1.fold(
       cs.namespace(|| "folded instance"),
-      u,
+      u1,
       &rho,
       rx_p,
       &self.sigmas,
       &self.thetas,
       W_new,
-    )
+      pre_committed,
+    )?;
+    let U_cyclefold_temp = self.cyclefold_nifs.verify(
+      cs.namespace(|| "cyclefold_nifs"),
+      ro_consts.clone(),
+      U1_cyclefold,
+      limb_width,
+      n_limbs,
+    )?;
+    let U_cyclefold_temp_1 = self.cyclefold_nifs_1.verify(
+      cs.namespace(|| "cyclefold_nifs_1"),
+      ro_consts.clone(),
+      &U_cyclefold_temp,
+      limb_width,
+      n_limbs,
+    )?;
+    let U_cyclefold = self.cyclefold_nifs_2.verify(
+      cs.namespace(|| "cyclefold_nifs_2"),
+      ro_consts.clone(),
+      &U_cyclefold_temp_1,
+      limb_width,
+      n_limbs,
+    )?;
+    Ok((U, U_cyclefold))
   }
 
   fn claim<CS>(
@@ -227,6 +299,122 @@ where
   }
 }
 
+pub struct AllocatedCycleFoldNIFS<E>
+where
+  E: CurveCycleEquipped,
+{
+  comm_T: AllocatedPoint<<Dual<E> as Engine>::GE>,
+  l_u: AllocatedCycleFoldInstance<Dual<E>>,
+}
+
+impl<E> AllocatedCycleFoldNIFS<E>
+where
+  E: CurveCycleEquipped,
+{
+  pub fn alloc<CS>(
+    mut cs: CS,
+    inst: Option<&CycleFoldNIFS<E>>,
+    limb_width: usize,
+    n_limbs: usize,
+  ) -> Result<Self, SynthesisError>
+  where
+    CS: ConstraintSystem<E::Scalar>,
+  {
+    let comm_T = AllocatedPoint::alloc(
+      cs.namespace(|| "allocate T"),
+      map_field!(inst, comm_T.to_coordinates()),
+    )?;
+    let l_u = AllocatedCycleFoldInstance::alloc(
+      cs.namespace(|| "l_u"),
+      map_field!(inst, l_u),
+      limb_width,
+      n_limbs,
+    )?;
+    Ok(Self { comm_T, l_u })
+  }
+
+  /// The NIFS verifier which folds the CycleFold instance into a running relaxed R1CS instance.
+  pub fn verify<CS>(
+    &self,
+    mut cs: CS,
+    ro_consts: ROConstantsCircuit<Dual<E>>,
+    U: &AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>,
+    limb_width: usize,
+    n_limbs: usize,
+  ) -> Result<AllocatedRelaxedR1CSInstance<Dual<E>, NIO_CYCLE_FOLD>, SynthesisError>
+  where
+    CS: ConstraintSystem<E::Scalar>,
+  {
+    let mut ro = <Dual<E> as Engine>::ROCircuit::new(ro_consts, DEFAULT_ABSORBS);
+    U.absorb_in_ro(
+      cs.namespace(|| "absorb cyclefold running instance"),
+      &mut ro,
+    )?;
+    self
+      .l_u
+      .absorb_in_ro(cs.namespace(|| "absorb cyclefold instance"), &mut ro)?;
+    ro.absorb(&self.comm_T.x);
+    ro.absorb(&self.comm_T.y);
+    ro.absorb(&self.comm_T.is_infinity);
+    let r_bits = ro.squeeze(cs.namespace(|| "r bits"), NUM_CHALLENGE_BITS)?;
+    let r = le_bits_to_num(cs.namespace(|| "r"), &r_bits)?;
+
+    // W_fold = self.W + r * u.W
+    let rW = self.l_u.W.scalar_mul(cs.namespace(|| "r * u.W"), &r_bits)?;
+    let W_fold = U.W.add(cs.namespace(|| "self.W + r * u.W"), &rW)?;
+
+    // E_fold = self.E + r * T
+    let rT = self.comm_T.scalar_mul(cs.namespace(|| "r * T"), &r_bits)?;
+    let E_fold = U.E.add(cs.namespace(|| "self.E + r * T"), &rT)?;
+
+    // u_fold = u_r + r
+    let u_fold = AllocatedNum::alloc(cs.namespace(|| "u_fold"), || {
+      Ok(*U.u.get_value().get()? + r.get_value().get()?)
+    })?;
+    cs.enforce(
+      || "Check u_fold",
+      |lc| lc,
+      |lc| lc,
+      |lc| lc + u_fold.get_variable() - U.u.get_variable() - r.get_variable(),
+    );
+
+    // Fold the IO:
+    // Analyze r into limbs
+    let r_bn = BigNat::from_num(
+      cs.namespace(|| "allocate r_bn"),
+      &Num::from(r),
+      limb_width,
+      n_limbs,
+    )?;
+
+    // Allocate the order of the non-native field as a constant
+    let m_bn = alloc_bignat_constant(
+      cs.namespace(|| "alloc m"),
+      &<Dual<E> as Engine>::GE::group_params().2,
+      limb_width,
+      n_limbs,
+    )?;
+
+    // fold io
+    let mut X_fold = vec![];
+    for (idx, (X, x)) in U.X.iter().zip_eq(self.l_u.X.iter()).enumerate() {
+      let (_, r) = x.mult_mod(cs.namespace(|| format!("r*u.X[{idx}]")), &r_bn, &m_bn)?;
+      let r_new = X.add(&r)?;
+      let X_i_fold = r_new.red_mod(cs.namespace(|| format!("reduce folded X[{idx}]")), &m_bn)?;
+      X_fold.push(X_i_fold);
+    }
+    let X_fold = X_fold.try_into().map_err(|err: Vec<_>| {
+      SynthesisError::IncompatibleLengthVector(format!("{} != {NIO_CYCLE_FOLD}", err.len()))
+    })?;
+    Ok(AllocatedRelaxedR1CSInstance {
+      W: W_fold,
+      E: E_fold,
+      u: u_fold,
+      X: X_fold,
+    })
+  }
+}
+
 pub struct AllocatedSumcheckProof<E>
 where
   E: CurveCycleEquipped,
@@ -251,7 +439,7 @@ where
         .map(|i| {
           AllocatedUniPoly::alloc(
             cs.namespace(|| format!("poly_{i}")),
-            inst.map(|inst| &inst.polys[i]),
+            map_field!(inst, polys[i]),
           )
         })
         .try_collect()?,
@@ -294,6 +482,7 @@ where
     Ok((e, rx))
   }
 }
+
 pub struct AllocatedUniPoly<F>
 where
   F: PrimeField,
@@ -407,6 +596,10 @@ where
   pub x1: AllocatedNum<E::Scalar>,
   pub rx: Vec<AllocatedNum<E::Scalar>>,
   pub vs: Vec<AllocatedNum<E::Scalar>>,
+  pub pre_committed: (
+    AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+  ),
 }
 
 impl<E> AllocatedLR1CSInstance<E>
@@ -423,10 +616,11 @@ where
   where
     CS: ConstraintSystem<E::Scalar>,
   {
-    let (comm_W, x0, x1) = alloc_instance_witness::<_, E>(
+    let (comm_W, x0, x1, pre_committed) = alloc_instance_witness::<_, E>(
       cs.namespace(|| "allocate instance witness"),
       map_field!(inst, comm_W).copied(),
       map_field!(inst, X),
+      map_field!(inst, pre_committed).copied(),
       limb_width,
       n_limbs,
     )?;
@@ -440,17 +634,22 @@ where
       x1,
       rx,
       vs,
+      pre_committed,
     })
   }
   pub fn fold<CS>(
     &self,
     mut cs: CS,
-    u: &AllocatedR1CSInstance<E>,
+    u: &AllocatedSplitR1CSInstance<E>,
     rho: &AllocatedNum<E::Scalar>,
     rx_p: Vec<AllocatedNum<E::Scalar>>,
     sigmas: &[AllocatedNum<E::Scalar>],
     thetas: &[AllocatedNum<E::Scalar>],
     W_new: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    pre_committed: (
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    ),
   ) -> Result<Self, SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
@@ -474,6 +673,7 @@ where
       x1: x1_fold,
       rx: rx_p,
       vs,
+      pre_committed,
     })
   }
 
@@ -497,6 +697,14 @@ where
     for v in self.vs.iter() {
       ro.absorb(v);
     }
+    self
+      .pre_committed
+      .0
+      .absorb_in_ro(cs.namespace(|| "pre_committed0"), ro)?;
+    self
+      .pre_committed
+      .1
+      .absorb_in_ro(cs.namespace(|| "pre_committed1"), ro)?;
     Ok(())
   }
 
@@ -514,28 +722,24 @@ where
       &other.comm_W,
       condition,
     )?;
-
     let u = conditionally_select(
       cs.namespace(|| "u = cond ? self.u : other.u"),
       &self.u,
       &other.u,
       condition,
     )?;
-
     let x0 = conditionally_select(
       cs.namespace(|| "x0 = cond ? self.x0 : other.x0"),
       &self.x0,
       &other.x0,
       condition,
     )?;
-
     let x1 = conditionally_select(
       cs.namespace(|| "x1 = cond ? self.x1 : other.x1"),
       &self.x1,
       &other.x1,
       condition,
     )?;
-
     let rx = self
       .rx
       .iter()
@@ -554,7 +758,16 @@ where
         conditionally_select(cs.namespace(|| format!("vs[{}]", i)), a, b, condition)
       })
       .try_collect()?;
-
+    let pre_committed0 = self.pre_committed.0.conditionally_select(
+      cs.namespace(|| "pre_committed0 = cond ? self.pre_committed0 : other.pre_committed0"),
+      &other.pre_committed.0,
+      condition,
+    )?;
+    let pre_committed1 = self.pre_committed.1.conditionally_select(
+      cs.namespace(|| "pre_committed1 = cond ? self.pre_committed1 : other.pre_committed1"),
+      &other.pre_committed.1,
+      condition,
+    )?;
     Ok(Self {
       comm_W,
       u,
@@ -562,6 +775,7 @@ where
       x1,
       rx,
       vs,
+      pre_committed: (pre_committed0, pre_committed1),
     })
   }
 
@@ -571,7 +785,7 @@ where
     n_limbs: usize,
     num_rounds: usize,
   ) -> Result<Self, SynthesisError> {
-    let comm_W =
+    let default_point =
       AllocatedEmulPoint::default(cs.namespace(|| "default comm_W"), limb_width, n_limbs)?;
     let u = alloc_zero(cs.namespace(|| "u = 0"));
     let x0 = u.clone();
@@ -579,46 +793,57 @@ where
     let rx = (0..num_rounds).map(|_| u.clone()).collect_vec();
     let vs = (0..NUM_MATRICES).map(|_| u.clone()).collect_vec();
     Ok(Self {
-      comm_W,
+      comm_W: default_point.clone(),
       u,
       x0,
       x1,
       rx,
       vs,
+      pre_committed: (default_point.clone(), default_point),
     })
   }
 }
 
-pub struct AllocatedR1CSInstance<E>
+pub struct AllocatedSplitR1CSInstance<E>
 where
   E: CurveCycleEquipped,
 {
   pub comm_W: AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
   pub x0: AllocatedNum<E::Scalar>,
   pub x1: AllocatedNum<E::Scalar>,
+  pub pre_committed: (
+    AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+  ),
 }
 
-impl<E> AllocatedR1CSInstance<E>
+impl<E> AllocatedSplitR1CSInstance<E>
 where
   E: CurveCycleEquipped,
 {
   pub fn alloc<CS>(
     mut cs: CS,
-    inst: Option<&R1CSInstance<E>>,
+    inst: Option<&SplitR1CSInstance<E>>,
     limb_width: usize,
     n_limbs: usize,
   ) -> Result<Self, SynthesisError>
   where
     CS: ConstraintSystem<E::Scalar>,
   {
-    let (comm_W, x0, x1) = alloc_instance_witness::<_, E>(
+    let (comm_W, x0, x1, pre_committed) = alloc_instance_witness::<_, E>(
       cs.namespace(|| "allocate instance witness"),
-      map_field!(inst, comm_W).copied(),
-      map_field!(inst, X),
+      map_field!(inst, aux.comm_W).copied(),
+      map_field!(inst, aux.X),
+      map_field!(inst, pre_committed).copied(),
       limb_width,
       n_limbs,
     )?;
-    Ok(Self { comm_W, x0, x1 })
+    Ok(Self {
+      comm_W,
+      x0,
+      x1,
+      pre_committed,
+    })
   }
 
   pub fn absorb_in_ro<CS>(
@@ -634,6 +859,14 @@ where
       .absorb_in_ro(cs.namespace(|| "absorb u_W"), ro)?;
     ro.absorb(&self.x0);
     ro.absorb(&self.x1);
+    self
+      .pre_committed
+      .0
+      .absorb_in_ro(cs.namespace(|| "pre_committed0"), ro)?;
+    self
+      .pre_committed
+      .1
+      .absorb_in_ro(cs.namespace(|| "pre_committed1"), ro)?;
     Ok(())
   }
 }
@@ -656,6 +889,7 @@ fn alloc_instance_witness<CS, E>(
   mut cs: CS,
   comm_W: Option<Commitment<E>>,
   X: Option<&Vec<E::Scalar>>,
+  pre_committed: Option<(Commitment<E>, Commitment<E>)>,
   limb_width: usize,
   n_limbs: usize,
 ) -> Result<
@@ -663,6 +897,10 @@ fn alloc_instance_witness<CS, E>(
     AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
     AllocatedNum<E::Scalar>,
     AllocatedNum<E::Scalar>,
+    (
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+      AllocatedEmulPoint<<Dual<E> as Engine>::GE>,
+    ),
   ),
   SynthesisError,
 >
@@ -678,7 +916,13 @@ where
   )?;
   let x0 = alloc_scalar(cs.namespace(|| "allocate x0"), X.map(|X| X[0]))?;
   let x1 = alloc_scalar(cs.namespace(|| "allocate x1"), X.map(|X| X[1]))?;
-  Ok((comm_W, x0, x1))
+  let pre_committed = alloc_tuple_comms::<_, E>(
+    cs.namespace(|| "pre_committed"),
+    pre_committed,
+    limb_width,
+    n_limbs,
+  )?;
+  Ok((comm_W, x0, x1, pre_committed))
 }
 
 fn alloc_scalar<CS, F>(mut cs: CS, s: Option<F>) -> Result<AllocatedNum<F>, SynthesisError>
@@ -706,28 +950,6 @@ where
     |lc| lc + i_new.get_variable() - CS::one() - i.get_variable(),
   );
   Ok(i_new)
-}
-
-/// Adds a constraint to CS, enforcing an equality relationship between the allocated numbers a and b.
-///
-/// a == b
-pub fn enforce_equal<F: PrimeField, A, AR, CS: ConstraintSystem<F>>(
-  cs: &mut CS,
-  annotation: A,
-  a: &AllocatedNum<F>,
-  b: &AllocatedNum<F>,
-) where
-  A: FnOnce() -> AR,
-  AR: Into<String>,
-{
-  // debug_assert_eq!(a.get_value(), b.get_value());
-  // a * 1 = b
-  cs.enforce(
-    annotation,
-    |lc| lc + a.get_variable(),
-    |lc| lc + CS::one(),
-    |lc| lc + b.get_variable(),
-  );
 }
 
 /// Adds a constraint to CS, enforcing a difference relationship between the allocated numbers a, b, and difference.

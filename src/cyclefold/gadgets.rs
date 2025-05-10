@@ -5,8 +5,8 @@ use super::util::FoldingData;
 use crate::{
   constants::{BN_N_LIMBS, NIO_CYCLE_FOLD, NUM_CHALLENGE_BITS},
   gadgets::{
-    alloc_bignat_constant, f_to_nat, le_bits_to_num, AllocatedPoint, AllocatedRelaxedR1CSInstance,
-    BigNat, Num,
+    alloc_bignat_constant, 
+    f_to_nat, le_bits_to_num, AllocatedPoint, AllocatedRelaxedR1CSInstance, BigNat, Num,
   },
   r1cs::R1CSInstance,
   traits::{commitment::CommitmentTrait, Engine, Group, ROCircuitTrait, ROConstantsCircuit},
@@ -224,13 +224,110 @@ pub mod emulated {
   use crate::{
     constants::{NUM_CHALLENGE_BITS, NUM_FE_IN_EMULATED_POINT},
     gadgets::{alloc_zero, conditionally_select, emulated::AllocatedEmulPoint, le_bits_to_num},
-    r1cs::RelaxedR1CSInstance,
+    r1cs::{R1CSInstance, RelaxedR1CSInstance, RelaxedR1CSWitness},
     traits::{commitment::CommitmentTrait, Engine, ROCircuitTrait, ROConstantsCircuit},
   };
 
   use super::FoldingData;
 
   use ff::Field;
+
+  #[derive(Clone, Debug)]
+  /// A non-native circuit version of a `R1CSInstance`. This is used for the in-circuit
+  /// representation of the primary running instance
+  #[allow(dead_code)]
+  pub struct AllocatedEmulRelaxedR1CSWitness<E: Engine> {
+    pub W: Vec<AllocatedNum<E::Base>>,
+    pub E: Vec<AllocatedNum<E::Base>>,
+  }
+
+  impl<E> AllocatedEmulRelaxedR1CSWitness<E>
+  where
+    E: Engine,
+  {
+    #[allow(dead_code)]
+    fn alloc<CS, E2: Engine<Base = E::Scalar, Scalar = E::Base>>(
+      mut cs: CS,
+      inst: Option<&RelaxedR1CSWitness<E2>>,
+    ) -> Result<Self, SynthesisError>
+    where
+      CS: ConstraintSystem<<E as Engine>::Base>,
+    {
+      let inst = inst.ok_or(SynthesisError::AssignmentMissing)?;
+
+      let W = inst
+        .W
+        .iter()
+        .map(|x| AllocatedNum::alloc(cs.namespace(|| "allocate W"), || Ok(*x)))
+        .collect::<Result<Vec<_>, _>>()?;
+
+      let E = inst
+        .E
+        .iter()
+        .map(|x| AllocatedNum::alloc(cs.namespace(|| "allocate E"), || Ok(*x)))
+        .collect::<Result<Vec<_>, _>>()?;
+
+      Ok(Self { W, E })
+    }
+  }
+
+  #[derive(Clone, Debug)]
+  /// A non-native circuit version of a `R1CSInstance`. This is used for the in-circuit
+  /// representation of the primary running instance
+  pub struct AllocatedEmulR1CSInstance<E: Engine> {
+    pub comm_W: AllocatedEmulPoint<E::GE>,
+    pub(crate) x0: AllocatedNum<E::Base>,
+    pub(crate) x1: AllocatedNum<E::Base>,
+  }
+
+  impl<E> AllocatedEmulR1CSInstance<E>
+  where
+    E: Engine,
+  {
+    pub fn alloc<CS, E2: Engine<Base = E::Scalar, Scalar = E::Base>>(
+      mut cs: CS,
+      inst: Option<&R1CSInstance<E2>>,
+      limb_width: usize,
+      n_limbs: usize,
+    ) -> Result<Self, SynthesisError>
+    where
+      CS: ConstraintSystem<<E as Engine>::Base>,
+    {
+      let comm_W = AllocatedEmulPoint::alloc(
+        cs.namespace(|| "allocate comm_W"),
+        inst.map(|x| x.comm_W.to_coordinates()),
+        limb_width,
+        n_limbs,
+      )?;
+
+      let x0 = AllocatedNum::alloc(cs.namespace(|| "allocate x0"), || {
+        inst.map_or(Ok(E::Base::ZERO), |inst| Ok(inst.X[0]))
+      })?;
+
+      let x1 = AllocatedNum::alloc(cs.namespace(|| "allocate x1"), || {
+        inst.map_or(Ok(E::Base::ZERO), |inst| Ok(inst.X[1]))
+      })?;
+
+      Ok(Self { comm_W, x0, x1 })
+    }
+
+    pub fn absorb_in_ro<CS>(
+      &self,
+      mut cs: CS,
+      ro: &mut impl ROCircuitTrait<E::Base>,
+    ) -> Result<(), SynthesisError>
+    where
+      CS: ConstraintSystem<<E as Engine>::Base>,
+    {
+      self
+        .comm_W
+        .absorb_in_ro(cs.namespace(|| "absorb comm_W"), ro)?;
+      ro.absorb(&self.x0);
+      ro.absorb(&self.x1);
+
+      Ok(())
+    }
+  }
 
   #[derive(Clone, Debug)]
   /// A non-native circuit version of a `RelaxedR1CSInstance`. This is used for the in-circuit

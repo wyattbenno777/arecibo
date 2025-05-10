@@ -6,6 +6,8 @@ use crate::{
 };
 use ff::PrimeField;
 
+use super::Split;
+
 /// `ShapeCS` is a `ConstraintSystem` for creating `R1CSShape`s for a circuit.
 pub struct ShapeCS<E: Engine>
 where
@@ -20,7 +22,7 @@ where
   inputs: usize,
   aux: usize,
   precommitted: usize,
-  precommitted2: usize,
+  precommitted1: usize,
 }
 
 impl<E: Engine> ShapeCS<E> {
@@ -49,9 +51,9 @@ impl<E: Engine> ShapeCS<E> {
     self.precommitted
   }
 
-  /// Returns the number of precommitted2 inputs defined for this `ShapeCS`.
-  pub fn num_precommitted2(&self) -> usize {
-    self.precommitted2
+  /// Returns the number of precommitted1 inputs defined for this `ShapeCS`.
+  pub fn num_precommitted1(&self) -> usize {
+    self.precommitted1
   }
 }
 
@@ -62,7 +64,7 @@ impl<E: Engine> Default for ShapeCS<E> {
       inputs: 1,
       aux: 0,
       precommitted: 0,
-      precommitted2: 0,
+      precommitted1: 0,
     }
   }
 }
@@ -85,34 +87,17 @@ impl<E: Engine> ConstraintSystem<E::Scalar> for ShapeCS<E> {
     &mut self,
     _annotation: A,
     _f: F,
+    idx: Split,
   ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<E::Scalar, SynthesisError>,
     A: FnOnce() -> AR,
     AR: Into<String>,
   {
-    self.precommitted += 1;
-
-    Ok(Variable::new_unchecked(Index::Precommitted(
-      self.precommitted - 1,
-    )))
-  }
-
-  fn alloc_precommitted2<F, A, AR>(
-    &mut self,
-    _annotation: A,
-    _f: F,
-  ) -> Result<Variable, SynthesisError>
-  where
-    F: FnOnce() -> Result<E::Scalar, SynthesisError>,
-    A: FnOnce() -> AR,
-    AR: Into<String>,
-  {
-    self.precommitted2 += 1;
-
-    Ok(Variable::new_unchecked(Index::Precommitted2(
-      self.precommitted2 - 1,
-    )))
+    match idx {
+      Split::ZERO => alloc_precommitted_generic(&mut self.precommitted, Index::Precommitted),
+      Split::ONE => alloc_precommitted_generic(&mut self.precommitted1, Index::Precommitted1),
+    }
   }
 
   fn alloc_input<F, A, AR>(&mut self, _annotation: A, _f: F) -> Result<Variable, SynthesisError>
@@ -153,4 +138,12 @@ impl<E: Engine> ConstraintSystem<E::Scalar> for ShapeCS<E> {
   fn get_root(&mut self) -> &mut Self::Root {
     self
   }
+}
+
+fn alloc_precommitted_generic(
+  num: &mut usize,
+  index_fn: impl FnOnce(usize) -> Index,
+) -> Result<Variable, SynthesisError> {
+  *num += 1;
+  Ok(Variable::new_unchecked(index_fn(*num - 1)))
 }

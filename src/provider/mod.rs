@@ -3,7 +3,7 @@
 // public modules to be used as an evaluation engine with Spartan
 pub mod hyperkzg;
 pub mod ipa_pc;
-mod kzg_commitment;
+pub mod kzg_commitment;
 
 // crate-public modules, made crate-public mostly for tests
 pub(crate) mod bn256_grumpkin;
@@ -32,10 +32,10 @@ use crate::{
   traits::{CurveCycleEquipped, Engine},
 };
 use bn256_grumpkin::bn256;
-use halo2curves::bn256::Bn256;
+use halo2curves::bn256::{Bn256, G2, G2Affine, Gt, G2Prepared, multi_miller_loop, pairing};
+use pairing::{Engine as PairingEngine, MultiMillerLoop};
 use pasta_curves::{pallas, vesta};
 use serde::{Deserialize, Serialize};
-
 use self::kzg_commitment::KZGCommitmentEngine;
 
 /// An implementation of the Nova `Engine` trait with Grumpkin curve and Pedersen commitment scheme
@@ -80,7 +80,7 @@ impl Engine for Bn256EngineZM {
   type CE = KZGCommitmentEngine<Bn256>;
 }
 /// An implementation of Nova traits with HyperKZG over the BN256 curve
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Bn256EngineKZG;
 
 impl Engine for Bn256EngineKZG {
@@ -91,6 +91,28 @@ impl Engine for Bn256EngineKZG {
   type ROCircuit = PoseidonROCircuit<Self::Base>;
   type TE = Keccak256Transcript<Self>;
   type CE = KZGCommitmentEngine<Bn256>;
+}
+
+impl PairingEngine for Bn256EngineKZG {
+  type Fr = bn256::Scalar;
+  type G1 = bn256::Point;
+  type G1Affine = bn256::Affine;
+  type G2 = G2;
+  type G2Affine = G2Affine;
+  type Gt = Gt;
+
+  fn pairing(p: &Self::G1Affine, q: &Self::G2Affine) -> Self::Gt {
+      pairing(p, q)
+  }
+}
+
+impl MultiMillerLoop for Bn256EngineKZG {
+  type G2Prepared = G2Prepared;
+  type Result = Gt;
+
+  fn multi_miller_loop(terms: &[(&Self::G1Affine, &Self::G2Prepared)]) -> Self::Result {
+      multi_miller_loop(terms)
+  }
 }
 
 impl CurveCycleEquipped for Bn256EngineIPA {

@@ -100,7 +100,7 @@ impl NonUniformSNARK {
           .synthesize(&mut cs)
           .expect("failed to synthesize");
 
-        cs.r1cs_shape()
+        cs.r1cs_shape_and_key()
       })
       .collect();
 

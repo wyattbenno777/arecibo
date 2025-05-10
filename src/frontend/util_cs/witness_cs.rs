@@ -2,7 +2,9 @@
 
 use ff::PrimeField;
 
-use crate::frontend::{ConstraintSystem, Index, LinearCombination, SynthesisError, Variable};
+use crate::frontend::{
+  ConstraintSystem, Index, LinearCombination, Split, SynthesisError, Variable,
+};
 
 /// A [`ConstraintSystem`] trait
 pub trait SizedWitness<Scalar: PrimeField> {
@@ -42,7 +44,7 @@ where
   pub(crate) input_assignment: Vec<Scalar>,
   pub(crate) aux_assignment: Vec<Scalar>,
   pub(crate) precommitted_assignment: Vec<Scalar>,
-  pub(crate) precommitted2_assignment: Vec<Scalar>,
+  pub(crate) precommitted1_assignment: Vec<Scalar>,
 }
 
 impl<Scalar> WitnessCS<Scalar>
@@ -58,6 +60,30 @@ where
   pub fn aux_assignment(&self) -> &[Scalar] {
     &self.aux_assignment
   }
+
+  /// Get precommitted assignment
+  pub fn precommitted_assignment(&self) -> &[Scalar] {
+    &self.precommitted_assignment
+  }
+
+  /// Get precommitted1 assignment
+  pub fn precommitted1_assignment(&self) -> &[Scalar] {
+    &self.precommitted1_assignment
+  }
+}
+
+/// Alloc precommitted generic
+fn alloc_precommitted_generic<F, Scalar>(
+  assignment: &mut Vec<Scalar>,
+  f: F,
+  index_fn: impl FnOnce(usize) -> Index,
+) -> Result<Variable, SynthesisError>
+where
+  F: FnOnce() -> Result<Scalar, SynthesisError>,
+  Scalar: PrimeField,
+{
+  assignment.push(f()?);
+  Ok(Variable(index_fn(assignment.len() - 1)))
 }
 
 impl<Scalar> ConstraintSystem<Scalar> for WitnessCS<Scalar>
@@ -73,7 +99,7 @@ where
       input_assignment,
       aux_assignment: vec![],
       precommitted_assignment: vec![],
-      precommitted2_assignment: vec![],
+      precommitted1_assignment: vec![],
     }
   }
 
@@ -88,28 +114,25 @@ where
     Ok(Variable(Index::Aux(self.aux_assignment.len() - 1)))
   }
 
-  fn alloc_precommitted<F, A, AR>(&mut self, _: A, f: F) -> Result<Variable, SynthesisError>
+  fn alloc_precommitted<F, A, AR>(
+    &mut self,
+    _: A,
+    f: F,
+    idx: Split,
+  ) -> Result<Variable, SynthesisError>
   where
     F: FnOnce() -> Result<Scalar, SynthesisError>,
     A: FnOnce() -> AR,
     AR: Into<String>,
   {
-    self.precommitted_assignment.push(f()?);
-
-    Ok(Variable(Index::Aux(self.precommitted_assignment.len() - 1)))
-  }
-
-  fn alloc_precommitted2<F, A, AR>(&mut self, _: A, f: F) -> Result<Variable, SynthesisError>
-  where
-    F: FnOnce() -> Result<Scalar, SynthesisError>,
-    A: FnOnce() -> AR,
-    AR: Into<String>,
-  {
-    self.precommitted2_assignment.push(f()?);
-
-    Ok(Variable(Index::Aux(
-      self.precommitted2_assignment.len() - 1,
-    )))
+    match idx {
+      Split::ZERO => {
+        alloc_precommitted_generic(&mut self.precommitted_assignment, f, Index::Precommitted)
+      }
+      Split::ONE => {
+        alloc_precommitted_generic(&mut self.precommitted1_assignment, f, Index::Precommitted1)
+      }
+    }
   }
 
   fn alloc_input<F, A, AR>(&mut self, _: A, f: F) -> Result<Variable, SynthesisError>

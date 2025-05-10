@@ -3,6 +3,7 @@
 
 use std::marker::PhantomData;
 
+use ec_gpu_gen::threadpool::Worker;
 use ff::{Field, PrimeField, PrimeFieldBits};
 use group::{prime::PrimeCurveAffine, Curve, Group as _};
 use pairing::Engine;
@@ -12,13 +13,12 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::{
-  digest::SimpleDigestible,
-  provider::{pedersen::Commitment, traits::DlogGroup, util::fb_msm},
-  traits::{
+  digest::SimpleDigestible, frontend::{domain::EvaluationDomain, gpu::GpuName, ConstraintSystem, SynthesisError}, gadgets::AllocatedPoint, provider::{pedersen::Commitment, traits::DlogGroup, util::fb_msm}, traits::{
     commitment::{CommitmentEngineTrait, Len},
     Engine as NovaEngine, Group, TranscriptReprTrait,
-  },
+  } 
 };
+
 
 /// `UniversalParams` are the universal parameters for the KZG10 scheme.
 #[derive(Debug, Clone, Eq, Serialize, Deserialize)]
@@ -37,6 +37,7 @@ pub struct UniversalKZGParam<E: Engine> {
   // this is a hack; we just assume the size of the element.
   // Look for the static assertions in provider macros for a justification
   pub powers_of_h: Vec<E::G2Affine>,
+  /// A generator of G1
   pub h: E::G1Affine,
 }
 
@@ -53,7 +54,11 @@ impl<E: Engine> Len for UniversalKZGParam<E> {
 }
 
 /// `UnivariateProverKey` is used to generate a proof
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(bound(
+  serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",
+  deserialize = "E::G1Affine: Deserialize<'de>, E::G2Affine: Deserialize<'de>"
+))]
 pub struct KZGProverKey<E: Engine> {
   /// generators from the universal parameters
   uv_params: Arc<UniversalKZGParam<E>>,
@@ -83,6 +88,7 @@ impl<E: Engine> KZGProverKey<E> {
     }
   }
 
+  /// Generates powers of g
   pub fn powers_of_g(&self) -> &[E::G1Affine] {
     &self.uv_params.powers_of_g[self.offset..self.offset + self.supported_size]
   }
@@ -90,7 +96,7 @@ impl<E: Engine> KZGProverKey<E> {
 
 /// `UVKZGVerifierKey` is used to check evaluation proofs for a given
 /// commitment.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(bound(serialize = "E::G1Affine: Serialize, E::G2Affine: Serialize",))]
 pub struct KZGVerifierKey<E: Engine> {
   /// The generator of G1.
@@ -195,6 +201,13 @@ pub struct UVKZGCommitment<E: Engine>(
   pub E::G1Affine,
 );
 
+impl<E: Engine> UVKZGCommitment<E> {
+  /// Create a new UVKZG commitment
+  pub fn new(commitment: E::G1Affine) -> Self {
+    Self(commitment)
+  }
+}
+
 impl<E: Engine> TranscriptReprTrait<E::G1> for UVKZGCommitment<E>
 where
   E::G1: DlogGroup,
@@ -232,7 +245,7 @@ where
   E::G1: DlogGroup<ScalarExt = E::Fr, AffineExt = E::G1Affine>,
   E::G1Affine: Serialize + for<'de> Deserialize<'de>,
   E::G2Affine: Serialize + for<'de> Deserialize<'de>,
-  E::Fr: PrimeFieldBits, // TODO due to use of gen_srs_for_testing, make optional
+  E::Fr: PrimeFieldBits + GpuName, // TODO due to use of gen_srs_for_testing, make optional
 {
   type CommitmentKey = UniversalKZGParam<E>;
   type Commitment = Commitment<NE>;
@@ -247,19 +260,37 @@ where
     UniversalKZGParam::gen_srs_for_testing(rng, n.next_power_of_two())
   }
 
-  fn commit(
+  fn commit_at(
     ck: &Self::CommitmentKey,
     v: &[<E::G1 as Group>::Scalar],
-    r: &<E::G1 as Group>::Scalar,
-  ) -> Self::Commitment {
-    assert!(ck.length() >= v.len());
-    let mut scalars = v.to_vec();
-    scalars.push(*r);
-    let mut bases = ck.powers_of_g[..v.len()].to_vec();
-    bases.push(ck.h);
+    _r: &<E::G1 as Group>::Scalar,
+    idx: usize,
+  ) -> Self::Commitment 
+  where
+  E::G1: DlogGroup<ScalarExt = E::Fr, AffineExt = E::G1Affine>,
+  {
+
+    assert!(ck.length() > idx);
+    assert!(ck.length() - idx >= v.len());
+    let mut domain =
+    EvaluationDomain::from_coeffs(v.to_vec()).expect("Failed to creat
+e evaluation domain");
+
+    let worker = Worker::new();
+    domain.ifft(&worker, &mut None).expect("FFT failed");
+    let scalars = domain.into_coeffs();
+    let bases = ck.powers_of_g[idx..(idx + scalars.len())].to_vec();
     Commitment {
       comm: E::G1::vartime_multiscalar_mul(&scalars, &bases),
     }
+  }
+
+  fn commit_gadget<CS: ConstraintSystem<NE::Base>> (
+    _cs: &mut CS, 
+    _ck: &Self::CommitmentKey, 
+    _v: &[NE::Scalar], 
+    _r: &NE::Scalar) -> Result<AllocatedPoint<NE::GE>, SynthesisError> {
+    unimplemented!()
   }
 
   fn derand_key(ck: &Self::CommitmentKey) -> Self::DerandKey {
@@ -292,9 +323,10 @@ impl<E: Engine, NE: NovaEngine<GE = E::G1, Scalar = E::Fr>> From<UVKZGCommitment
 where
   E::G1: Group,
 {
-  fn from(c: UVKZGCommitment<E>) -> Self {
+  fn from(c: UVKZGCommitment<E>) -> Self { 
     Self {
       comm: c.0.to_curve(),
     }
   }
 }
+

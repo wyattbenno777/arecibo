@@ -28,13 +28,14 @@ pub mod frontend;
 pub mod gadgets;
 pub mod hypernova;
 pub mod provider;
-pub mod r1cs;
+pub(crate) mod r1cs;
 pub mod spartan;
 pub mod traits;
 
 mod cyclefold;
 pub mod nebula;
 // pub mod supernova;
+pub mod onchain;
 pub use errors::NovaError;
 pub(crate) use nebula::AugmentedCircuitParams;
 use traits::ROConstants;

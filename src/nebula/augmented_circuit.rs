@@ -28,6 +28,7 @@ use crate::cyclefold::{
 
 use super::rs::StepCircuit;
 
+
 /// The parameters for the [`AugmentedCircuit`]
 ///
 /// Used for non-native arithmetic
@@ -49,6 +50,7 @@ impl AugmentedCircuitParams {
   }
 }
 
+/// Augmented circuit inputs
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct AugmentedCircuitInputs<E1>
@@ -78,6 +80,7 @@ impl<E1> AugmentedCircuitInputs<E1>
 where
   E1: CurveCycleEquipped,
 {
+  /// Create a new augmented circuit inputs
   pub fn new(
     pp_digest: E1::Base,
     i: E1::Scalar,
@@ -111,6 +114,7 @@ where
   }
 }
 
+/// Augmented circuit
 pub struct AugmentedCircuit<'a, E1, SC>
 where
   E1: CurveCycleEquipped,
@@ -127,6 +131,7 @@ where
   E1: CurveCycleEquipped,
   SC: StepCircuit<E1::Scalar>,
 {
+  /// Create a new augmented circuit
   pub const fn new(
     params: &'a AugmentedCircuitParams,
     ro_consts: ROConstantsCircuit<Dual<E1>>,
@@ -286,6 +291,7 @@ where
     ))
   }
 
+  /// Synthesize the base case of the augmented circuit
   pub fn synthesize_base_case<CS: ConstraintSystem<<E1 as Engine>::Scalar>>(
     &self,
     mut cs: CS,
@@ -313,6 +319,7 @@ where
     Ok((U_c_default, U_p_default))
   }
 
+  /// Synthesize the non-base case of the augmented circuit
   pub fn synthesize_non_base_case<CS: ConstraintSystem<E1::Scalar>>(
     &self,
     mut cs: CS,
@@ -461,6 +468,7 @@ where
     Ok((U_c, U_p, checks_pass))
   }
 
+  /// Synthesize the augmented circuit
   pub fn synthesize<CS: ConstraintSystem<E1::Scalar>>(
     self,
     cs: &mut CS,
