@@ -150,7 +150,7 @@ where
     let g = E::G1::random(&mut rng);
     let h = E::G2::random(rng);
 
-    let nz_powers_of_beta = (0..=max_degree)
+    let nz_powers_of_beta = (0..max_degree)
       .scan(beta, |acc, _| {
         let val = *acc;
         *acc *= beta;
@@ -167,8 +167,10 @@ where
         fb_msm::multi_scalar_mul::<E::G1>(scalar_bits, window_size, &g_table, &nz_powers_of_beta)
       },
       || {
-        let h_table = fb_msm::get_window_table(scalar_bits, window_size, h);
-        fb_msm::multi_scalar_mul::<E::G2>(scalar_bits, window_size, &h_table, &nz_powers_of_beta)
+        let mut h_vec = vec![E::G2::identity(); max_degree];
+        h_vec[0] = h;
+        h_vec[1] = h * beta;
+        h_vec
       },
     );
 
