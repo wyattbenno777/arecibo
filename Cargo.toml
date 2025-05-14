@@ -17,7 +17,6 @@ rust-version = "1.74.1"
 [dependencies]
 ff = { version = "0.13.0", features = ["derive"] }
 digest = "0.10"
-ec-gpu-gen = "0.7.1"
 halo2curves = { git = "https://github.com/ICME-Lab/halo2curves", branch = "main", features = ["bits", "derive_serde"] }
 sha3 = "0.10"
 rayon = "1.7"
@@ -47,6 +46,8 @@ memmap2 = "0.9.5"
 log = "0.4.25"
 crossbeam-channel = "0.5.14"
 hex = "0.4"
+msm-webgpu = { git = "https://github.com/ICME-Lab/msm-webgpu", branch = "cuzk" }
+ec-gpu-gen = { version = "0.7.1" }
 
 # Onchain verifier
 askama = { version = "0.12.0", features = ["config"], default-features = false }
@@ -54,8 +55,10 @@ revm = {version="19.5.0", default-features=false, features=["std"]}
 
 [target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
 grumpkin-msm = { git = "https://github.com/ICME-Lab/grumpkin-msm", branch = "dev" }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2.0", default-features = false, features = ["js"] }
+
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 proptest = "1.2.0"
@@ -71,6 +74,12 @@ tracing-texray = "0.2.0"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 rand_xorshift = "0.3.0"
 env_logger = "0.11.6"
+wasm-bindgen-test = "0.3.50"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3.77"
+web-sys = { version = "0.3", features = ["console"] }
+wgpu = "24.0.3"
 
 [features]
 default = []
