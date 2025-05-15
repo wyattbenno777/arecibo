@@ -10,7 +10,7 @@ pub mod msm {
   }
 
   pub fn web_gpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
-    run_webgpu_msm(bases, scalars)
+    best_multiexp(scalars, bases)
   }
 }
 
