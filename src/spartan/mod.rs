@@ -10,7 +10,7 @@ pub mod batched;
 pub mod batched_ppsnark;
 #[macro_use]
 mod macros;
-pub mod lin_snark;
+// pub mod lin_snark;
 pub(crate) mod math;
 pub mod polys;
 pub mod ppsnark;

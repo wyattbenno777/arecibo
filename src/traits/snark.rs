@@ -2,7 +2,7 @@
 use crate::{
   errors::NovaError,
   r1cs::{
-    split::{LR1CSInstance, SplitR1CSWitness},
+    split::{SplitR1CSWitness},
     R1CSShape, RelaxedR1CSInstance, RelaxedR1CSWitness,
   },
   traits::Engine,
@@ -105,40 +105,40 @@ pub trait DigestHelperTrait<E: Engine> {
   fn digest(&self) -> E::Scalar;
 }
 
-/// A trait that defines the behavior of a `zkSNARK`
-pub trait LinearizedR1CSSNARKTrait<E: Engine>:
-  Send + Sync + Serialize + for<'de> Deserialize<'de>
-{
-  /// A type that represents the prover's key
-  type ProverKey: Send + Sync + Serialize + for<'de> Deserialize<'de>;
+// /// A trait that defines the behavior of a `zkSNARK`
+// pub trait LinearizedR1CSSNARKTrait<E: Engine>:
+//   Send + Sync + Serialize + for<'de> Deserialize<'de>
+// {
+//   /// A type that represents the prover's key
+//   type ProverKey: Send + Sync + Serialize + for<'de> Deserialize<'de>;
 
-  /// A type that represents the verifier's key
-  type VerifierKey: Send + Sync + Serialize + for<'de> Deserialize<'de>;
+//   /// A type that represents the verifier's key
+//   type VerifierKey: Send + Sync + Serialize + for<'de> Deserialize<'de>;
 
-  /// This associated function (not a method) provides a hint that offers
-  /// a minimum sizing cue for the commitment key used by this SNARK
-  /// implementation. The commitment key passed in setup should then
-  /// be at least as large as this hint.
-  fn ck_floor() -> Box<dyn for<'a> Fn(&'a R1CSShape<E>) -> usize> {
-    // The default is to not put an additional floor on the size of the commitment key
-    default_ck_hint()
-  }
+//   /// This associated function (not a method) provides a hint that offers
+//   /// a minimum sizing cue for the commitment key used by this SNARK
+//   /// implementation. The commitment key passed in setup should then
+//   /// be at least as large as this hint.
+//   fn ck_floor() -> Box<dyn for<'a> Fn(&'a R1CSShape<E>) -> usize> {
+//     // The default is to not put an additional floor on the size of the commitment key
+//     default_ck_hint()
+//   }
 
-  /// Produces the keys for the prover and the verifier
-  fn setup(
-    ck: Arc<CommitmentKey<E>>,
-    S: &R1CSShape<E>,
-  ) -> Result<(Self::ProverKey, Self::VerifierKey), NovaError>;
+//   /// Produces the keys for the prover and the verifier
+//   fn setup(
+//     ck: Arc<CommitmentKey<E>>,
+//     S: &R1CSShape<E>,
+//   ) -> Result<(Self::ProverKey, Self::VerifierKey), NovaError>;
 
-  /// Produces a new SNARK for a relaxed R1CS
-  fn prove(
-    ck: &CommitmentKey<E>,
-    pk: &Self::ProverKey,
-    S: &R1CSShape<E>,
-    U: &LR1CSInstance<E>,
-    W: &SplitR1CSWitness<E>,
-  ) -> Result<Self, NovaError>;
+//   /// Produces a new SNARK for a relaxed R1CS
+//   fn prove(
+//     ck: &CommitmentKey<E>,
+//     pk: &Self::ProverKey,
+//     S: &R1CSShape<E>,
+//     U: &LR1CSInstance<E>,
+//     W: &SplitR1CSWitness<E>,
+//   ) -> Result<Self, NovaError>;
 
-  /// Verifies a SNARK for a relaxed R1CS
-  fn verify(&self, vk: &Self::VerifierKey, U: &LR1CSInstance<E>) -> Result<(), NovaError>;
-}
+//   /// Verifies a SNARK for a relaxed R1CS
+//   fn verify(&self, vk: &Self::VerifierKey, U: &LR1CSInstance<E>) -> Result<(), NovaError>;
+// }

@@ -2,7 +2,7 @@
 use core::fmt::Debug;
 use thiserror::Error;
 
-use crate::{frontend::SynthesisError, hypernova::error::HyperNovaError};
+use crate::{frontend::SynthesisError};
 
 /// Errors returned by Nova
 #[derive(Debug, Eq, PartialEq, Error)]
@@ -93,9 +93,9 @@ pub enum NovaError {
   /// returned when the incremental commitment passed to recursiveSNARK is not the correct one.
   #[error("InvalidIC")]
   InvalidIC,
-  /// HyperNovaError
-  #[error("HyperNovaError")]
-  HyperNovaError(#[from] HyperNovaError),
+  // /// HyperNovaError
+  // #[error("HyperNovaError")]
+  // HyperNovaError(#[from] HyperNovaError),
   /// returned when circuit for proving is not found
   #[error("NoCircuit")]
   NoCircuit,

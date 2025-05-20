@@ -21,7 +21,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 pub(crate) use sparse::SparseMatrix;
-use split::{LR1CSInstance, SplitR1CSInstance, SplitR1CSWitness};
+use split::{SplitR1CSInstance, SplitR1CSWitness};
 use util::fold_witness;
 pub mod split;
 /// A type that holds the shape of the R1CS matrices
@@ -386,50 +386,50 @@ impl<E: Engine> R1CSShape<E> {
     Ok(())
   }
 
-  /// Checks if the R1CS instance is satisfiable given a witness and its shape
-  pub(crate) fn is_sat_linearized(
-    &self,
-    ck: &CommitmentKey<E>,
-    U: &LR1CSInstance<E>,
-    W: &SplitR1CSWitness<E>,
-  ) -> Result<(), NovaError> {
-    let num_vars = self.num_vars + self.num_precommitted.0 + self.num_precommitted.1;
-    assert_eq!(W.W().len(), num_vars);
-    assert_eq!(U.X.len(), self.num_io);
-    let (Az, Bz, Cz) = self.multiply_witness(&W.W(), &U.u, &U.X)?;
+  // /// Checks if the R1CS instance is satisfiable given a witness and its shape
+  // pub(crate) fn is_sat_linearized(
+  //   &self,
+  //   ck: &CommitmentKey<E>,
+  //   U: &LR1CSInstance<E>,
+  //   W: &SplitR1CSWitness<E>,
+  // ) -> Result<(), NovaError> {
+  //   let num_vars = self.num_vars + self.num_precommitted.0 + self.num_precommitted.1;
+  //   assert_eq!(W.W().len(), num_vars);
+  //   assert_eq!(U.X.len(), self.num_io);
+  //   let (Az, Bz, Cz) = self.multiply_witness(&W.W(), &U.u, &U.X)?;
 
-    // Helper functions for resizing polynomials and evaluating them
-    let eval_padded_poly = |mut vec: Vec<E::Scalar>| {
-      vec.resize(self.num_cons.next_power_of_two(), E::Scalar::ZERO);
-      MultilinearPolynomial::new(vec).evaluate(&U.rx)
-    };
-    assert_eq!(U.vs[0], eval_padded_poly(Az));
-    assert_eq!(U.vs[1], eval_padded_poly(Bz));
-    assert_eq!(U.vs[2], eval_padded_poly(Cz));
+  //   // Helper functions for resizing polynomials and evaluating them
+  //   let eval_padded_poly = |mut vec: Vec<E::Scalar>| {
+  //     vec.resize(self.num_cons.next_power_of_two(), E::Scalar::ZERO);
+  //     MultilinearPolynomial::new(vec).evaluate(&U.rx)
+  //   };
+  //   assert_eq!(U.vs[0], eval_padded_poly(Az));
+  //   assert_eq!(U.vs[1], eval_padded_poly(Bz));
+  //   assert_eq!(U.vs[2], eval_padded_poly(Cz));
 
-    // verify if comm_W is a commitment to W
-    if U.comm_W
-      != CE::<E>::commit_at(
-        ck,
-        &W.aux.W,
-        &W.aux.r_W,
-        self.num_precommitted.0 + self.num_precommitted.1,
-      )
-      || U.pre_committed
-        != (
-          CE::<E>::commit(ck, &W.pre_committed.0, &E::Scalar::ZERO),
-          CE::<E>::commit_at(
-            ck,
-            &W.pre_committed.1,
-            &E::Scalar::ZERO,
-            self.num_precommitted.0,
-          ),
-        )
-    {
-      return Err(NovaError::UnSat);
-    }
-    Ok(())
-  }
+  //   // verify if comm_W is a commitment to W
+  //   if U.comm_W
+  //     != CE::<E>::commit_at(
+  //       ck,
+  //       &W.aux.W,
+  //       &W.aux.r_W,
+  //       self.num_precommitted.0 + self.num_precommitted.1,
+  //     )
+  //     || U.pre_committed
+  //       != (
+  //         CE::<E>::commit(ck, &W.pre_committed.0, &E::Scalar::ZERO),
+  //         CE::<E>::commit_at(
+  //           ck,
+  //           &W.pre_committed.1,
+  //           &E::Scalar::ZERO,
+  //           self.num_precommitted.0,
+  //         ),
+  //       )
+  //   {
+  //     return Err(NovaError::UnSat);
+  //   }
+  //   Ok(())
+  // }
 
   /// A method to compute a commitment to the cross-term `T` given a
   /// Relaxed R1CS instance-witness pair and an R1CS instance-witness pair

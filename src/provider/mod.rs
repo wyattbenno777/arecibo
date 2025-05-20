@@ -11,7 +11,7 @@ pub mod non_hiding_zeromorph;
 mod pasta;
 pub mod pedersen;
 pub(crate) mod poseidon;
-pub(crate) mod secp_secq;
+// pub(crate) mod secp_secq;
 pub(crate) mod traits;
 
 #[allow(dead_code)]
@@ -27,7 +27,7 @@ use crate::{
     keccak::Keccak256Transcript,
     pedersen::CommitmentEngine as PedersenCommitmentEngine,
     poseidon::{PoseidonRO, PoseidonROCircuit},
-    secp_secq::{secp256k1, secq256k1},
+    // secp_secq::{secp256k1, secq256k1},
   },
   traits::{CurveCycleEquipped, Engine},
 };
@@ -127,37 +127,37 @@ impl CurveCycleEquipped for Bn256EngineZM {
   type Secondary = GrumpkinEngine;
 }
 
-/// An implementation of the Nova `Engine` trait with Secp256k1 curve and Pedersen commitment scheme
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Secp256k1Engine;
+// /// An implementation of the Nova `Engine` trait with Secp256k1 curve and Pedersen commitment scheme
+// #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+// pub struct Secp256k1Engine;
 
-/// An implementation of the Nova `Engine` trait with Secp256k1 curve and Pedersen commitment scheme
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Secq256k1Engine;
+// /// An implementation of the Nova `Engine` trait with Secp256k1 curve and Pedersen commitment scheme
+// #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+// pub struct Secq256k1Engine;
 
-impl Engine for Secp256k1Engine {
-  type Base = secp256k1::Base;
-  type Scalar = secp256k1::Scalar;
-  type GE = secp256k1::Point;
-  type RO = PoseidonRO<Self::Base, Self::Scalar>;
-  type ROCircuit = PoseidonROCircuit<Self::Base>;
-  type TE = Keccak256Transcript<Self>;
-  type CE = PedersenCommitmentEngine<Self>;
-}
+// impl Engine for Secp256k1Engine {
+//   type Base = secp256k1::Base;
+//   type Scalar = secp256k1::Scalar;
+//   type GE = secp256k1::Point;
+//   type RO = PoseidonRO<Self::Base, Self::Scalar>;
+//   type ROCircuit = PoseidonROCircuit<Self::Base>;
+//   type TE = Keccak256Transcript<Self>;
+//   type CE = PedersenCommitmentEngine<Self>;
+// }
 
-impl Engine for Secq256k1Engine {
-  type Base = secq256k1::Base;
-  type Scalar = secq256k1::Scalar;
-  type GE = secq256k1::Point;
-  type RO = PoseidonRO<Self::Base, Self::Scalar>;
-  type ROCircuit = PoseidonROCircuit<Self::Base>;
-  type TE = Keccak256Transcript<Self>;
-  type CE = PedersenCommitmentEngine<Self>;
-}
+// impl Engine for Secq256k1Engine {
+//   type Base = secq256k1::Base;
+//   type Scalar = secq256k1::Scalar;
+//   type GE = secq256k1::Point;
+//   type RO = PoseidonRO<Self::Base, Self::Scalar>;
+//   type ROCircuit = PoseidonROCircuit<Self::Base>;
+//   type TE = Keccak256Transcript<Self>;
+//   type CE = PedersenCommitmentEngine<Self>;
+// }
 
-impl CurveCycleEquipped for Secp256k1Engine {
-  type Secondary = Secq256k1Engine;
-}
+// impl CurveCycleEquipped for Secp256k1Engine {
+//   type Secondary = Secq256k1Engine;
+// }
 
 /// An implementation of the Nova `Engine` trait with Pallas curve and Pedersen commitment scheme
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -199,7 +199,7 @@ impl CurveCycleEquipped for VestaEngine {
 mod test {
   use crate::provider::{
     bn256_grumpkin::{bn256, grumpkin},
-    secp_secq::{secp256k1, secq256k1},
+    // secp_secq::{secp256k1, secq256k1},
     traits::DlogGroup,
     util::msm::cpu_best_msm,
   };
@@ -263,8 +263,8 @@ mod test {
     test_msm_with::<vesta::Scalar, vesta::Affine>();
     test_msm_with::<bn256::Scalar, bn256::Affine>();
     test_msm_with::<grumpkin::Scalar, grumpkin::Affine>();
-    test_msm_with::<secp256k1::Scalar, secp256k1::Affine>();
-    test_msm_with::<secq256k1::Scalar, secq256k1::Affine>();
+    // test_msm_with::<secp256k1::Scalar, secp256k1::Affine>();
+    // test_msm_with::<secq256k1::Scalar, secq256k1::Affine>();
   }
 
   #[test]
@@ -277,8 +277,8 @@ mod test {
     impl_cycle_pair_test!(pallas);
   }
 
-  #[test]
-  fn test_secp256k1_from_label() {
-    impl_cycle_pair_test!(secp256k1);
-  }
+  // #[test]
+  // fn test_secp256k1_from_label() {
+  //   impl_cycle_pair_test!(secp256k1);
+  // }
 }
