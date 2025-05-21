@@ -99,12 +99,12 @@ where
   S2: RelaxedR1CSSNARKTrait<Dual<E>>,
 {
   /// Creates prover and verifier keys for [`CompressedSNARK`]
-  pub fn setup(
+  pub async fn setup(
     pp: &ShardingPublicParams<E>,
   ) -> Result<(ProverKey<E, S1, S2>, VerifierKey<E, S1, S2>), NovaError> {
-    let (pk_primary, vk_primary) = S1::setup(pp.ck.clone(), pp.primary_r1cs_shapes())?;
+    let (pk_primary, vk_primary) = S1::setup(pp.ck.clone(), pp.primary_r1cs_shapes()).await?;
     let (pk_secondary, vk_secondary) =
-      S2::setup(pp.pp.ck_cyclefold.clone(), pp.r1cs_shape_cyclefold())?;
+      S2::setup(pp.pp.ck_cyclefold.clone(), pp.r1cs_shape_cyclefold()).await?;
     let prover_key = ProverKey {
       primary: pk_primary,
       secondary: pk_secondary,
@@ -120,7 +120,7 @@ where
   }
 
   /// Create a new [`CompressedSNARK`]
-  pub fn prove(
+  pub async fn prove(
     pp: &ShardingPublicParams<E>,
     pk: &ProverKey<E, S1, S2>,
     rs: &ShardingRecursiveSNARK<E>,
@@ -161,10 +161,10 @@ where
       wit_blind_scan,
       err_blind_scan,
       random_U_scan,
-    ) = rs.fold_derandom(pp)?;
+    ) = rs.fold_derandom(pp).await?;
     let U = vec![derandom_U_F, derandom_U_ops, derandom_U_scan, U_verifier];
     let W = vec![derandom_W_F, derandom_W_ops, derandom_W_scan, W_verifier];
-    let snark_primary = S1::prove(&pp.ck, &pk.primary, pp.primary_r1cs_shapes(), &U, &W)?;
+    let snark_primary = S1::prove(&pp.ck, &pk.primary, pp.primary_r1cs_shapes(), &U, &W).await?;
 
     // Secondary SNARK
     //
@@ -177,14 +177,15 @@ where
       U_random_secondary,
       wit_blind_secondary,
       err_blind_secondary,
-    ) = rs.fold_derandom_secondary(pp)?;
+    ) = rs.fold_derandom_secondary(pp).await?;
     let snark_secondary = S2::prove(
       &pp.pp.ck_cyclefold,
       &pk.secondary,
       pp.r1cs_shape_cyclefold(),
       &U_secondary,
       &W_secondary,
-    )?;
+    )
+    .await?;
 
     Ok(Self {
       snark_primary,
@@ -231,7 +232,7 @@ where
   }
 
   /// Verify the correctness of the [`CompressedSNARK`]
-  pub fn verify(
+  pub async fn verify(
     &self,
     pp: &ShardingPublicParams<E>,
     vk: &VerifierKey<E, S1, S2>,
@@ -285,7 +286,7 @@ where
       U_scan.derandomize(&vk.dk_primary, &self.wit_blind_scan, &self.err_blind_scan);
 
     let U = vec![derandom_U_F, derandom_U_ops, derandom_U_scan, derandom_U];
-    self.snark_primary.verify(&vk.primary, &U)?;
+    self.snark_primary.verify(&vk.primary, &U).await?;
 
     // Secondary SNARK
     let U_temp_1_secondary = self.nifs_1_secondary.verify(
@@ -305,7 +306,8 @@ where
     );
     self
       .snark_secondary
-      .verify(&vk.secondary, &derandom_U_secondary)?;
+      .verify(&vk.secondary, &derandom_U_secondary)
+      .await?;
     Ok(())
   }
 }

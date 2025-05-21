@@ -558,12 +558,12 @@ where
 
   type EvaluationArgument = ZMProof<E>;
 
-  fn setup(ck: Arc<UniversalKZGParam<E>>) -> (Self::ProverKey, Self::VerifierKey) {
+  async fn setup(ck: Arc<UniversalKZGParam<E>>) -> (Self::ProverKey, Self::VerifierKey) {
     let len = ck.length() - 1;
     trim_zeromorph(ck, len)
   }
 
-  fn prove(
+  async fn prove(
     _ck: &UniversalKZGParam<E>,
     pk: &Self::ProverKey,
     transcript: &mut NE::TE,
@@ -579,7 +579,7 @@ where
     Self::open(pk, &commitment, &polynomial, point, &evaluation, transcript)
   }
 
-  fn verify(
+  async fn verify(
     vk: &Self::VerifierKey,
     transcript: &mut NE::TE,
     comm: &Commitment<NE>,

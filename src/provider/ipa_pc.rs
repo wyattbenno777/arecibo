@@ -54,7 +54,7 @@ where
   type VerifierKey = VerifierKey<E>;
   type EvaluationArgument = InnerProductArgument<E>;
 
-  fn setup(
+  async fn setup(
     ck: Arc<<<E as Engine>::CE as CommitmentEngineTrait<E>>::CommitmentKey>,
   ) -> (Self::ProverKey, Self::VerifierKey) {
     let ck_c = E::CE::setup(b"ipa", 1);
@@ -68,7 +68,7 @@ where
     (pk, vk)
   }
 
-  fn prove(
+  async fn prove(
     ck: &CommitmentKey<E>,
     pk: &Self::ProverKey,
     transcript: &mut E::TE,
@@ -80,11 +80,11 @@ where
     let u = InnerProductInstance::new(comm, &EqPolynomial::evals_from_points(point), eval);
     let w = InnerProductWitness::new(poly);
 
-    InnerProductArgument::prove(ck.clone(), pk.ck_s.clone(), &u, &w, transcript)
+    InnerProductArgument::prove(ck.clone(), pk.ck_s.clone(), &u, &w, transcript).await
   }
 
   /// A method to verify purported evaluations of a batch of polynomials
-  fn verify(
+  async fn verify(
     vk: &Self::VerifierKey,
     transcript: &mut E::TE,
     comm: &Commitment<E>,
@@ -94,7 +94,7 @@ where
   ) -> Result<(), NovaError> {
     let u = InnerProductInstance::new(comm, &EqPolynomial::evals_from_points(point), eval);
 
-    arg.verify(&vk.ck_v, vk.ck_s.clone(), 1 << point.len(), &u, transcript)?;
+    arg.verify(&vk.ck_v, vk.ck_s.clone(), 1 << point.len(), &u, transcript).await?;
 
     Ok(())
   }
@@ -168,7 +168,77 @@ where
     b"IPA"
   }
 
-  fn prove(
+    // Executes a step of the recursive inner product argument
+  async fn prove_inner(
+    a_vec: &[E::Scalar],
+    b_vec: &[E::Scalar],
+    ck: CommitmentKey<E>,
+    ck_c: &mut CommitmentKey<E>,
+    transcript: &mut E::TE,
+) -> Result<
+    (
+        CompressedCommitment<E>,
+        CompressedCommitment<E>,
+        Vec<E::Scalar>,
+        Vec<E::Scalar>,
+        CommitmentKey<E>,
+    ),
+    NovaError,
+> {
+    let n = a_vec.len();
+    let (ck_L, ck_R) = ck.split_at(n / 2);
+
+    let c_L = inner_product(&a_vec[0..n / 2], &b_vec[n / 2..n]);
+    let c_R = inner_product(&a_vec[n / 2..n], &b_vec[0..n / 2]);
+
+    let L = CE::<E>::commit(
+        &ck_R.combine(&ck_c),
+        &a_vec[0..n / 2]
+            .iter()
+            .chain(std::iter::once(&c_L))
+            .copied()
+            .collect::<Vec<E::Scalar>>(),
+        &E::Scalar::ZERO,
+    )
+    .await
+    .compress();
+
+    let R = CE::<E>::commit(
+        &ck_L.combine(&ck_c),
+        &a_vec[n / 2..n]
+            .iter()
+            .chain(std::iter::once(&c_R))
+            .copied()
+            .collect::<Vec<E::Scalar>>(),
+        &E::Scalar::ZERO,
+    )
+    .await
+    .compress();
+
+    transcript.absorb(b"L", &L);
+    transcript.absorb(b"R", &R);
+
+    let r = transcript.squeeze(b"r")?;
+    let r_inverse = r.invert().unwrap();
+
+    let a_vec_folded = zip_with!(
+        (a_vec[0..n / 2].par_iter(), a_vec[n / 2..n].par_iter()),
+        |a_L, a_R| *a_L * r + r_inverse * *a_R
+    )
+    .collect::<Vec<E::Scalar>>();
+
+    let b_vec_folded = zip_with!(
+        (b_vec[0..n / 2].par_iter(), b_vec[n / 2..n].par_iter()),
+        |b_L, b_R| *b_L * r_inverse + r * *b_R
+    )
+    .collect::<Vec<E::Scalar>>();
+
+    let ck_folded = CommitmentKeyExtTrait::fold(&ck_L, &ck_R, &r_inverse, &r);
+
+    Ok((L, R, a_vec_folded, b_vec_folded, ck_folded))
+}
+
+  async fn prove(
     ck: CommitmentKey<E>,
     mut ck_c: CommitmentKey<E>,
     U: &InnerProductInstance<E>,
@@ -190,71 +260,7 @@ where
     let r = transcript.squeeze(b"r")?;
     ck_c.scale(&r);
 
-    // a closure that executes a step of the recursive inner product argument
-    let prove_inner = |a_vec: &[E::Scalar],
-                       b_vec: &[E::Scalar],
-                       ck: CommitmentKey<E>,
-                       transcript: &mut E::TE|
-     -> Result<
-      (
-        CompressedCommitment<E>,
-        CompressedCommitment<E>,
-        Vec<E::Scalar>,
-        Vec<E::Scalar>,
-        CommitmentKey<E>,
-      ),
-      NovaError,
-    > {
-      let n = a_vec.len();
-      let (ck_L, ck_R) = ck.split_at(n / 2);
 
-      let c_L = inner_product(&a_vec[0..n / 2], &b_vec[n / 2..n]);
-      let c_R = inner_product(&a_vec[n / 2..n], &b_vec[0..n / 2]);
-
-      let L = CE::<E>::commit(
-        &ck_R.combine(&ck_c),
-        &a_vec[0..n / 2]
-          .iter()
-          .chain(iter::once(&c_L))
-          .copied()
-          .collect::<Vec<E::Scalar>>(),
-        &E::Scalar::ZERO,
-      )
-      .compress();
-      let R = CE::<E>::commit(
-        &ck_L.combine(&ck_c),
-        &a_vec[n / 2..n]
-          .iter()
-          .chain(iter::once(&c_R))
-          .copied()
-          .collect::<Vec<E::Scalar>>(),
-        &E::Scalar::ZERO,
-      )
-      .compress();
-
-      transcript.absorb(b"L", &L);
-      transcript.absorb(b"R", &R);
-
-      let r = transcript.squeeze(b"r")?;
-      let r_inverse = r.invert().unwrap();
-
-      // fold the left half and the right half
-      let a_vec_folded = zip_with!(
-        (a_vec[0..n / 2].par_iter(), a_vec[n / 2..n].par_iter()),
-        |a_L, a_R| *a_L * r + r_inverse * *a_R
-      )
-      .collect::<Vec<E::Scalar>>();
-
-      let b_vec_folded = zip_with!(
-        (b_vec[0..n / 2].par_iter(), b_vec[n / 2..n].par_iter()),
-        |b_L, b_R| *b_L * r_inverse + r * *b_R
-      )
-      .collect::<Vec<E::Scalar>>();
-
-      let ck_folded = CommitmentKeyExtTrait::fold(&ck_L, &ck_R, &r_inverse, &r);
-
-      Ok((L, R, a_vec_folded, b_vec_folded, ck_folded))
-    };
 
     // two vectors to hold the logarithmic number of group elements
     let mut L_vec: Vec<CompressedCommitment<E>> = Vec::new();
@@ -266,7 +272,7 @@ where
     let mut ck = ck;
     for _i in 0..usize::try_from(U.b_vec.len().ilog2()).unwrap() {
       let (L, R, a_vec_folded, b_vec_folded, ck_folded) =
-        prove_inner(&a_vec, &b_vec, ck, transcript)?;
+        Self::prove_inner(&a_vec, &b_vec, ck, &mut ck_c, transcript).await?;
       L_vec.push(L);
       R_vec.push(R);
 
@@ -282,7 +288,7 @@ where
     })
   }
 
-  fn verify(
+  async fn verify(
     &self,
     ck: &CommitmentKey<E>,
     mut ck_c: CommitmentKey<E>,
@@ -308,7 +314,8 @@ where
     let r = transcript.squeeze(b"r")?;
     ck_c.scale(&r);
 
-    let P = U.comm_a_vec + CE::<E>::commit(&ck_c, &[U.c], &E::Scalar::ZERO);
+    let cm = CE::<E>::commit(&ck_c, &[U.c], &E::Scalar::ZERO).await;
+    let P = U.comm_a_vec + cm;
 
     // compute a vector of public coins using self.L_vec and self.R_vec
     let r = (0..self.L_vec.len())
@@ -348,7 +355,7 @@ where
     };
 
     let ck_hat = {
-      let c = CE::<E>::commit(&ck, &s, &E::Scalar::ZERO).compress();
+      let c = CE::<E>::commit(&ck, &s, &E::Scalar::ZERO).await.compress();
       CommitmentKey::<E>::reinterpret_commitments_as_ck(&[c])?
     };
 
@@ -371,7 +378,7 @@ where
           .copied()
           .collect::<Vec<E::Scalar>>(),
         &E::Scalar::ZERO,
-      )
+      ).await
     };
 
     if P_hat
@@ -379,7 +386,7 @@ where
         &ck_hat.combine(&ck_c),
         &[self.a_hat, self.a_hat * b_hat],
         &E::Scalar::ZERO,
-      )
+      ).await
     {
       Ok(())
     } else {

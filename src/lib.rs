@@ -8,6 +8,8 @@
   missing_docs
 )]
 #![allow(non_snake_case, clippy::upper_case_acronyms)]
+#![allow(async_fn_in_trait)]
+
 // #![forbid(unsafe_code)] // Commented for development with `Abomonation`
 
 use digest::{DigestComputer, SimpleDigestible};

@@ -29,12 +29,12 @@ pub trait EvaluationEngineTrait<E: Engine>: Clone + Send + Sync {
   ///
   /// **Note:** This method should be cheap and should not copy most of the
   /// commitment key. Look at `CommitmentEngineTrait::setup` for generating SRS data.
-  fn setup(
+  async fn setup(
     ck: Arc<<<E as Engine>::CE as CommitmentEngineTrait<E>>::CommitmentKey>,
   ) -> (Self::ProverKey, Self::VerifierKey);
 
   /// A method to prove the evaluation of a multilinear polynomial
-  fn prove(
+  async fn prove(
     ck: &<<E as Engine>::CE as CommitmentEngineTrait<E>>::CommitmentKey,
     pk: &Self::ProverKey,
     transcript: &mut E::TE,
@@ -45,7 +45,7 @@ pub trait EvaluationEngineTrait<E: Engine>: Clone + Send + Sync {
   ) -> Result<Self::EvaluationArgument, NovaError>;
 
   /// A method to verify the purported evaluation of a multilinear polynomials
-  fn verify(
+  async fn verify(
     vk: &Self::VerifierKey,
     transcript: &mut E::TE,
     comm: &<<E as Engine>::CE as CommitmentEngineTrait<E>>::Commitment,

@@ -178,15 +178,15 @@ where
   }
 
   /// Get the precommitted commitments
-  pub fn commit(&self, ck: &CommitmentKey<E>) -> (Commitment<E>, Commitment<E>) {
+  pub async fn commit(&self, ck: &CommitmentKey<E>) -> (Commitment<E>, Commitment<E>) {
     (
-      CE::<E>::commit(ck, &self.pre_committed.0, &E::Scalar::ZERO),
+      CE::<E>::commit(ck, &self.pre_committed.0, &E::Scalar::ZERO).await,
       CE::<E>::commit_at(
         ck,
         &self.pre_committed.1,
         &E::Scalar::ZERO,
         self.pre_committed.0.len(),
-      ),
+      ).await,
     )
   }
 

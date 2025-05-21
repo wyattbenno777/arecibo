@@ -47,7 +47,7 @@ where
 {
   /// Prover algorithm for the NIFS used in folding IVC proofs. Implemented with CycleFold.
   #[tracing::instrument(skip_all, name = "Fold Recursive SNARK", level = "debug")]
-  pub fn prove(
+  pub async fn prove(
     (ck, ck_secondary): (&CommitmentKey<E>, &CommitmentKey<Dual<E>>),
     ro_consts: &ROConstants<Dual<E>>,
     pp_digest: &E::Scalar,
@@ -68,7 +68,7 @@ where
      * *********** Primary Fold ***********
      */
     let (nifs_primary, (U, W), r) =
-      PrimaryRelaxedNIFS::prove(ck, ro_consts, pp_digest, S, (U1, W1), (U2, W2))?;
+      PrimaryRelaxedNIFS::prove(ck, ro_consts, pp_digest, S, (U1, W1), (U2, W2)).await?;
 
     /*
      * *********** CycleFold instances ***********
@@ -87,7 +87,7 @@ where
       U1.comm_E,
       nifs_primary.comm_T,
       r_bools,
-    )?;
+    ).await?;
 
     // Get the committed R1CS instance and witness from second CycleFold instance
     //
@@ -102,7 +102,7 @@ where
       E_term_1,
       U2.comm_E,
       r_squared_bools,
-    )?;
+    ).await?;
 
     // Get the committed R1CS instance and witness from third CycleFold instance.
     //
@@ -113,7 +113,7 @@ where
       U1.comm_W,
       U2.comm_W,
       r_bools,
-    )?;
+    ).await?;
 
     /*
      * *********** Fold first cyclefold instance ***********
@@ -126,7 +126,7 @@ where
       W1_secondary,
       &l_u_cyclefold_E1,
       &l_w_cyclefold_E1,
-    )?;
+    ).await?;
 
     /*
      * *********** Fold second cyclefold instance ***********
@@ -139,7 +139,7 @@ where
       &W_secondary_temp,
       &l_u_cyclefold_E2,
       &l_w_cyclefold_E2,
-    )?;
+    ).await?;
 
     /*
      * *********** Fold third cyclefold instance ***********
@@ -152,7 +152,7 @@ where
       &W_secondary_temp_1,
       &l_u_cyclefold_W,
       &l_w_cyclefold_W,
-    )?;
+    ).await?;
 
     /*
      * *********** Fold fourth cyclefold instance ***********
@@ -165,7 +165,7 @@ where
       &W_secondary_temp_2,
       U2_secondary,
       W2_secondary,
-    )?;
+    ).await?;
 
     Ok((
       Self {
@@ -200,7 +200,7 @@ where
 {
   /// Prover algorithm for folding incoming CycleFold [`R1CSInstance`] and [`R1CSWitness`] instances into running instance
   #[tracing::instrument(skip_all, name = "CycleFoldNIFS::prove", level = "debug")]
-  pub fn prove(
+  pub async fn prove(
     ck: &CommitmentKey<Dual<E>>,
     ro_consts: &ROConstants<Dual<E>>,
     S: &R1CSShape<Dual<E>>,
@@ -222,7 +222,7 @@ where
     );
     absorb_U_bn(U1, &mut ro);
     absorb_cyclefold_r1cs(U2, &mut ro);
-    let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2, &<Dual<E> as Engine>::Scalar::ZERO)?;
+    let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2, &<Dual<E> as Engine>::Scalar::ZERO).await?;
     comm_T.absorb_in_ro(&mut ro);
     let r = ro.squeeze(NUM_CHALLENGE_BITS);
     let U = U1.fold(U2, &comm_T, &r);
@@ -232,7 +232,7 @@ where
 }
 
 /// Computes the R1CS instance and witness for the CycleFold Circuit
-pub fn compute_cyclefold_instance_witness_pair<E>(
+pub async fn compute_cyclefold_instance_witness_pair<E>(
   S_cyclefold: &R1CSShape<Dual<E>>,
   ck_cyclefold: &CommitmentKey<Dual<E>>,
   commit_1: Commitment<E>,
@@ -248,5 +248,6 @@ where
   let _ = circuit_cyclefold_W.synthesize(&mut cs_cyclefold_W);
   cs_cyclefold_W
     .r1cs_instance_and_witness(S_cyclefold, ck_cyclefold)
+    .await
     .map_err(|_| NovaError::UnSat)
 }

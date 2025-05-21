@@ -52,7 +52,7 @@ where
     }
 }
   /// Prover algorithm for: CycleFold folding scheme applied to Nova
-  pub fn prove(
+  pub async fn prove(
     (ck, ck_secondary): (&CommitmentKey<E>, &CommitmentKey<Dual<E>>),
     ro_consts: &ROConstants<Dual<E>>,
     pp_digest: &E::Scalar,
@@ -75,7 +75,7 @@ where
      * Primary Fold
      */
     let (nifs_primary, (U, W), r) =
-      PrimaryNIFS::prove(ck, ro_consts, pp_digest, S, (U1, W1), (U2, W2))?;
+      PrimaryNIFS::prove(ck, ro_consts, pp_digest, S, (U1, W1), (U2, W2)).await?;
 
     /*
      * CycleFold instances
@@ -98,6 +98,7 @@ where
       let _ = circuit_cyclefold_E.synthesize(&mut cs_cyclefold_E);
       cs_cyclefold_E
         .r1cs_instance_and_witness(S_secondary, ck_secondary)
+        .await
         .map_err(|_| NovaError::UnSat)?
     };
 
@@ -109,6 +110,7 @@ where
       let _ = circuit_cyclefold_W.synthesize(&mut cs_cyclefold_W);
       cs_cyclefold_W
         .r1cs_instance_and_witness(S_secondary, ck_secondary)
+        .await
         .map_err(|_| NovaError::UnSat)?
     };
 
@@ -129,7 +131,7 @@ where
       &l_u_cyclefold_E,
       &l_w_cyclefold_E,
       &r_T1,
-    )?;
+    ).await?;
     comm_T1.absorb_in_ro(&mut ro);
     let r1 = ro.squeeze(NUM_CHALLENGE_BITS);
     let U_secondary_temp = U1_secondary.fold(&l_u_cyclefold_E, &comm_T1, &r1);
@@ -152,7 +154,7 @@ where
       &l_u_cyclefold_W,
       &l_w_cyclefold_W,
       &r_T2,
-    )?;
+    ).await?;
     comm_T2.absorb_in_ro(&mut ro);
     let r2 = ro.squeeze(NUM_CHALLENGE_BITS);
     let U_secondary = U_secondary_temp.fold(&l_u_cyclefold_W, &comm_T2, &r2);
@@ -235,7 +237,7 @@ where
   E: CurveCycleEquipped,
 {
   /// Prover implementation for NIFS
-  pub fn prove(
+  pub async fn prove(
     ck: &CommitmentKey<E>,
     ro_consts: &ROConstants<Dual<E>>,
     pp_digest: &E::Scalar,
@@ -258,7 +260,7 @@ where
     ro.absorb(*pp_digest);
     absorb_primary_r1cs::<E, Dual<E>>(U2, &mut ro);
     let r_T = E::Scalar::random(&mut OsRng);
-    let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2, &r_T)?;
+    let (T, comm_T) = S.commit_T(ck, U1, W1, U2, W2, &r_T).await?;
     absorb_primary_commitment::<E, Dual<E>>(&comm_T, &mut ro);
     let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
     let U = U1.fold(U2, &comm_T, &r);
@@ -313,7 +315,7 @@ where
 {
   /// Prove the primary relaxed NIFS
   #[tracing::instrument(skip_all, name = "PrimaryRelaxedNIFS::prove", level = "debug")]
-  pub fn prove(
+  pub async fn prove(
     ck: &CommitmentKey<E>,
     ro_consts: &ROConstants<Dual<E>>,
     pp_digest: &E::Scalar,
@@ -338,7 +340,7 @@ where
     );
     ro.absorb(*pp_digest);
     absorb_U::<E>(U2, &mut ro);
-    let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2, &E::Scalar::ZERO)?;
+    let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2, &E::Scalar::ZERO).await?;
     absorb_primary_commitment::<E, Dual<E>>(&comm_T, &mut ro);
     let r = scalar_as_base::<Dual<E>>(ro.squeeze(NUM_CHALLENGE_BITS));
     let U = U1.fold_relaxed(U2, &comm_T, &r);
@@ -383,7 +385,7 @@ where
 {
   /// Prover algorithm for folding two CycleFold [`RelaxedR1CSInstance`] and [`RelaxedR1CSWitness`] instances
   #[tracing::instrument(skip_all, name = "CycleFoldRelaxedNIFS::prove", level = "debug")]
-  pub fn prove(
+  pub async fn prove(
     ck: &CommitmentKey<Dual<E>>,
     ro_consts: &ROConstants<Dual<E>>,
     S: &R1CSShape<Dual<E>>,
@@ -405,7 +407,7 @@ where
     );
     absorb_U_bn(U1, &mut ro);
     absorb_U_bn(U2, &mut ro);
-    let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2, &<Dual<E> as Engine>::Scalar::ZERO)?;
+    let (T, comm_T) = S.commit_T_relaxed(ck, U1, W1, U2, W2, &<Dual<E> as Engine>::Scalar::ZERO).await?;
     comm_T.absorb_in_ro(&mut ro);
     let r = ro.squeeze(NUM_CHALLENGE_BITS);
     let U = U1.fold_relaxed(U2, &comm_T, &r);

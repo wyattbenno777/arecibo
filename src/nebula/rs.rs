@@ -203,7 +203,7 @@ where
 {
   /// Create a new instance of RecursiveSNARK
   #[tracing::instrument(skip_all, name = "nebula::RecursiveSNARK::new")]
-  pub fn new<C>(
+  pub async fn new<C>(
     pp: &PublicParams<E1>,
     step_circuit: &C,
     z0: &[E1::Scalar],
@@ -248,7 +248,7 @@ where
     );
     let zi = circuit_primary.synthesize(&mut cs_primary)?;
     let (l_u_primary, l_w_primary) =
-      cs_primary.r1cs_instance_and_witness(r1cs_primary, &pp.ck_primary)?;
+      cs_primary.r1cs_instance_and_witness(r1cs_primary, &pp.ck_primary).await?;
 
     // Get z_i values out of the Constraint System
     let zi = zi
@@ -277,7 +277,7 @@ where
       prev_IC: E1::Scalar::ZERO, // IC_0 = ⊥, // carries value of: C_i−1
 
       // commitment to non-deterministic advice
-      comm_omega_prev: step_circuit.commit_w::<E1>(&pp.ck_primary), // C_ω_i−1
+      comm_omega_prev: step_circuit.commit_w::<E1>(&pp.ck_primary).await, // C_ω_i−1
 
       // running Cyclefold instance, witness pair
       r_U_cyclefold,
@@ -291,7 +291,7 @@ where
   /// Create a new [`RecursiveSNARK`] (or updates the provided [`RecursiveSNARK`])
   /// by executing a step of the incremental computation
   #[tracing::instrument(skip_all, name = "nebula::RecursiveSNARK::prove_step")]
-  pub fn prove_step<C>(
+  pub async fn prove_step<C>(
     &mut self,
     pp: &PublicParams<E1>,
     step_circuit: &C,
@@ -327,7 +327,7 @@ where
         (&self.r_U_primary, &self.r_W_primary),
         (&self.l_u_primary, &self.l_w_primary),
         (&self.r_U_cyclefold, &self.r_W_cyclefold),
-      )?;
+      ).await?;
 
     // Get advice to pass into verifier circuit
     let E_new = r_U_primary.comm_E;
@@ -371,6 +371,7 @@ where
     let zi = circuit_primary.synthesize(&mut cs_primary)?;
     let (l_u_primary, l_w_primary) = cs_primary
       .r1cs_instance_and_witness(&pp.circuit_shape_primary.r1cs_shape, &pp.ck_primary)
+      .await
       .map_err(|_| NovaError::UnSat)?;
 
     // Get z_i values out of the Constraint System
@@ -391,7 +392,7 @@ where
 
     // update incremental commitments in IVC proof
     self.prev_IC = IC_i;
-    self.comm_omega_prev = step_circuit.commit_w::<E1>(&pp.ck_primary);
+    self.comm_omega_prev = step_circuit.commit_w::<E1>(&pp.ck_primary).await;
 
     // Update number of steps proven
     self.i += 1;
@@ -401,7 +402,7 @@ where
 
   /// Verify the correctness of the `RecursiveSNARK`
   #[tracing::instrument(skip_all, name = "nebula::RecursiveSNARK::verify")]
-  pub fn verify(
+  pub async fn verify(
     &self,
     pp: &PublicParams<E1>,
     num_steps: usize,
@@ -467,32 +468,22 @@ where
     }
 
     // Verify the satisfiability of running relaxed instances, and the final primary instance.
-    let (res_r_primary, (res_l_primary, res_r_cyclefold)) = rayon::join(
-      || {
-        pp.circuit_shape_primary.r1cs_shape.is_sat_relaxed(
-          &pp.ck_primary,
-          &self.r_U_primary,
-          &self.r_W_primary,
-        )
-      },
-      || {
-        rayon::join(
-          || {
-            pp.circuit_shape_primary.r1cs_shape.is_sat(
-              &pp.ck_primary,
-              &self.l_u_primary,
-              &self.l_w_primary,
-            )
-          },
-          || {
-            pp.circuit_shape_cyclefold.r1cs_shape.is_sat_relaxed(
-              &pp.ck_cyclefold,
-              &self.r_U_cyclefold,
-              &self.r_W_cyclefold,
-            )
-          },
-        )
-      },
+    let (res_r_primary, res_l_primary, res_r_cyclefold) = tokio::join!(
+      pp.circuit_shape_primary.r1cs_shape.is_sat_relaxed(
+        &pp.ck_primary,
+        &self.r_U_primary,
+        &self.r_W_primary,
+      ),
+      pp.circuit_shape_primary.r1cs_shape.is_sat(
+        &pp.ck_primary,
+        &self.l_u_primary,
+        &self.l_w_primary,
+      ),
+      pp.circuit_shape_cyclefold.r1cs_shape.is_sat_relaxed(
+        &pp.ck_cyclefold,
+        &self.r_U_cyclefold,
+        &self.r_W_cyclefold,
+      ),
     );
     res_r_primary?;
     res_l_primary?;
@@ -514,7 +505,7 @@ where
     name = "nebula::RecursiveSNARK::increment_commitment",
     level = "debug"
   )]
-  pub fn increment_commitment<C>(&self, pp: &PublicParams<E1>, step_circuit: &C) -> E1::Scalar
+  pub async fn increment_commitment<C>(&self, pp: &PublicParams<E1>, step_circuit: &C) -> E1::Scalar
   where
     C: StepCircuit<E1::Scalar>,
   {
@@ -524,6 +515,7 @@ where
       self.prev_IC,
       step_circuit.non_deterministic_advice(),
     )
+    .await
   }
 
   /// The number of steps which have been executed thus far.
@@ -564,7 +556,7 @@ where
   }
 
   /// Do NIFS.P on the IVC proof before we send it of for compression
-  pub(crate) fn fold_ivc_compression_step(
+  pub(crate) async fn fold_ivc_compression_step(
     &self,
     pp: &PublicParams<E1>,
   ) -> Result<
@@ -586,13 +578,14 @@ where
       &pp.circuit_shape_primary.r1cs_shape,
       (&self.r_U_primary, &self.r_W_primary),
       (&self.l_u_primary, &self.l_w_primary),
-    )?;
+    ).await?;
 
     // Fold random instance and witness
     let (random_U, random_W) = pp
       .circuit_shape_primary
       .r1cs_shape
-      .sample_random_instance_witness(&pp.ck_primary)?;
+      .sample_random_instance_witness(&pp.ck_primary)
+      .await?;
     let (nifs_r, (U, W), _) = PrimaryRelaxedNIFS::prove(
       &*pp.ck_primary,
       &pp.ro_consts,
@@ -600,7 +593,7 @@ where
       &pp.circuit_shape_primary.r1cs_shape,
       (&U_f, &W_f),
       (&random_U, &random_W),
-    )?;
+    ).await?;
 
     let (derandom_W, wit_blind, err_blind) = W.derandomize();
     let derandom_U = U.derandomize(&E1::CE::derand_key(&pp.ck_primary), &wit_blind, &err_blind);
@@ -649,11 +642,11 @@ pub trait StepCircuit<F: PrimeField>: Send + Sync + Clone {
   fn non_deterministic_advice(&self) -> Vec<F>;
 
   /// Produce a commitment to the non_deterministic advice
-  fn commit_w<E>(&self, ck: &CommitmentKey<E>) -> Commitment<E>
+  async fn commit_w<E>(&self, ck: &CommitmentKey<E>) -> Commitment<E>
   where
     E: Engine<Scalar = F>,
   {
-    E::CE::commit(ck, &self.non_deterministic_advice(), &E::Scalar::ZERO)
+    E::CE::commit(ck, &self.non_deterministic_advice(), &E::Scalar::ZERO).await
   }
 }
 

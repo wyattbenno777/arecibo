@@ -36,6 +36,7 @@ use crate::{
   zip_with, zip_with_for_each, Commitment, CommitmentKey, CompressedCommitment,
 };
 use ff::Field;
+use futures::{future::join_all, stream, StreamExt, TryStreamExt};
 use itertools::{chain, Itertools as _};
 use once_cell::sync::*;
 use rayon::prelude::*;
@@ -140,7 +141,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     })
   }
 
-  fn setup(
+  async fn setup(
     ck: Arc<CommitmentKey<E>>,
     S: Vec<&R1CSShape<E>>,
   ) -> Result<(Self::ProverKey, Self::VerifierKey), NovaError> {
@@ -151,14 +152,11 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
         return Err(NovaError::InternalError);
       }
     }
-    let (pk_ee, vk_ee) = EE::setup(ck.clone());
+    let (pk_ee, vk_ee) = EE::setup(ck.clone()).await;
 
     let S = S.iter().map(|s| s.pad()).collect::<Vec<_>>();
     let S_repr = S.iter().map(R1CSShapeSparkRepr::new).collect::<Vec<_>>();
-    let S_comm = S_repr
-      .iter()
-      .map(|s_repr| s_repr.commit(&*ck))
-      .collect::<Vec<_>>();
+    let S_comm = join_all(S_repr.iter().map(|s_repr| s_repr.commit(&*ck))).await;
     let num_vars = S.iter().map(|s| s.num_vars).collect::<Vec<_>>();
     let vk = VerifierKey::new(num_vars, S_comm.clone(), vk_ee);
     let pk = ProverKey {
@@ -170,7 +168,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     Ok((pk, vk))
   }
 
-  fn prove(
+  async fn prove(
     ck: &CommitmentKey<E>,
     pk: &Self::ProverKey,
     S: Vec<&R1CSShape<E>>,
@@ -223,21 +221,16 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     .collect::<Result<Vec<_>, NovaError>>()?;
 
     // Commit to [Az, Bz, Cz] and add to transcript
-    let comms_Az_Bz_Cz = polys_Az_Bz_Cz
-      .par_iter()
-      .map(|[Az, Bz, Cz]| {
-        let (comm_Az, (comm_Bz, comm_Cz)) = rayon::join(
-          || E::CE::commit(ck, Az, &E::Scalar::ZERO),
-          || {
-            rayon::join(
-              || E::CE::commit(ck, Bz, &E::Scalar::ZERO),
-              || E::CE::commit(ck, Cz, &E::Scalar::ZERO),
-            )
-          },
-        );
-        [comm_Az, comm_Bz, comm_Cz]
-      })
-      .collect::<Vec<_>>();
+    let zero = E::Scalar::ZERO;
+
+    let mut comms_Az_Bz_Cz: Vec<_> = vec![];
+    for [Az, Bz, Cz] in polys_Az_Bz_Cz.clone().iter_mut() {
+      let comm_Az = E::CE::commit(ck, &Az, &zero).await;
+      let comm_Bz = E::CE::commit(ck, &Bz, &zero).await;
+      let comm_Cz = E::CE::commit(ck, &Cz, &zero).await;
+      comms_Az_Bz_Cz.push([comm_Az, comm_Bz, comm_Cz]);
+    }
+
     comms_Az_Bz_Cz
       .iter()
       .for_each(|comms| transcript.absorb(b"c", &comms.as_slice()));
@@ -349,16 +342,15 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     )
     .collect::<Vec<_>>();
 
-    let comms_L_row_col = polys_L_row_col
-      .par_iter()
-      .map(|[L_row, L_col]| {
-        let (comm_L_row, comm_L_col) = rayon::join(
-          || E::CE::commit(ck, L_row, &E::Scalar::ZERO),
-          || E::CE::commit(ck, L_col, &E::Scalar::ZERO),
-        );
-        [comm_L_row, comm_L_col]
-      })
-      .collect::<Vec<_>>();
+    let mut comms_L_row_col: Vec<_> = vec![];
+    let zero = E::Scalar::ZERO;
+
+    for [L_row, L_col] in polys_L_row_col.iter() {
+      let comm_L_row = E::CE::commit(ck, L_row, &zero).await;
+      let comm_L_col = E::CE::commit(ck, L_col, &zero).await;
+      comms_L_row_col.push([comm_L_row, comm_L_col]);
+    }
+
 
     // absorb commitments to L_row and L_col in the transcript
     for comms in comms_L_row_col.iter() {
@@ -456,17 +448,20 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
 
       // We start by computing oracles and auxiliary polynomials to help prove the claim
       // oracles correspond to [t_plus_r_inv_row, w_plus_r_inv_row, t_plus_r_inv_col, w_plus_r_inv_col]
-      let (comms_mem_oracles, polys_mem_oracles, mem_aux) = pk
+      let zero = E::Scalar::ZERO;
+
+      let comms_mem_oracles_stream = pk
         .S_repr
         .iter()
         .zip_eq(polys_tau.iter())
         .zip_eq(polys_Z.iter())
-        .zip_eq(polys_L_row_col.iter())
-        .try_fold(
-          (Vec::new(), Vec::new(), Vec::new()),
-          |(mut comms, mut polys, mut aux), (((s_repr, poly_tau), poly_Z), [L_row, L_col])| {
-            let (comm, poly, a) = MemorySumcheckInstance::<E>::compute_oracles(
-              ck,
+        .zip_eq(polys_L_row_col.iter());
+
+      let (comms_mem_oracles, polys_mem_oracles, mem_aux): (Vec<_>, Vec<_>, Vec<_>) =
+        stream::iter(comms_mem_oracles_stream)
+          .then(|(((s_repr, poly_tau), poly_Z), [L_row, L_col])| async {
+            MemorySumcheckInstance::<E>::compute_oracles(
+              &ck,
               &r,
               &gamma,
               poly_tau,
@@ -477,15 +472,19 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
               &s_repr.col,
               L_col,
               &s_repr.ts_col,
-            )?;
-
-            comms.push(comm);
-            polys.push(poly);
-            aux.push(a);
-
-            Ok::<_, NovaError>((comms, polys, aux))
-          },
-        )?;
+            )
+            .await
+          })
+          .try_fold(
+            (Vec::new(), Vec::new(), Vec::new()),
+            |(mut comms, mut polys, mut aux), (comm, poly, a)| async move {
+              comms.push(comm);
+              polys.push(poly);
+              aux.push(a);
+              Ok::<_, NovaError>((comms, polys, aux))
+            },
+          )
+          .await?;
 
       // Commit to oracles
       for comms in comms_mem_oracles.iter() {
@@ -713,14 +712,15 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
       PolyEvalWitness::<E>::batch_diff_size(&w_vec.iter().by_ref().collect::<Vec<_>>(), c);
 
     let eval_arg = EE::prove(
-      ck,
+      &ck,
       &pk.pk_ee,
       &mut transcript,
       &u_batch.c,
       &w_batch.p,
       &u_batch.x,
       &u_batch.e,
-    )?;
+    )
+    .await?;
 
     let comms_Az_Bz_Cz = comms_Az_Bz_Cz
       .into_iter()
@@ -749,7 +749,11 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     })
   }
 
-  fn verify(&self, vk: &Self::VerifierKey, U: &[RelaxedR1CSInstance<E>]) -> Result<(), NovaError> {
+  async fn verify(
+    &self,
+    vk: &Self::VerifierKey,
+    U: &[RelaxedR1CSInstance<E>],
+  ) -> Result<(), NovaError> {
     let num_instances = U.len();
     let num_claims_per_instance = 10;
 
@@ -1066,7 +1070,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     };
 
     // verify
-    EE::verify(&vk.vk_ee, &mut transcript, &u.c, &u.x, &u.e, &self.eval_arg)?;
+    EE::verify(&vk.vk_ee, &mut transcript, &u.c, &u.x, &u.e, &self.eval_arg).await?;
 
     Ok(())
   }

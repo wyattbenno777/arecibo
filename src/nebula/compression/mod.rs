@@ -117,12 +117,12 @@ where
   S2: RelaxedR1CSSNARKTrait<Dual<E>>,
 {
   /// Creates prover and verifier keys for [`CompressedSNARK`]
-  pub fn setup(
+  pub async fn setup(
     pp: &impl Layer1PPTrait<E>,
   ) -> Result<(ProverKey<E, S1, S2>, VerifierKey<E, S1, S2>), NovaError> {
-    let (pk_primary, vk_primary) = S1::setup(pp.biggest_ck().clone(), pp.primary_r1cs_shapes())?;
+    let (pk_primary, vk_primary) = S1::setup(pp.biggest_ck().clone(), pp.primary_r1cs_shapes()).await?;
     let (pk_secondary, vk_secondary) =
-      S2::setup(pp.ck_secondary().clone(), pp.cyclefold_r1cs_shape())?;
+      S2::setup(pp.ck_secondary().clone(), pp.cyclefold_r1cs_shape()).await?;
     let prover_key = ProverKey {
       primary: pk_primary,
       secondary: pk_secondary,
@@ -137,7 +137,7 @@ where
   }
 
   /// Create a new [`CompressedSNARK`]
-  pub fn prove(
+  pub async fn prove(
     pp: &impl Layer1PPTrait<E>,
     pk: &ProverKey<E, S1, S2>,
     rs: &impl Layer1RSTrait<E>,
@@ -150,9 +150,9 @@ where
     //
     // Fold's (U, W, u, w) into (U', W') and runs the folded instance witness pair though Spartan
     let (U_F, W_F, nifs_F, nifs_random_F, wit_blind_F, err_blind_F, U_random_F) =
-      rs.F().fold_ivc_compression_step(pp.F())?;
+      rs.F().fold_ivc_compression_step(pp.F()).await?;
     let (U_ops, W_ops, nifs_ops, nifs_random_ops, wit_blind_ops, err_blind_ops, U_random_ops) =
-      rs.ops().fold_ivc_compression_step(pp.ops())?;
+      rs.ops().fold_ivc_compression_step(pp.ops()).await?;
     let (
       U_scan,
       W_scan,
@@ -161,7 +161,7 @@ where
       wit_blind_scan,
       err_blind_scan,
       U_random_scan,
-    ) = rs.scan().fold_ivc_compression_step(pp.scan())?;
+    ) = rs.scan().fold_ivc_compression_step(pp.scan()).await?;
     let U = vec![U_F, U_ops, U_scan];
     let W = vec![W_F, W_ops, W_scan];
     let snark_primary = S1::prove(
@@ -170,7 +170,7 @@ where
       pp.primary_r1cs_shapes(),
       &U,
       &W,
-    )?;
+    ).await?;
 
     // Secondary SNARK
     //
@@ -185,14 +185,14 @@ where
       U_random_secondary,
       wit_blind_secondary,
       err_blind_secondary,
-    ) = rs.fold_cyclefold_derandom(pp)?;
+    ) = rs.fold_cyclefold_derandom(pp).await?;
     let snark_secondary = S2::prove(
       pp.ck_secondary(),
       &pk.secondary,
       pp.cyclefold_r1cs_shape(),
       &derandom_U_secondary,
       &derandom_W_secondary,
-    )?;
+    ).await?;
 
     Ok(Self {
       snark_primary,
@@ -250,7 +250,7 @@ where
   }
 
   /// Verify the correctness of the [`CompressedSNARK`]
-  pub fn verify(
+  pub async fn verify(
     &self,
     pp: &impl Layer1PPTrait<E>,
     vk: &VerifierKey<E, S1, S2>,
@@ -504,7 +504,7 @@ where
     let U_scan_derandom =
       U_scan.derandomize(&vk.dk_primary, &self.wit_blind_scan, &self.err_blind_scan);
     let U = vec![U_F_derandom, U_ops_derandom, U_scan_derandom];
-    self.snark_primary.verify(&vk.primary, &U)?;
+    self.snark_primary.verify(&vk.primary, &U).await?;
 
     // Verify secondary SNARK
     let U_temp_1 = self.nifs_1_secondary.verify(
@@ -523,7 +523,7 @@ where
       &self.wit_blind_secondary,
       &self.err_blind_secondary,
     );
-    self.snark_secondary.verify(&vk.secondary, &derandom_U)?;
+    self.snark_secondary.verify(&vk.secondary, &derandom_U).await?;
     Ok(())
   }
 }

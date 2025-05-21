@@ -260,7 +260,7 @@ where
     UniversalKZGParam::gen_srs_for_testing(rng, n.next_power_of_two())
   }
 
-  fn commit_at(
+  async fn commit_at(
     ck: &Self::CommitmentKey,
     v: &[<E::G1 as Group>::Scalar],
     r: &<E::G1 as Group>::Scalar,

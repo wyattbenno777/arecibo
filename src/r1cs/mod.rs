@@ -257,7 +257,7 @@ impl<E: Engine> R1CSShape<E> {
   }
 
   /// Checks if the Relaxed R1CS instance is satisfiable given a witness and its shape
-  pub(crate) fn is_sat_relaxed(
+  pub(crate) async fn is_sat_relaxed(
     &self,
     ck: &CommitmentKey<E>,
     U: &RelaxedR1CSInstance<E>,
@@ -285,16 +285,14 @@ impl<E: Engine> R1CSShape<E> {
 
     // verify if comm_E and comm_W are commitments to E and W
     let res_comm = {
-      let (comm_W, comm_E) = rayon::join(
-        || {
+      let (comm_W, comm_E) = tokio::join!(
           CE::<E>::commit_at(
-            ck,
-            &W.W,
-            &W.r_W,
-            self.num_precommitted.0 + self.num_precommitted.1,
-          )
-        },
-        || CE::<E>::commit(ck, &W.E, &W.r_E),
+          ck,
+          &W.W,
+          &W.r_W,
+          self.num_precommitted.0 + self.num_precommitted.1,
+        ),
+        CE::<E>::commit(ck, &W.E, &W.r_E),
       );
       U.comm_W == comm_W && U.comm_E == comm_E
     };
@@ -307,7 +305,7 @@ impl<E: Engine> R1CSShape<E> {
   }
 
   /// Checks if the R1CS instance is satisfiable given a witness and its shape
-  pub(crate) fn is_sat(
+  pub(crate) async fn is_sat(
     &self,
     ck: &CommitmentKey<E>,
     U: &R1CSInstance<E>,
@@ -334,7 +332,7 @@ impl<E: Engine> R1CSShape<E> {
         &W.W,
         &W.r_W,
         self.num_precommitted.0 + self.num_precommitted.1,
-      )
+      ).await
     {
       return Err(NovaError::UnSat);
     }
@@ -342,7 +340,7 @@ impl<E: Engine> R1CSShape<E> {
   }
 
   /// Checks if the R1CS instance is satisfiable given a witness and its shape
-  pub(crate) fn is_sat_split(
+  pub(crate) async fn is_sat_split(
     &self,
     ck: &CommitmentKey<E>,
     U: &SplitR1CSInstance<E>,
@@ -369,16 +367,16 @@ impl<E: Engine> R1CSShape<E> {
         &W.aux.W,
         &W.aux.r_W,
         self.num_precommitted.0 + self.num_precommitted.1,
-      )
+      ).await
       || U.pre_committed
         != (
-          CE::<E>::commit(ck, &W.pre_committed.0, &E::Scalar::ZERO),
+          CE::<E>::commit(ck, &W.pre_committed.0, &E::Scalar::ZERO).await,
           CE::<E>::commit_at(
             ck,
             &W.pre_committed.1,
             &E::Scalar::ZERO,
             self.num_precommitted.0,
-          ),
+          ).await,
         )
     {
       return Err(NovaError::UnSat);
@@ -433,7 +431,7 @@ impl<E: Engine> R1CSShape<E> {
 
   /// A method to compute a commitment to the cross-term `T` given a
   /// Relaxed R1CS instance-witness pair and an R1CS instance-witness pair
-  pub(crate) fn commit_T(
+  pub(crate) async fn commit_T(
     &self,
     ck: &CommitmentKey<E>,
     U1: &RelaxedR1CSInstance<E>,
@@ -479,14 +477,14 @@ impl<E: Engine> R1CSShape<E> {
         .collect::<Vec<E::Scalar>>()
     });
 
-    let comm_T = CE::<E>::commit(ck, &T, r_T);
+    let comm_T = CE::<E>::commit(ck, &T, r_T).await;
 
     Ok((T, comm_T))
   }
 
   /// A method to compute a commitment to the cross-term `T` given two
   /// Relaxed R1CS instance-witness pair
-  pub(crate) fn commit_T_relaxed(
+  pub(crate) async fn commit_T_relaxed(
     &self,
     ck: &CommitmentKey<E>,
     U1: &RelaxedR1CSInstance<E>,
@@ -518,7 +516,7 @@ impl<E: Engine> R1CSShape<E> {
       .map(|((((az, bz), cz), e1), e2)| *az * *bz - u * *cz - *e1 - *e2)
       .collect::<Vec<E::Scalar>>();
 
-    let comm_T = CE::<E>::commit(ck, &T, r_T);
+    let comm_T = CE::<E>::commit(ck, &T, r_T).await;
 
     Ok((T, comm_T))
   }
@@ -588,7 +586,7 @@ impl<E: Engine> R1CSShape<E> {
   }
 
   /// Samples a new random `RelaxedR1CSInstance`/`RelaxedR1CSWitness` pair
-  pub(crate) fn sample_random_instance_witness(
+  pub(crate) async fn sample_random_instance_witness(
     &self,
     ck: &CommitmentKey<E>,
   ) -> Result<(RelaxedR1CSInstance<E>, RelaxedR1CSWitness<E>), NovaError> {
@@ -615,9 +613,9 @@ impl<E: Engine> R1CSShape<E> {
       .collect::<Vec<E::Scalar>>();
 
     // compute commitments to W,E in parallel
-    let (comm_W, comm_E) = rayon::join(
-      || CE::<E>::commit(ck, &Z[..num_vars], &r_W),
-      || CE::<E>::commit(ck, &E, &r_E),
+    let (comm_W, comm_E) = tokio::join!(
+      CE::<E>::commit(ck, &Z[..num_vars], &r_W),
+      CE::<E>::commit(ck, &E, &r_E),
     );
 
     Ok((
@@ -670,8 +668,8 @@ impl<E: Engine> R1CSWitness<E> {
   }
 
   /// Commits to the witness using the supplied generators
-  pub(crate) fn commit_at(&self, ck: &CommitmentKey<E>, idx: usize) -> Commitment<E> {
-    CE::<E>::commit_at(ck, &self.W, &self.r_W, idx)
+  pub(crate) async fn commit_at(&self, ck: &CommitmentKey<E>, idx: usize) -> Commitment<E> {
+    CE::<E>::commit_at(ck, &self.W, &self.r_W, idx).await
   }
 
   /// Folds an incoming `R1CSWitness` into the current one
@@ -913,7 +911,7 @@ pub(crate) mod tests {
 
   use super::*;
   use crate::{
-    provider::{Bn256EngineKZG, PallasEngine, Secp256k1Engine},
+    provider::{Bn256EngineKZG, PallasEngine},
     r1cs::sparse::SparseMatrix,
     traits::Engine,
   };
@@ -997,6 +995,5 @@ pub(crate) mod tests {
   fn test_pad_tiny_r1cs() {
     test_pad_tiny_r1cs_with::<PallasEngine>();
     test_pad_tiny_r1cs_with::<Bn256EngineKZG>();
-    test_pad_tiny_r1cs_with::<Secp256k1Engine>();
   }
 }

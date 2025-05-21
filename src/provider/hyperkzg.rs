@@ -10,16 +10,20 @@
 //!
 #![allow(non_snake_case)]
 use crate::{
-  errors::NovaError, frontend::gpu::GpuName, provider::{
+  errors::NovaError,
+  frontend::gpu::GpuName,
+  provider::{
     kzg_commitment::{KZGCommitmentEngine, KZGProverKey, KZGVerifierKey, UniversalKZGParam},
     pedersen::Commitment,
     traits::DlogGroup,
     util::iterators::IndexedParallelIteratorExt as _,
-  }, spartan::{math::Math, polys::univariate::UniPoly}, traits::{
+  },
+  spartan::{math::Math, polys::univariate::UniPoly},
+  traits::{
     commitment::{CommitmentEngineTrait, Len},
     evaluation::EvaluationEngineTrait,
     Engine as NovaEngine, Group, TranscriptEngineTrait, TranscriptReprTrait,
-  }
+  },
 };
 use core::marker::PhantomData;
 use ff::{Field, PrimeFieldBits};
@@ -35,6 +39,7 @@ use rayon::{
 use ref_cast::RefCast as _;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::sync::Arc;
+use tokio::task;
 
 /// Provides an implementation of a polynomial evaluation argument
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -128,16 +133,18 @@ where
     polys
   }
 
-  fn compute_commitments(
+  async fn compute_commitments(
     ck: &UniversalKZGParam<E>,
     _C: &Commitment<NE>,
     polys: &[Vec<E::Fr>],
   ) -> Vec<E::G1Affine> {
-    let comms: Vec<NE::GE> = (1..polys.len())
-      .into_par_iter()
-      .map(|i| <NE::CE as CommitmentEngineTrait<NE>>::commit(ck, &polys[i], &E::Fr::from(0)).comm)
-      .collect();
-
+    let mut comms: Vec<_> = vec![];
+    for poly in polys[1..].iter() {
+      let ck = Arc::new(ck);
+      let zero = E::Fr::from(0);
+      let comm = <NE::CE as CommitmentEngineTrait<NE>>::commit(&ck, &poly, &zero).await.comm;
+      comms.push(comm);
+    }
     let mut comms_affine: Vec<E::G1Affine> = vec![E::G1Affine::identity(); comms.len()];
     NE::GE::batch_normalize(&comms, &mut comms_affine);
     comms_affine
@@ -188,12 +195,12 @@ where
   type ProverKey = KZGProverKey<E>;
   type VerifierKey = KZGVerifierKey<E>;
 
-  fn setup(ck: Arc<UniversalKZGParam<E>>) -> (Self::ProverKey, Self::VerifierKey) {
+  async fn setup(ck: Arc<UniversalKZGParam<E>>) -> (Self::ProverKey, Self::VerifierKey) {
     let len = ck.length() - 1;
     UniversalKZGParam::trim(ck, len)
   }
 
-  fn prove(
+  async fn prove(
     ck: &UniversalKZGParam<E>,
     _pk: &Self::ProverKey,
     transcript: &mut <NE as NovaEngine>::TE,
@@ -211,7 +218,7 @@ where
     // We do not compute final Pi (and its commitment as well since it is already committed according to EvaluationEngineTrait API) as it is constant and equals to 'eval'
     // also known to verifier, so can be derived on its side as well
     let polys = Self::compute_pi_polynomials(hat_P, point);
-    let comms = Self::compute_commitments(ck, _C, &polys);
+    let comms = Self::compute_commitments(ck, _C, &polys).await;
 
     // Phase 2
     let r = Self::compute_challenge(&comms, transcript);
@@ -228,6 +235,7 @@ where
     let (Q_x, R_x) = batched_Pi.divide_with_q_and_r(&D).unwrap();
 
     let C_Q = <NE::CE as CommitmentEngineTrait<NE>>::commit(ck, &Q_x.coeffs, &E::Fr::from(0))
+      .await
       .comm
       .to_affine();
 
@@ -239,6 +247,7 @@ where
     // TODO: since this is a usual KZG10 we should use it as utility instead
     let h = K_x.divide_minus_u(a);
     let C_H = <NE::CE as CommitmentEngineTrait<NE>>::commit(ck, &h.coeffs, &E::Fr::from(0))
+      .await
       .comm
       .to_affine();
 
@@ -252,7 +261,7 @@ where
   }
 
   /// A method to verify purported evaluations of a batch of polynomials
-  fn verify(
+  async fn verify(
     vk: &Self::VerifierKey,
     transcript: &mut <NE as NovaEngine>::TE,
     C: &Commitment<NE>,

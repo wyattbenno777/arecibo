@@ -171,7 +171,7 @@ where
 {
   #[tracing::instrument(skip_all, name = "AggregationRecursiveSNARK::new")]
   /// Constructs a new AggregationRecursiveSNARK instance
-  pub fn new(
+  pub async fn new(
     pp: &AggregationPublicParams<E>,
     layer1_rs: &impl Layer1RSTrait<E>,
     _U: &impl MemoryCommitmentsTraits<E>,
@@ -197,7 +197,7 @@ where
       (U2_F, W2_F),
       (&r_U_cyclefold, &r_W_cyclefold),
       (U2_secondary_F, W2_secondary_F),
-    )?;
+    ).await?;
     let E_new_F = new_r_U_F.comm_E;
     let W_new_F = new_r_U_F.comm_W;
     let folding_data_F = Layer2FoldingData::new(
@@ -231,7 +231,7 @@ where
         (U2_ops, W2_ops),
         (&r_U_cyclefold_temp1, &r_W_cyclefold_temp1),
         (U2_secondary_ops, W2_secondary_ops),
-      )?;
+      ).await?;
     let E_new_ops = new_r_U_ops.comm_E;
     let W_new_ops = new_r_U_ops.comm_W;
     let folding_data_ops = Layer2FoldingData::new(
@@ -265,7 +265,7 @@ where
         (U2_scan, W2_scan),
         (&r_U_cyclefold_temp2, &r_W_cyclefold_temp2),
         (U2_secondary_scan, W2_secondary_scan),
-      )?;
+      ).await?;
     let E_new_scan = new_r_U_scan.comm_E;
     let W_new_scan = new_r_U_scan.comm_W;
     let folding_data_scan = Layer2FoldingData::new(
@@ -303,9 +303,9 @@ where
       vec![hash_U]
     };
     let mut IC_i = E::Scalar::ZERO;
-    let mut rs = RecursiveSNARK::new(&pp.pp, &verifier_circuit, &z0)?;
-    rs.prove_step(&pp.pp, &verifier_circuit, IC_i)?;
-    IC_i = rs.increment_commitment(&pp.pp, &verifier_circuit);
+    let mut rs = RecursiveSNARK::new(&pp.pp, &verifier_circuit, &z0).await?;
+    rs.prove_step(&pp.pp, &verifier_circuit, IC_i).await?;
+    IC_i = rs.increment_commitment(&pp.pp, &verifier_circuit).await;
     Ok(Self {
       r_W_F: new_r_W_F,
       r_U_F: new_r_U_F,
@@ -324,7 +324,7 @@ where
 
   #[tracing::instrument(skip_all, name = "AggregationRecursiveSNARK::prove_step")]
   /// Proves a step in the aggregation proof
-  pub fn prove_step(
+  pub async fn prove_step(
     &mut self,
     pp: &AggregationPublicParams<E>,
     layer1_rs: &impl Layer1RSTrait<E>,
@@ -350,7 +350,8 @@ where
       (U2_F, W2_F),
       (&self.r_U_cyclefold, &self.r_W_cyclefold),
       (U2_secondary_F, W2_secondary_F),
-    )?;
+    )
+    .await?;
     let E_new_F = new_r_U_F.comm_E;
     let W_new_F = new_r_U_F.comm_W;
     let folding_data_F = Layer2FoldingData::new(
@@ -381,7 +382,7 @@ where
         (U2_ops, W2_ops),
         (&r_U_cyclefold_temp1, &r_W_cyclefold_temp1),
         (U2_secondary_ops, W2_secondary_ops),
-      )?;
+      ).await?;
     let E_new_ops = new_r_U_ops.comm_E;
     let W_new_ops = new_r_U_ops.comm_W;
     let folding_data_ops = Layer2FoldingData::new(
@@ -412,7 +413,7 @@ where
         (U2_scan, W2_scan),
         (&r_U_cyclefold_temp2, &r_W_cyclefold_temp2),
         (U2_secondary_scan, W2_secondary_scan),
-      )?;
+      ).await?;
     let E_new_scan = new_r_U_scan.comm_E;
     let W_new_scan = new_r_U_scan.comm_W;
     let folding_data_scan = Layer2FoldingData::new(
@@ -433,8 +434,8 @@ where
       Some(folding_data_scan),
       Some(self.r_U_cyclefold.clone()),
     );
-    self.rs.prove_step(&pp.pp, &verifier_circuit, self.IC_i)?;
-    self.IC_i = self.rs.increment_commitment(&pp.pp, &verifier_circuit);
+    self.rs.prove_step(&pp.pp, &verifier_circuit, self.IC_i).await?;
+    self.IC_i = self.rs.increment_commitment(&pp.pp, &verifier_circuit).await;
     self.r_W_F = new_r_W_F;
     self.r_U_F = new_r_U_F;
     self.r_W_ops = new_r_W_ops;
@@ -449,43 +450,26 @@ where
 
   #[tracing::instrument(skip_all, name = "AggregationRecursiveSNARK::verify")]
   /// Verifies the aggregation proof
-  pub fn verify(&self, pp: &AggregationPublicParams<E>) -> Result<(), NovaError> {
+  pub async fn verify(&self, pp: &AggregationPublicParams<E>) -> Result<(), NovaError> {
     self
       .rs
-      .verify(&pp.pp, self.rs.num_steps(), &self.z0, self.IC_i)?;
-    let (res_r_F, (res_r_ops, (res_r_scan, res_r_cyclefold))) = rayon::join(
-      || {
-        pp.circuit_shape_F
-          .r1cs_shape
-          .is_sat_relaxed(&pp.ck, &self.r_U_F, &self.r_W_F)
-      },
-      || {
-        rayon::join(
-          || {
-            pp.circuit_shape_ops
-              .r1cs_shape
-              .is_sat_relaxed(&pp.ck, &self.r_U_ops, &self.r_W_ops)
-          },
-          || {
-            rayon::join(
-              || {
-                pp.circuit_shape_scan.r1cs_shape.is_sat_relaxed(
-                  &pp.ck,
-                  &self.r_U_scan,
-                  &self.r_W_scan,
-                )
-              },
-              || {
-                pp.r1cs_shape_cyclefold().is_sat_relaxed(
-                  pp.ck_cyclefold(),
-                  &self.r_U_cyclefold,
-                  &self.r_W_cyclefold,
-                )
-              },
-            )
-          },
-        )
-      },
+      .verify(&pp.pp, self.rs.num_steps(), &self.z0, self.IC_i)
+      .await?;
+    let (res_r_F, res_r_ops, res_r_scan, res_r_cyclefold) = tokio::join!(
+      pp.circuit_shape_F
+        .r1cs_shape
+        .is_sat_relaxed(&pp.ck, &self.r_U_F, &self.r_W_F),
+      pp.circuit_shape_ops
+        .r1cs_shape
+        .is_sat_relaxed(&pp.ck, &self.r_U_ops, &self.r_W_ops),
+      pp.circuit_shape_scan
+        .r1cs_shape
+        .is_sat_relaxed(&pp.ck, &self.r_U_scan, &self.r_W_scan,),
+      pp.r1cs_shape_cyclefold().is_sat_relaxed(
+        pp.ck_cyclefold(),
+        &self.r_U_cyclefold,
+        &self.r_W_cyclefold,
+      )
     );
     res_r_F?;
     res_r_ops?;
@@ -494,7 +478,7 @@ where
     Ok(())
   }
 
-  fn fold_derandom(
+  async fn fold_derandom(
     &self,
     pp: &AggregationPublicParams<E>,
   ) -> Result<
@@ -540,7 +524,7 @@ where
       wit_blind_verifer,
       err_blind_verifier,
       random_U_verifier,
-    ) = self.rs.fold_ivc_compression_step(&pp.pp)?;
+    ) = self.rs.fold_ivc_compression_step(&pp.pp).await?;
 
     // Randomize the rest of the running instances
     let (derandom_U_F, derandom_W_F, nifs_r_F, wit_blind_F, err_blind_F, random_U_F) =
@@ -551,7 +535,8 @@ where
         pp.digest_F,
         &self.r_U_F,
         &self.r_W_F,
-      )?;
+      )
+      .await?;
     let (derandom_U_ops, derandom_W_ops, nifs_r_ops, wit_blind_ops, err_blind_ops, random_U_ops) =
       random_fold_and_derandom(
         &pp.circuit_shape_ops.r1cs_shape,
@@ -560,7 +545,8 @@ where
         pp.digest_ops,
         &self.r_U_ops,
         &self.r_W_ops,
-      )?;
+      )
+      .await?;
     let (
       derandom_U_scan,
       derandom_W_scan,
@@ -575,7 +561,8 @@ where
       pp.digest_scan,
       &self.r_U_scan,
       &self.r_W_scan,
-    )?;
+    )
+    .await?;
 
     Ok((
       // rs
@@ -610,7 +597,7 @@ where
     ))
   }
 
-  fn fold_derandom_secondary(
+  async fn fold_derandom_secondary(
     &self,
     pp: &AggregationPublicParams<E>,
   ) -> Result<
@@ -638,14 +625,14 @@ where
       r_W_secondary_verifier,
       &self.r_U_cyclefold,
       &self.r_W_cyclefold,
-    )?;
+    ).await?;
     // Sample random U and W
-    let (U_random, W_random) = S.sample_random_instance_witness(ck)?;
+    let (U_random, W_random) = S.sample_random_instance_witness(ck).await?;
 
     // Random Fold
     let (nifs_final, (U, W), _) = CycleFoldRelaxedNIFS::<E>::prove(
       ck, ro_consts, S, &U_temp_1, &W_temp_1, &U_random, &W_random,
-    )?;
+    ).await?;
 
     // Derandomize
     let (derandom_W, wit_blind, err_blind) = W.derandomize();

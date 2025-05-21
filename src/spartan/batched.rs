@@ -107,11 +107,11 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
 
   type VerifierKey = VerifierKey<E, EE>;
 
-  fn setup(
+  async fn setup(
     ck: Arc<CommitmentKey<E>>,
     S: Vec<&R1CSShape<E>>,
   ) -> Result<(Self::ProverKey, Self::VerifierKey), NovaError> {
-    let (pk_ee, vk_ee) = EE::setup(ck);
+    let (pk_ee, vk_ee) = EE::setup(ck).await;
 
     let S = S.iter().map(|s| s.pad()).collect();
 
@@ -125,7 +125,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     Ok((pk, vk))
   }
 
-  fn prove(
+  async fn prove(
     ck: &CommitmentKey<E>,
     pk: &Self::ProverKey,
     S: Vec<&R1CSShape<E>>,
@@ -357,7 +357,8 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
       &batched_w.p,
       &batched_u.x,
       &batched_u.e,
-    )?;
+    )
+    .await?;
 
     Ok(Self {
       sc_proof_outer,
@@ -371,7 +372,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
     })
   }
 
-  fn verify(&self, vk: &Self::VerifierKey, U: &[RelaxedR1CSInstance<E>]) -> Result<(), NovaError> {
+  async fn verify(&self, vk: &Self::VerifierKey, U: &[RelaxedR1CSInstance<E>]) -> Result<(), NovaError> {
     let num_instances = U.len();
     let mut transcript = E::TE::new(b"BatchedRelaxedR1CSSNARK");
 
@@ -574,7 +575,8 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> BatchedRelaxedR1CSSNARKTrait<E>
       &batched_u.x,
       &batched_u.e,
       &self.eval_arg,
-    )?;
+    )
+    .await?;
 
     Ok(())
   }

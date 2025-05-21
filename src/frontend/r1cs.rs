@@ -19,14 +19,14 @@ use ff::PrimeField;
 /// `NovaWitness` provide a method for acquiring an `R1CSInstance` and `R1CSWitness` from implementers.
 pub trait NovaWitness<E: Engine> {
   /// Return an instance and witness, given a shape and ck.
-  fn r1cs_instance_and_witness(
+  async fn r1cs_instance_and_witness(
     &self,
     shape: &R1CSShape<E>,
     ck: &CommitmentKey<E>,
   ) -> Result<(R1CSInstance<E>, R1CSWitness<E>), NovaError>;
 
   /// Return an instance and witness, given a shape and ck.
-  fn split_r1cs_instance_and_witness(
+  async fn split_r1cs_instance_and_witness(
     &self,
     shape: &R1CSShape<E>,
     ck: &CommitmentKey<E>,
@@ -51,7 +51,7 @@ pub trait NovaShape<E: Engine> {
 }
 
 impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
-  fn r1cs_instance_and_witness(
+  async fn r1cs_instance_and_witness(
     &self,
     shape: &R1CSShape<E>,
     ck: &CommitmentKey<E>,
@@ -61,23 +61,23 @@ impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
     let comm_W = W.commit_at(
       ck,
       self.precommitted_assignment().len() + self.precommitted1_assignment().len(),
-    );
+    ).await;
     let instance = R1CSInstance::<E>::new(shape, comm_W, X.to_vec())?;
     Ok((instance, W))
   }
 
-  fn split_r1cs_instance_and_witness(
+  async fn split_r1cs_instance_and_witness(
     &self,
     S: &R1CSShape<E>,
     ck: &CommitmentKey<E>,
   ) -> Result<(SplitR1CSInstance<E>, SplitR1CSWitness<E>), NovaError> {
-    let (aux_U, aux_W) = self.r1cs_instance_and_witness(S, ck)?;
+    let (aux_U, aux_W) = self.r1cs_instance_and_witness(S, ck).await?;
     let pre_committed_witness = (
       self.precommitted_assignment().to_vec(),
       self.precommitted1_assignment().to_vec(),
     );
     let W = SplitR1CSWitness::new(aux_W, pre_committed_witness);
-    let pre_commits = W.commit(ck);
+    let pre_commits = W.commit(ck).await;
     let instance = SplitR1CSInstance::new(aux_U, pre_commits);
     Ok((instance, W))
   }

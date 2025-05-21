@@ -41,13 +41,13 @@ pub trait RelaxedR1CSSNARKTrait<E: Engine>:
   }
 
   /// Produces the keys for the prover and the verifier
-  fn setup(
+  async fn setup(
     ck: Arc<CommitmentKey<E>>,
     S: &R1CSShape<E>,
   ) -> Result<(Self::ProverKey, Self::VerifierKey), NovaError>;
 
   /// Produces a new SNARK for a relaxed R1CS
-  fn prove(
+  async fn prove(
     ck: &CommitmentKey<E>,
     pk: &Self::ProverKey,
     S: &R1CSShape<E>,
@@ -56,7 +56,7 @@ pub trait RelaxedR1CSSNARKTrait<E: Engine>:
   ) -> Result<Self, NovaError>;
 
   /// Verifies a SNARK for a relaxed R1CS
-  fn verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<E>) -> Result<(), NovaError>;
+  async fn verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<E>) -> Result<(), NovaError>;
 }
 
 /// A trait that defines the behavior of a `zkSNARK` to prove knowledge of satisfying witness to batches of relaxed R1CS instances.
@@ -81,13 +81,13 @@ pub trait BatchedRelaxedR1CSSNARKTrait<E: Engine>:
   ///
   /// **Note:** This method should be cheap and should not copy most of the
   /// commitment key. Look at `CommitmentEngineTrait::setup` for generating SRS data.
-  fn setup(
+  async fn setup(
     ck: Arc<CommitmentKey<E>>,
     S: Vec<&R1CSShape<E>>,
   ) -> Result<(Self::ProverKey, Self::VerifierKey), NovaError>;
 
   /// Produces a new SNARK for a batch of relaxed R1CS
-  fn prove(
+  async fn prove(
     ck: &CommitmentKey<E>,
     pk: &Self::ProverKey,
     S: Vec<&R1CSShape<E>>,
@@ -96,7 +96,7 @@ pub trait BatchedRelaxedR1CSSNARKTrait<E: Engine>:
   ) -> Result<Self, NovaError>;
 
   /// Verifies a SNARK for a batch of relaxed R1CS
-  fn verify(&self, vk: &Self::VerifierKey, U: &[RelaxedR1CSInstance<E>]) -> Result<(), NovaError>;
+  async fn verify(&self, vk: &Self::VerifierKey, U: &[RelaxedR1CSInstance<E>]) -> Result<(), NovaError>;
 }
 
 /// A helper trait that defines the behavior of a verifier key of `zkSNARK`

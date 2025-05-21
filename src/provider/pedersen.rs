@@ -247,7 +247,7 @@ where
     }
   }
 
-  fn commit_at(
+  async fn commit_at(
     ck: &Self::CommitmentKey,
     v: &[E::Scalar],
     r: &E::Scalar,

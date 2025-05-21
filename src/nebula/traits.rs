@@ -30,7 +30,7 @@ where
   fn scan(&self) -> &AuditRecursiveSNARK<E>;
 
   /// Fold the CycleFold instances and derandomize
-  fn fold_cyclefold_derandom(
+  async fn fold_cyclefold_derandom(
     &self,
     pp: &impl Layer1PPTrait<E>,
   ) -> Result<
@@ -62,7 +62,7 @@ where
       r_W_cyclefold_F,
       r_U_cyclefold_ops,
       r_W_cyclefold_ops,
-    )?;
+    ).await?;
 
     // Second Fold
     let (nifs_2, (U_temp_2, W_temp_2), _) = CycleFoldRelaxedNIFS::<E>::prove(
@@ -73,15 +73,15 @@ where
       &W_temp_1,
       r_U_cyclefold_scan,
       r_W_cyclefold_scan,
-    )?;
+    ).await?;
 
     // Sample random U and W
-    let (U_random, W_random) = S.sample_random_instance_witness(ck)?;
+    let (U_random, W_random) = S.sample_random_instance_witness(ck).await?;
 
     // Random Fold
     let (nifs_final, (U, W), _) = CycleFoldRelaxedNIFS::<E>::prove(
       ck, ro_consts, S, &U_temp_2, &W_temp_2, &U_random, &W_random,
-    )?;
+    ).await?;
 
     // Derandomize
     let (derandom_W, wit_blind, err_blind) = W.derandomize();

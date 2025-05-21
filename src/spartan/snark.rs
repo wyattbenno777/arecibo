@@ -98,11 +98,11 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
   type ProverKey = ProverKey<E, EE>;
   type VerifierKey = VerifierKey<E, EE>;
 
-  fn setup(
+  async fn setup(
     ck: Arc<CommitmentKey<E>>,
     S: &R1CSShape<E>,
   ) -> Result<(Self::ProverKey, Self::VerifierKey), NovaError> {
-    let (pk_ee, vk_ee) = EE::setup(ck);
+    let (pk_ee, vk_ee) = EE::setup(ck).await;
 
     let S = S.pad();
 
@@ -118,7 +118,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
 
   /// produces a succinct proof of satisfiability of a `RelaxedR1CS` instance
   #[tracing::instrument(skip_all, name = "SNARK::prove")]
-  fn prove(
+  async fn prove(
     ck: &CommitmentKey<E>,
     pk: &Self::ProverKey,
     S: &R1CSShape<E>,
@@ -261,7 +261,8 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
       &batched_w.p,
       &batched_u.x,
       &batched_u.e,
-    )?;
+    )
+    .await?;
 
     Ok(Self {
       sc_proof_outer,
@@ -276,7 +277,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
   }
 
   /// verifies a proof of satisfiability of a `RelaxedR1CS` instance
-  fn verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<E>) -> Result<(), NovaError> {
+  async fn verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<E>) -> Result<(), NovaError> {
     let mut transcript = E::TE::new(b"RelaxedR1CSSNARK");
 
     // append the digest of R1CS matrices and the RelaxedR1CSInstance to the transcript
@@ -404,7 +405,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
       &batched_u.x,
       &batched_u.e,
       &self.eval_arg,
-    )?;
+    ).await?;
 
     Ok(())
   }

@@ -108,7 +108,7 @@ where
   }
 }
 
-pub fn random_fold_and_derandom<E>(
+pub async fn random_fold_and_derandom<E>(
   S: &R1CSShape<E>,
   ck: &CommitmentKey<E>,
   ro_const: &ROConstants<Dual<E>>,
@@ -130,9 +130,9 @@ where
   E: CurveCycleEquipped,
 {
   // Fold random instance and witness
-  let (random_U, random_W) = S.sample_random_instance_witness(ck)?;
+  let (random_U, random_W) = S.sample_random_instance_witness(ck).await?;
   let (nifs_r, (U, W), _) =
-    PrimaryRelaxedNIFS::prove(ck, ro_const, &digest, S, (U, W), (&random_U, &random_W))?;
+    PrimaryRelaxedNIFS::prove(ck, ro_const, &digest, S, (U, W), (&random_U, &random_W)).await?;
   let (derandom_W, wit_blind, err_blind) = W.derandomize();
   let derandom_U = U.derandomize(&E::CE::derand_key(ck), &wit_blind, &err_blind);
   Ok((

@@ -3,6 +3,7 @@
 //! The verifier in this preprocessing SNARK maintains a commitment to R1CS matrices. This is beneficial when using a
 //! polynomial commitment scheme in which the verifier's costs is succinct.
 //! This code includes experimental optimizations to reduce runtimes and proof sizes.
+use super::polys::{masked_eq::MaskedEqPolynomial, multilinear::SparsePolynomial};
 use crate::{
   digest::{DigestComputer, SimpleDigestible},
   errors::NovaError,
@@ -36,13 +37,13 @@ use crate::{
 };
 use core::cmp::max;
 use ff::Field;
+use futures::stream;
 use itertools::Itertools as _;
 use once_cell::sync::OnceCell;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-
-use super::polys::{masked_eq::MaskedEqPolynomial, multilinear::SparsePolynomial};
+use tokio::task;
 
 fn padded<E: Engine>(v: &[E::Scalar], n: usize, e: &E::Scalar) -> Vec<E::Scalar> {
   let mut v_padded = vec![*e; n];
@@ -181,19 +182,27 @@ impl<E: Engine> R1CSShapeSparkRepr<E> {
     }
   }
 
-  pub(in crate::spartan) fn commit(&self, ck: &CommitmentKey<E>) -> R1CSShapeSparkCommitment<E> {
-    let comm_vec: Vec<Commitment<E>> = [
-      &self.row,
-      &self.col,
-      &self.val_A,
-      &self.val_B,
-      &self.val_C,
-      &self.ts_row,
-      &self.ts_col,
-    ]
-    .par_iter()
-    .map(|v| E::CE::commit(ck, v, &E::Scalar::ZERO))
-    .collect();
+  pub(in crate::spartan) async fn commit(
+    &self,
+    ck: &CommitmentKey<E>,
+  ) -> R1CSShapeSparkCommitment<E> {
+    let zero = E::Scalar::ZERO;
+
+    let inputs = vec![
+      self.row.clone(),
+      self.col.clone(),
+      self.val_A.clone(),
+      self.val_B.clone(),
+      self.val_C.clone(),
+      self.ts_row.clone(),
+      self.ts_col.clone(),
+    ];
+
+    let mut comm_vec: Vec<_> = vec![];
+    for v in inputs {
+      let comm = E::CE::commit(ck, &v, &zero).await;
+      comm_vec.push(comm);
+    }
 
     R1CSShapeSparkCommitment {
       N: self.row.len(),
@@ -327,7 +336,7 @@ pub struct RelaxedR1CSSNARK<E: Engine, EE: EvaluationEngineTrait<E>> {
 }
 
 impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARK<E, EE> {
-  fn prove_helper<T1, T2, T3, T4>(
+  async fn prove_helper<T1, T2, T3, T4>(
     mem: &mut T1,
     outer: &mut T2,
     inner: &mut T3,
@@ -378,10 +387,10 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARK<E, EE> {
     let mut cubic_polys: Vec<CompressedUniPoly<E::Scalar>> = Vec::new();
     let num_rounds = mem.size().log_2();
     for _ in 0..num_rounds {
-      let ((evals_mem, evals_outer), (evals_inner, evals_witness)) = rayon::join(
-        || rayon::join(|| mem.evaluation_points(), || outer.evaluation_points()),
-        || rayon::join(|| inner.evaluation_points(), || witness.evaluation_points()),
-      );
+      let evals_mem = mem.evaluation_points();
+      let evals_outer = outer.evaluation_points();
+      let evals_inner = inner.evaluation_points();
+      let evals_witness = witness.evaluation_points();
 
       let evals: Vec<Vec<E::Scalar>> = evals_mem
         .into_iter()
@@ -476,7 +485,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
     })
   }
 
-  fn setup(
+  async fn setup(
     ck: Arc<CommitmentKey<E>>,
     S: &R1CSShape<E>,
   ) -> Result<(Self::ProverKey, Self::VerifierKey), NovaError> {
@@ -484,13 +493,13 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
     if ck.length() < Self::ck_floor()(S) {
       return Err(NovaError::InvalidCommitmentKeyLength);
     }
-    let (pk_ee, vk_ee) = EE::setup(ck.clone());
+    let (pk_ee, vk_ee) = EE::setup(ck.clone()).await;
 
     // pad the R1CS matrices
     let S = S.pad();
 
     let S_repr = R1CSShapeSparkRepr::new(&S);
-    let S_comm = S_repr.commit(&*ck);
+    let S_comm = S_repr.commit(&*ck).await;
 
     let vk = VerifierKey::new(S.num_cons, S.num_vars, S_comm.clone(), vk_ee);
 
@@ -506,7 +515,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
 
   /// produces a succinct proof of satisfiability of a `RelaxedR1CS` instance
   #[tracing::instrument(skip_all, name = "PPSNARK::prove")]
-  fn prove(
+  async fn prove(
     ck: &CommitmentKey<E>,
     pk: &Self::ProverKey,
     S: &R1CSShape<E>,
@@ -532,14 +541,11 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
     let (mut Az, mut Bz, mut Cz) = S.multiply_vec(&z)?;
 
     // commit to Az, Bz, Cz
-    let (comm_Az, (comm_Bz, comm_Cz)) = rayon::join(
-      || E::CE::commit(ck, &Az, &E::Scalar::ZERO),
-      || {
-        rayon::join(
-          || E::CE::commit(ck, &Bz, &E::Scalar::ZERO),
-          || E::CE::commit(ck, &Cz, &E::Scalar::ZERO),
-        )
-      },
+    let zero = E::Scalar::ZERO;
+    let (comm_Az, comm_Bz, comm_Cz) = tokio::join!(
+      E::CE::commit(ck, &Az, &zero),
+      E::CE::commit(ck, &Bz, &zero),
+      E::CE::commit(ck, &Cz, &zero),
     );
 
     transcript.absorb(b"c", &[comm_Az, comm_Bz, comm_Cz].as_slice());
@@ -572,9 +578,10 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
     // L_row(i) = eq(tau, row(i)) for all i
     // L_col(i) = z(col(i)) for all i
     let (mem_row, mem_col, L_row, L_col) = pk.S_repr.evaluation_oracles(&S, &tau, &z);
-    let (comm_L_row, comm_L_col) = rayon::join(
-      || E::CE::commit(ck, &L_row, &E::Scalar::ZERO),
-      || E::CE::commit(ck, &L_col, &E::Scalar::ZERO),
+    let zero = E::Scalar::ZERO;
+    let (comm_L_row, comm_L_col) = tokio::join!(
+      E::CE::commit(ck, &L_row, &zero),
+      E::CE::commit(ck, &L_col, &zero),
     );
 
     // since all the three polynomials are opened at tau,
@@ -600,9 +607,8 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
     let gamma = transcript.squeeze(b"g")?;
     let r = transcript.squeeze(b"r")?;
 
-    let ((mut outer_sc_inst, mut inner_sc_inst), mem_res) = rayon::join(
-      || {
-        // a sum-check instance to prove the first claim
+    let (outer_inner_result, mem_result) = tokio::join!(
+      async {
         let outer_sc_inst = OuterSumcheckInstance::new(
           PowPolynomial::new(&tau, num_rounds_sc).evals(),
           Az.clone(),
@@ -610,17 +616,17 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
           (0..Cz.len())
             .map(|i| U.u * Cz[i] + E[i])
             .collect::<Vec<E::Scalar>>(),
-          w.p.clone(), // Mz = Az + r * Bz + r^2 * Cz
-          &u.e,        // eval_Az_at_tau + r * eval_Az_at_tau + r^2 * eval_Cz_at_tau
+          w.p.clone(),
+          &u.e,
         );
 
-        // a sum-check instance to prove the second claim
         let val = zip_with!(
           par_iter,
           (pk.S_repr.val_A, pk.S_repr.val_B, pk.S_repr.val_C),
           |v_a, v_b, v_c| *v_a + c * *v_b + c * c * *v_c
         )
         .collect::<Vec<E::Scalar>>();
+
         let inner_sc_inst = InnerSumcheckInstance {
           claim: eval_Az_at_tau + c * eval_Bz_at_tau + c * c * eval_Cz_at_tau,
           poly_L_row: MultilinearPolynomial::new(L_row.clone()),
@@ -628,14 +634,9 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
           poly_val: MultilinearPolynomial::new(val),
         };
 
-        (outer_sc_inst, inner_sc_inst)
+        Ok::<_, NovaError>((outer_sc_inst, inner_sc_inst))
       },
-      || {
-        // a third sum-check instance to prove the read-only memory claim
-        // we now need to prove that L_row and L_col are well-formed
-
-        // hash the tuples of (addr,val) memory contents and read responses into a single field element using `hash_func`
-
+      async {
         let (comm_mem_oracles, mem_oracles, mem_aux) =
           MemorySumcheckInstance::<E>::compute_oracles(
             ck,
@@ -649,10 +650,10 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
             &pk.S_repr.col,
             &L_col,
             &pk.S_repr.ts_col,
-          )?;
-        // absorb the commitments
-        transcript.absorb(b"l", &comm_mem_oracles.as_slice());
+          )
+          .await?;
 
+        transcript.absorb(b"l", &comm_mem_oracles.as_slice());
         let rho = transcript.squeeze(b"r")?;
         let poly_eq = MultilinearPolynomial::new(PowPolynomial::new(&rho, num_rounds_sc).evals());
 
@@ -667,10 +668,12 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
           comm_mem_oracles,
           mem_oracles,
         ))
-      },
+      }
     );
 
-    let (mut mem_sc_inst, comm_mem_oracles, mem_oracles) = mem_res?;
+    let (mut outer_sc_inst, mut inner_sc_inst) = outer_inner_result?;
+
+    let (mut mem_sc_inst, comm_mem_oracles, mem_oracles) = mem_result?;
 
     let mut witness_sc_inst = WitnessBoundSumcheck::new(tau, W.clone(), S.num_vars);
 
@@ -680,7 +683,8 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
       &mut inner_sc_inst,
       &mut witness_sc_inst,
       &mut transcript,
-    )?;
+    )
+    .await?;
 
     // claims from the end of the sum-check
     let eval_Az = claims_outer[0][0];
@@ -782,7 +786,7 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
     let w: PolyEvalWitness<E> = PolyEvalWitness::batch(&poly_vec, &c);
     let u: PolyEvalInstance<E> = PolyEvalInstance::batch(&comm_vec, rand_sc.clone(), &eval_vec, &c);
 
-    let eval_arg = EE::prove(ck, &pk.pk_ee, &mut transcript, &u.c, &w.p, &rand_sc, &u.e)?;
+    let eval_arg = EE::prove(ck, &pk.pk_ee, &mut transcript, &u.c, &w.p, &rand_sc, &u.e).await?;
 
     Ok(Self {
       comm_Az: comm_Az.compress(),
@@ -829,7 +833,11 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
   }
 
   /// verifies a proof of satisfiability of a `RelaxedR1CS` instance
-  fn verify(&self, vk: &Self::VerifierKey, U: &RelaxedR1CSInstance<E>) -> Result<(), NovaError> {
+  async fn verify(
+    &self,
+    vk: &Self::VerifierKey,
+    U: &RelaxedR1CSInstance<E>,
+  ) -> Result<(), NovaError> {
     let mut transcript = E::TE::new(b"RelaxedR1CSSNARK");
 
     // append the verifier key (including commitment to R1CS matrices) and the RelaxedR1CSInstance to the transcript
@@ -1052,7 +1060,8 @@ impl<E: Engine, EE: EvaluationEngineTrait<E>> RelaxedR1CSSNARKTrait<E> for Relax
       &rand_sc,
       &u.e,
       &self.eval_arg,
-    )?;
+    )
+    .await?;
 
     Ok(())
   }

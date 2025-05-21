@@ -30,13 +30,13 @@ where
   /// * commits to advice with Pedersen
   /// * hashes previous commitment & pedersen commitment to advice
   /// * outputs hash bits as scalar
-  pub fn commit(
+  pub async fn commit(
     ck: &CommitmentKey<E1>,
     ro_consts: &ROConstants<Dual<E1>>,
     prev_comm: E1::Scalar,
     w_input: Vec<E1::Scalar>, // non-deterministic witness ω
   ) -> E1::Scalar {
-    let comm_w_input = E1::CE::commit(ck, &w_input, &E1::Scalar::ZERO);
+    let comm_w_input = E1::CE::commit(ck, &w_input, &E1::Scalar::ZERO).await;
     let mut ro = <Dual<E1> as Engine>::RO::new(ro_consts.clone(), 1 + NUM_FE_IN_EMULATED_POINT); // prev_comm + comm_omega
     ro.absorb(prev_comm);
     absorb_primary_commitment::<E1, Dual<E1>>(&comm_w_input, &mut ro);

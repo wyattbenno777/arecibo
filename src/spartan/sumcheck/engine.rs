@@ -157,7 +157,7 @@ impl<E: Engine> MemorySumcheckInstance<E> {
   ///
   /// The function returns oracles for the polynomials TS[i]/(T[i] + r), 1/(W[i] + r),
   /// as well as auxiliary polynomials T[i] + r, W[i] + r
-  pub fn compute_oracles(
+  pub async fn compute_oracles(
     ck: &CommitmentKey<E>,
     r: &E::Scalar,
     gamma: &E::Scalar,
@@ -244,24 +244,18 @@ impl<E: Engine> MemorySumcheckInstance<E> {
     let w_plus_r_inv_row = w_plus_r_inv_row?;
     let t_plus_r_inv_col = t_plus_r_inv_col?;
     let w_plus_r_inv_col = w_plus_r_inv_col?;
-
+    let zero = E::Scalar::ZERO;
     let (
-      (comm_t_plus_r_inv_row, comm_w_plus_r_inv_row),
-      (comm_t_plus_r_inv_col, comm_w_plus_r_inv_col),
-    ) = rayon::join(
-      || {
-        rayon::join(
-          || E::CE::commit(ck, &t_plus_r_inv_row, &E::Scalar::ZERO),
-          || E::CE::commit(ck, &w_plus_r_inv_row, &E::Scalar::ZERO),
-        )
-      },
-      || {
-        rayon::join(
-          || E::CE::commit(ck, &t_plus_r_inv_col, &E::Scalar::ZERO),
-          || E::CE::commit(ck, &w_plus_r_inv_col, &E::Scalar::ZERO),
-        )
-      },
-    );
+      comm_t_plus_r_inv_row,
+      comm_w_plus_r_inv_row,
+      comm_t_plus_r_inv_col,
+      comm_w_plus_r_inv_col,
+  ) = tokio::join!(
+      E::CE::commit(&ck, &t_plus_r_inv_row, &zero),
+      E::CE::commit(&ck, &w_plus_r_inv_row, &zero),
+      E::CE::commit(&ck, &t_plus_r_inv_col, &zero),
+      E::CE::commit(&ck, &w_plus_r_inv_col, &zero),
+  );
 
     let comm_vec = [
       comm_t_plus_r_inv_row,
