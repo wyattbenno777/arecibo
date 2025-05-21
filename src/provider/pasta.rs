@@ -63,15 +63,15 @@ macro_rules! impl_traits {
         level = "trace",
         name = "<_ as Group>::vartime_multiscalar_mul"
       )]
-      fn vartime_multiscalar_mul(scalars: &[Self::ScalarExt], bases: &[Self::Affine]) -> Self {
+      async fn vartime_multiscalar_mul(scalars: &[Self::ScalarExt], bases: &[Self::Affine]) -> Self {
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         if scalars.len() >= 128 {
           grumpkin_msm::pasta::$name(bases, scalars)
         } else {
-          cpu_best_msm(bases, scalars)
+          cpu_best_msm(bases, scalars).await
         }
         #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        cpu_best_msm(bases, scalars)
+        cpu_best_msm(bases, scalars).await
       }
 
       fn group(p: &Self::AffineExt) -> Self {

@@ -275,7 +275,7 @@ where
     let mut bases = ck.powers_of_g[..v.len()].to_vec();
     bases.push(ck.h);
     Commitment {
-      comm: E::G1::vartime_multiscalar_mul(&scalars, &bases),
+      comm: E::G1::vartime_multiscalar_mul(&scalars, &bases).await,
     }
   }
 

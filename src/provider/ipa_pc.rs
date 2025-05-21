@@ -233,7 +233,7 @@ where
     )
     .collect::<Vec<E::Scalar>>();
 
-    let ck_folded = CommitmentKeyExtTrait::fold(&ck_L, &ck_R, &r_inverse, &r);
+    let ck_folded = CommitmentKeyExtTrait::fold(&ck_L, &ck_R, &r_inverse, &r).await;
 
     Ok((L, R, a_vec_folded, b_vec_folded, ck_folded))
 }

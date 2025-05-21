@@ -54,7 +54,7 @@ impl<E: MultiMillerLoop> UVKZGPCS<E>
 where
   E::G1: DlogGroup<AffineExt = E::G1Affine, ScalarExt = E::Fr>,
 {
-  fn commit_offset(
+  async fn commit_offset(
     prover_param: impl Borrow<KZGProverKey<E>>,
     poly: &UVKZGPoly<E::Fr>,
     offset: usize,
@@ -73,14 +73,14 @@ where
     let C = <E::G1 as DlogGroup>::vartime_multiscalar_mul(
       &scalars[offset..],
       &bases[offset..scalars.len()],
-    );
+    ).await;
 
     Ok(UVKZGCommitment(C.to_affine()))
   }
 
   /// Generate a commitment for a polynomial
   /// Note that the scheme is not hiding
-  pub fn commit(
+  pub async fn commit(
     prover_param: impl Borrow<KZGProverKey<E>>,
     poly: &UVKZGPoly<E::Fr>,
   ) -> Result<UVKZGCommitment<E>, NovaError> {
@@ -92,13 +92,13 @@ where
     let C = <E::G1 as DlogGroup>::vartime_multiscalar_mul(
       poly.coeffs.as_slice(),
       &prover_param.powers_of_g()[..poly.coeffs.len()],
-    );
+    ).await;
     Ok(UVKZGCommitment(C.to_affine()))
   }
 
   /// On input a polynomial `p` and a point `point`, outputs a proof for the
   /// same.
-  pub fn open(
+  pub async fn open(
     prover_param: impl Borrow<KZGProverKey<E>>,
     polynomial: &UVKZGPoly<E::Fr>,
     point: &E::Fr,
@@ -108,7 +108,7 @@ where
     let proof = <E::G1 as DlogGroup>::vartime_multiscalar_mul(
       witness_polynomial.coeffs.as_slice(),
       &prover_param.powers_of_g()[..witness_polynomial.coeffs.len()],
-    );
+    ).await;
     let evaluation = UVKZGEvaluation(polynomial.evaluate(point));
 
     Ok((
@@ -241,7 +241,7 @@ where
 
   /// Generate a commitment for a polynomial
   /// Note that the scheme is not hiding
-  fn commit(
+  async fn commit(
     pp: impl Borrow<ZMProverKey<E>>,
     poly: &MultilinearPolynomial<E::Fr>,
   ) -> Result<ZMCommitment<E>, NovaError> {
@@ -249,12 +249,12 @@ where
     if pp.commit_pp.powers_of_g().len() < poly.Z.len() {
       return Err(PCSError::LengthError.into());
     }
-    UVKZGPCS::commit(&pp.commit_pp, UniPoly::ref_cast(&poly.Z)).map(|c| c.into())
+    UVKZGPCS::commit(&pp.commit_pp, UniPoly::ref_cast(&poly.Z)).await.map(|c| c.into())
   }
 
   /// On input a polynomial `poly` and a point `point`, outputs a proof for the
   /// same.
-  fn open(
+  async fn open(
     pp: &impl Borrow<ZMProverKey<E>>,
     comm: &ZMCommitment<E>,
     poly: &MultilinearPolynomial<E::Fr>,
@@ -269,7 +269,7 @@ where
       return Err(NovaError::PCSError(PCSError::LengthError));
     }
 
-    debug_assert_eq!(Self::commit(pp, poly).unwrap().0, comm.0);
+    debug_assert_eq!(Self::commit(pp, poly).await.unwrap().0, comm.0);
     debug_assert_eq!(poly.evaluate(point), eval.0);
 
     let (quotients, remainder) = quotients(poly, point);
@@ -280,10 +280,10 @@ where
     let quotients_polys = quotients.into_iter().map(UniPoly::new).collect::<Vec<_>>();
 
     // Compute and absorb commitments C_{q_k} = [q_k], k = 0,...,d-1
-    let q_comms = quotients_polys
-      .par_iter()
-      .map(|q| UVKZGPCS::commit(&pp.commit_pp, q))
-      .collect::<Result<Vec<_>, _>>()?;
+    let mut q_comms: Vec<_> = vec![];
+    for q in quotients_polys.clone() {
+      q_comms.push(UVKZGPCS::commit(&pp.commit_pp, &q).await?);
+    }
     q_comms.iter().for_each(|c| transcript.absorb(b"quo", c));
 
     // Get challenge y
@@ -294,7 +294,7 @@ where
     let (q_hat, offset) = batched_lifted_degree_quotient(y, &quotients_polys);
 
     // Compute and absorb the commitment C_q = [\hat{q}]
-    let q_hat_comm = UVKZGPCS::commit_offset(&pp.commit_pp, &q_hat, offset)?;
+    let q_hat_comm = UVKZGPCS::commit_offset(&pp.commit_pp, &q_hat, offset).await?;
     transcript.absorb(b"q_hat", &q_hat_comm);
 
     // Get challenges x and z
@@ -322,7 +322,7 @@ where
 
     // Compute and send proof commitment pi
     let (uvproof, _uveval): (UVKZGProof<_>, UVKZGEvaluation<_>) =
-      UVKZGPCS::<E>::open(&pp.open_pp, &f, &x)?;
+      UVKZGPCS::<E>::open(&pp.open_pp, &f, &x).await?;
 
     let proof = ZMProof {
       pi: uvproof.proof,
@@ -335,7 +335,7 @@ where
 
   /// Verifies that `value` is the evaluation at `x` of the polynomial
   /// committed inside `comm`.
-  fn verify(
+  async fn verify(
     vk: &impl Borrow<ZMVerifierKey<E>>,
     transcript: &mut impl TranscriptEngineTrait<NE>,
     comm: &ZMCommitment<E>,
@@ -374,7 +374,7 @@ where
       proof.ck.iter().map(|c| c.0).collect(),
     ]
     .concat();
-    let c = <E::G1 as DlogGroup>::vartime_multiscalar_mul(&scalars, &bases).to_affine();
+    let c = <E::G1 as DlogGroup>::vartime_multiscalar_mul(&scalars, &bases).await.to_affine();
 
     let pi = proof.pi;
 
@@ -576,7 +576,7 @@ where
     let polynomial = MultilinearPolynomial::new(poly.to_vec());
     let evaluation = ZMEvaluation(*eval);
 
-    Self::open(pk, &commitment, &polynomial, point, &evaluation, transcript)
+    Self::open(pk, &commitment, &polynomial, point, &evaluation, transcript).await
   }
 
   async fn verify(
@@ -590,7 +590,7 @@ where
     let commitment = ZMCommitment::from(UVKZGCommitment::from(*comm));
     let evaluation = ZMEvaluation(*eval);
 
-    if !Self::verify(vk, transcript, &commitment, point, &evaluation, arg)? {
+    if !Self::verify(vk, transcript, &commitment, point, &evaluation, arg).await? {
       return Err(NovaError::UnSat);
     }
     Ok(())

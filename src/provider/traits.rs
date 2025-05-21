@@ -36,7 +36,7 @@ pub trait DlogGroup:
     + TranscriptReprTrait<Self>;
 
   /// A method to compute a multiexponentation
-  fn vartime_multiscalar_mul(scalars: &[Self::ScalarExt], bases: &[Self::AffineExt]) -> Self;
+  async fn vartime_multiscalar_mul(scalars: &[Self::ScalarExt], bases: &[Self::AffineExt]) -> Self;
 
   /// Produce a vector of group elements using a static label
   fn from_label(label: &'static [u8], n: usize) -> Vec<Self::Affine>;
@@ -93,21 +93,36 @@ macro_rules! impl_traits {
       // so the blanket impl<T> From<T> for T and impl<T> Into<T> apply.
       type Compressed = $name::Compressed;
 
-      fn vartime_multiscalar_mul(scalars: &[Self::ScalarExt], bases: &[Self::AffineExt]) -> Self {
+      async fn vartime_multiscalar_mul(
+        scalars: &[Self::ScalarExt],
+        bases: &[Self::AffineExt],
+      ) -> Self {
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-        if scalars.len() >= 128 {
-          $large_msm_method(bases, scalars)
-        } else {
-          cpu_best_msm(bases, scalars)
+        {
+          if scalars.len() >= 128 {
+            return $large_msm_method(bases, scalars).await;
+          } else {
+            return cpu_best_msm(bases, scalars).await;
+          }
         }
+
         #[cfg(target_arch = "wasm32")]
-        if scalars.len() >= (1 << 16) {
-          $large_msm_method(bases, scalars)
-        } else {
-          cpu_best_msm(bases, scalars)
+        {
+          if scalars.len() >= (1 << 16) {
+            return $large_msm_method(bases, scalars).await;
+          } else {
+            return cpu_best_msm(bases, scalars).await;
+          }
         }
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "wasm32")))]
-        cpu_best_msm(bases, scalars)
+
+        #[cfg(not(any(
+          target_arch = "x86_64",
+          target_arch = "aarch64",
+          target_arch = "wasm32"
+        )))]
+        {
+          return cpu_best_msm(bases, scalars).await;
+        }
       }
 
       fn group(p: &Self::AffineExt) -> Self {

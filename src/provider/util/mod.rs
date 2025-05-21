@@ -5,12 +5,12 @@ pub mod msm {
   use msm_webgpu::run_webgpu_msm;
   // this argument swap is useful until Rust gets named arguments
   // and saves significant complexity in macro code
-  pub fn cpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
+  pub async fn cpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
     best_multiexp(scalars, bases)
   }
 
-  pub fn web_gpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
-    best_multiexp(scalars, bases)
+  pub async fn web_gpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
+    run_webgpu_msm(bases, scalars).await
   }
 }
 

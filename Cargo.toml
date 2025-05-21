@@ -49,8 +49,8 @@ hex = "0.4"
 ec-gpu-gen = { version = "0.7.1" }
 
 # async
-msm-webgpu = { git = "https://github.com/ICME-Lab/msm-webgpu", branch = "cuzk" }
-tokio = { version = "1.45.0", features = ["rt-multi-thread", "macros"] }
+# msm-webgpu = { git = "https://github.com/ICME-Lab/msm-webgpu", branch = "cuzk" }
+msm-webgpu = { path = "../icme-msm-webgpu" }
 futures = "0.3"
 
 # Onchain verifier
@@ -62,11 +62,12 @@ grumpkin-msm = { git = "https://github.com/ICME-Lab/grumpkin-msm", branch = "dev
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2.0", default-features = false, features = ["js"] }
-
+tokio = { version = "1.45", features = ["macros", "rt", "sync", "time", "io-util"], default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 proptest = "1.2.0"
 pprof = { version = "0.13", optional = true } # in benches under feature "flamegraph"
+tokio = { version = "1.45", features = ["full"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -105,3 +106,6 @@ opt-level = 3
 lto = "thin"
 incremental = false
 codegen-units = 16
+
+[lib]
+crate-type = ["cdylib", "rlib"]
