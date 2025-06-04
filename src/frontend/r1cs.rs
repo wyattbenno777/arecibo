@@ -15,7 +15,6 @@ use crate::{
   CommitmentKey,
 };
 use ff::PrimeField;
-use web_sys::console;
 /// `NovaWitness` provide a method for acquiring an `R1CSInstance` and `R1CSWitness` from implementers.
 pub trait NovaWitness<E: Engine> {
   /// Return an instance and witness, given a shape and ck.
@@ -58,7 +57,6 @@ impl<E: Engine> NovaWitness<E> for SatisfyingAssignment<E> {
   ) -> Result<(R1CSInstance<E>, R1CSWitness<E>), NovaError> {
     let W = R1CSWitness::<E>::new(shape, self.aux_assignment().to_vec())?;
     let X = &self.input_assignment()[1..];
-    console::log_1(&format!("r1cs_instance_and_witness").into());
     let comm_W = W.commit_at(
       ck,
       self.precommitted_assignment().len() + self.precommitted1_assignment().len(),

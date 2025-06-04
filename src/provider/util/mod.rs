@@ -9,15 +9,8 @@ pub mod msm {
   use ff::Field;
   use halo2curves::{msm::best_multiexp, CurveAffine};
   use msm_webgpu::run_webgpu_msm;
-  use wasm_bindgen::prelude::*;
-  use web_sys::console;
   use group::Group;
 
-  #[wasm_bindgen]
-  extern "C" {
-    #[wasm_bindgen(js_namespace = performance)]
-    fn now() -> f64;
-  }
 
   // this argument swap is useful until Rust gets named arguments
   // and saves significant complexity in macro code
@@ -28,16 +21,11 @@ pub mod msm {
     .zip(scalars.iter().cloned())
     .filter(|(_, s)| *s != C::Scalar::ZERO)  // constant-time versions exist too
     .unzip();
-    console::log_1(&format!("Running cpu msm: {:?}", bases.len()).into());
-    let start = now();
     let result = best_multiexp(&scalars, &bases);
-    console::log_1(&format!("cpu msm took {:?} ms", now() - start).into());
     result
   }
 
   pub async fn web_gpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
-    console::log_1(&format!("Scalars before: {:?}", scalars.len()).into());
-    let start = now();
     let (bases_one, scalars_one, bases_rest, scalars_rest) = bases
       .iter()
       .zip(scalars)
@@ -55,11 +43,6 @@ pub mod msm {
           (b1, s1, b0, s0)
         },
       );
-    console::log_1(&format!("scalars ones after: {:?}", scalars_one.len()).into());
-    console::log_1(&format!("scalars rest after: {:?}", scalars_rest.len()).into());
-    console::log_1(&format!("scalars total after: {:?}", scalars_one.len() + scalars_rest.len()).into());
-    console::log_1(&format!("Scalars fold took{:?} ms", now() - start).into());
-    let start = now();
     let boolean_sum =
       scalars_one
         .iter()
@@ -75,8 +58,6 @@ pub mod msm {
       best_multiexp(&scalars_rest, &bases_rest)
     };
 
-    // let result = run_webgpu_msm(&bases, &scalars).await;
-    console::log_1(&format!("webgpu msm took {:?} ms", now() - start).into());
     boolean_sum + rest_sum
   }
 }

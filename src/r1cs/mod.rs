@@ -24,7 +24,6 @@ pub(crate) use sparse::SparseMatrix;
 use split::{SplitR1CSInstance, SplitR1CSWitness};
 use util::fold_witness;
 pub mod split;
-use web_sys::console;
 /// A type that holds the shape of the R1CS matrices
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct R1CSShape<E: Engine> {
@@ -670,7 +669,6 @@ impl<E: Engine> R1CSWitness<E> {
 
   /// Commits to the witness using the supplied generators
   pub(crate) async fn commit_at(&self, ck: &CommitmentKey<E>, idx: usize) -> Commitment<E> {
-    console::log_1(&format!("witness length, {}", self.W.len()).into());
     CE::<E>::commit_at(ck, &self.W, &self.r_W, idx).await
   }
 
