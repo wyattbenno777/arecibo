@@ -7,20 +7,18 @@ pub mod msm {
   // and saves significant complexity in macro code
   pub fn cpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
     let (bases, scalars): (Vec<C>, Vec<C::Scalar>) = bases
-      .iter()
-      .cloned()
-      .zip(scalars.iter().cloned())
-      .filter(|(_, s)| *s != C::Scalar::ZERO)
+      .into_iter()
+      .zip(scalars)
+      .filter(|&(_, ref s)| *s != &C::Scalar::ZERO)
       .unzip();
     best_multiexp(&scalars, &bases)
   }
 
   pub fn web_gpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
     let (bases, scalars): (Vec<C>, Vec<C::Scalar>) = bases
-      .iter()
-      .cloned()
-      .zip(scalars.iter().cloned())
-      .filter(|(_, s)| *s != C::Scalar::ZERO)
+      .into_iter()
+      .zip(scalars)
+      .filter(|&(_, ref s)| *s != &C::Scalar::ZERO)
       .unzip();
     best_multiexp(&scalars, &bases)
   }
