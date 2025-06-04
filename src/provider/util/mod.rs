@@ -1,25 +1,23 @@
 //! Utilities for provider module.
 pub(in crate::provider) mod fb_msm;
 
-
-
 pub mod msm {
   use counter::Counter;
-  use num_bigint::BigUint;
   use ff::PrimeField;
+  use num_bigint::BigUint;
 
-use halo2curves::{msm::best_multiexp, CurveAffine};
-  use msm_webgpu::run_webgpu_msm;
-  use web_sys::console;
-  use wasm_bindgen::prelude::*;
   use ff::Field;
+  use halo2curves::{msm::best_multiexp, CurveAffine};
+  use msm_webgpu::run_webgpu_msm;
+  use wasm_bindgen::prelude::*;
+  use web_sys::console;
+  use group::Group;
+
   #[wasm_bindgen]
   extern "C" {
-      #[wasm_bindgen(js_namespace = performance)]
-      fn now() -> f64;
+    #[wasm_bindgen(js_namespace = performance)]
+    fn now() -> f64;
   }
-
-
 
   // this argument swap is useful until Rust gets named arguments
   // and saves significant complexity in macro code
@@ -29,7 +27,7 @@ use halo2curves::{msm::best_multiexp, CurveAffine};
     .cloned()            // or `.copied()` if `Copy`
     .zip(scalars.iter().cloned())
     .filter(|(_, s)| *s != C::Scalar::ZERO)  // constant-time versions exist too
-    .unzip(); 
+    .unzip();
     console::log_1(&format!("Running cpu msm: {:?}", bases.len()).into());
     let start = now();
     let result = best_multiexp(&scalars, &bases);
@@ -39,36 +37,47 @@ use halo2curves::{msm::best_multiexp, CurveAffine};
 
   pub async fn web_gpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
     console::log_1(&format!("Scalars before: {:?}", scalars.len()).into());
-    let (bases, scalars): (Vec<C>, Vec<C::Scalar>) = bases
+    let start = now();
+    let (bases_one, scalars_one, bases_rest, scalars_rest) = bases
+      .iter()
+      .zip(scalars)
+      .filter(|&(_, s)| *s != C::Scalar::ZERO)
+      .fold(
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+        |(mut b1, mut s1, mut b0, mut s0), (b, s)| {
+          if *s == C::Scalar::ONE {
+            b1.push(*b);
+            s1.push(*s);
+          } else {
+            b0.push(*b);
+            s0.push(*s);
+          }
+          (b1, s1, b0, s0)
+        },
+      );
+    console::log_1(&format!("scalars ones after: {:?}", scalars_one.len()).into());
+    console::log_1(&format!("scalars rest after: {:?}", scalars_rest.len()).into());
+    console::log_1(&format!("scalars total after: {:?}", scalars_one.len() + scalars_rest.len()).into());
+    console::log_1(&format!("Scalars fold took{:?} ms", now() - start).into());
+    let start = now();
+    let boolean_sum =
+      scalars_one
         .iter()
-        .cloned()            
-        .zip(scalars.iter().cloned())
-        .filter(|(_, s)| *s != C::Scalar::ZERO)  
-        .unzip();
+        .zip(bases_one.iter())
+        .fold(C::Curve::identity(), |mut acc, (_, base)| {
+          acc += *base;
+          acc
+        });
 
-    console::log_1(&format!("Scalars after: {:?}", scalars.len()).into());
-    if bases.len() as usize > (1 << 16) {
-      let counts = scalars.iter().zip(bases.iter()).map(|(s, b)| {
-        let int = BigUint::from_bytes_le(s.to_repr().as_ref());
-        let b_coords = b.coordinates().unwrap();
-        let b_x = BigUint::from_bytes_le(b_coords.x().to_repr().as_ref());
-        let b_y = BigUint::from_bytes_le(b_coords.y().to_repr().as_ref());
-        (int.to_str_radix(10), b_x.to_str_radix(10), b_y.to_str_radix(10))
-      }).collect::<Counter<_>>();  
-      for (value, freq) in counts.k_most_common_ordered(5) {
-          console::log_1(&format!("{value:?} ➜ {freq}").into());
-      }
-      let start = now();
-      let result = best_multiexp(&scalars, &bases);
-      // let result = run_webgpu_msm(&bases, &scalars).await;
-      console::log_1(&format!("webgpu msm took {:?} ms", now() - start).into());
-      result
+    let rest_sum = if bases_rest.len() > (1 << 16) {
+      run_webgpu_msm(&bases_rest, &scalars_rest).await
     } else {
-      let start = now();
-      let result = best_multiexp(&scalars, &bases);
-      console::log_1(&format!("cpu msm took {:?} ms", now() - start).into());
-      result
-    }
+      best_multiexp(&scalars_rest, &bases_rest)
+    };
+
+    // let result = run_webgpu_msm(&bases, &scalars).await;
+    console::log_1(&format!("webgpu msm took {:?} ms", now() - start).into());
+    boolean_sum + rest_sum
   }
 }
 
