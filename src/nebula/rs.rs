@@ -35,6 +35,7 @@ use ff::{Field, PrimeField};
 use once_cell::sync::OnceCell;
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
+use web_sys::console; 
 
 /// The public parameters used in the CycleFold recursive SNARK proof and verification
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -216,6 +217,7 @@ where
     }
 
     // Get default running primary instance and witness pair
+    console::log_1(&format!("pp.circuit_shape_primary.r1cs_shape").into());
     let r1cs_primary = &pp.circuit_shape_primary.r1cs_shape;
     let r_U_primary = RelaxedR1CSInstance::default(&*pp.ck_primary, r1cs_primary);
     let r_W_primary = RelaxedR1CSWitness::default(r1cs_primary);
@@ -240,27 +242,31 @@ where
       None,
       r_i,
     );
+    console::log_1(&format!("inputs_primary").into());
     let circuit_primary = AugmentedCircuit::new(
       &pp.augmented_circuit_params,
       pp.ro_consts_circuit.clone(),
       Some(inputs_primary),
       step_circuit,
     );
+    console::log_1(&format!("circuit_primary").into());
     let zi = circuit_primary.synthesize(&mut cs_primary)?;
+    console::log_1(&format!("zi").into());
     let (l_u_primary, l_w_primary) =
       cs_primary.r1cs_instance_and_witness(r1cs_primary, &pp.ck_primary).await?;
+    console::log_1(&format!("l_u_primary, l_w_primary").into());
 
     // Get z_i values out of the Constraint System
     let zi = zi
       .iter()
       .map(|v| v.get_value().ok_or(SynthesisError::AssignmentMissing))
       .collect::<Result<Vec<_>, _>>()?;
-
+    console::log_1(&format!("zi").into());
     // Get the running CycleFold instance and witness pair
     let r1cs_cyclefold = &pp.circuit_shape_cyclefold.r1cs_shape;
     let r_U_cyclefold = RelaxedR1CSInstance::default(&*pp.ck_cyclefold, r1cs_cyclefold);
     let r_W_cyclefold = RelaxedR1CSWitness::default(r1cs_cyclefold);
-
+    console::log_1(&format!("r_U_cyclefold, r_W_cyclefold").into());
     Ok(Self {
       z0: z0.to_vec(),
       // IVC proof

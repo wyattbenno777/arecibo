@@ -47,6 +47,9 @@ log = "0.4.25"
 crossbeam-channel = "0.5.14"
 hex = "0.4"
 ec-gpu-gen = { version = "0.7.1" }
+web-sys = { version = "0.3", features = ["console"] }
+wasm-bindgen = "0.2"
+counter = "0.6.0"
 
 # async
 msm-webgpu = { git = "https://github.com/ICME-Lab/msm-webgpu", branch = "random-num-msms" }
@@ -79,7 +82,6 @@ tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 rand_xorshift = "0.3.0"
 env_logger = "0.11.6"
 wasm-bindgen-test = "0.3.50"
-wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3.77"
 wgpu = "24.0.3"
