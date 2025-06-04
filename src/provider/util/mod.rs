@@ -2,15 +2,27 @@
 pub(in crate::provider) mod fb_msm;
 pub mod msm {
   use halo2curves::{msm::best_multiexp, CurveAffine};
-  use msm_webgpu::run_webgpu_msm;
+  use ff::Field;
   // this argument swap is useful until Rust gets named arguments
   // and saves significant complexity in macro code
   pub fn cpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
-    best_multiexp(scalars, bases)
+    let (bases, scalars): (Vec<C>, Vec<C::Scalar>) = bases
+      .iter()
+      .cloned()
+      .zip(scalars.iter().cloned())
+      .filter(|(_, s)| *s != C::Scalar::ZERO)
+      .unzip();
+    best_multiexp(&scalars, &bases)
   }
 
   pub fn web_gpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
-    best_multiexp(scalars, bases)
+    let (bases, scalars): (Vec<C>, Vec<C::Scalar>) = bases
+      .iter()
+      .cloned()
+      .zip(scalars.iter().cloned())
+      .filter(|(_, s)| *s != C::Scalar::ZERO)
+      .unzip();
+    best_multiexp(&scalars, &bases)
   }
 }
 
