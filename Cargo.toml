@@ -46,8 +46,9 @@ memmap2 = "0.9.5"
 log = "0.4.25"
 crossbeam-channel = "0.5.14"
 hex = "0.4"
-msm-webgpu = { git = "https://github.com/ICME-Lab/msm-webgpu", branch = "cuzk" }
+msm-webgpu = { git = "https://github.com/ICME-Lab/msm-webgpu", branch = "master" }
 ec-gpu-gen = { version = "0.7.1" }
+num-integer = "0.1.46"
 
 # Onchain verifier
 askama = { version = "0.12.0", features = ["config"], default-features = false }

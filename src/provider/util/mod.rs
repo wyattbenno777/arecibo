@@ -2,15 +2,48 @@
 pub(in crate::provider) mod fb_msm;
 pub mod msm {
   use halo2curves::{msm::best_multiexp, CurveAffine};
-  use msm_webgpu::run_webgpu_msm;
+  use group::Group;
+  use ff::Field;
   // this argument swap is useful until Rust gets named arguments
   // and saves significant complexity in macro code
   pub fn cpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
-    best_multiexp(scalars, bases)
+    let (bases, scalars): (Vec<C>, Vec<C::Scalar>) = bases
+      .iter()
+      .zip(scalars)
+      .filter(|&(_, ref s)| *s != &C::Scalar::ZERO)
+      .unzip();
+    best_multiexp(&scalars, &bases)
   }
 
   pub fn web_gpu_best_msm<C: CurveAffine>(bases: &[C], scalars: &[C::Scalar]) -> C::Curve {
-    best_multiexp(scalars, bases)
+    let (bases_one, scalars_one, bases_rest, scalars_rest) =
+    bases
+        .iter()
+        .zip(scalars)
+        .filter(|&(_, s)| *s != C::Scalar::ZERO)
+        .fold(   
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+            |(mut b1, mut s1, mut b0, mut s0), (b, s)| {
+                if *s == C::Scalar::ONE {
+                    b1.push(*b);
+                    s1.push(*s);
+                } else {
+                    b0.push(*b);
+                    s0.push(*s);
+                }
+                (b1, s1, b0, s0)
+            },
+        );
+    let boolean_sum = scalars_one
+      .iter()
+      .zip(bases_one.iter())
+      .fold(C::Curve::identity(), |mut acc, (_, base)| {
+        acc += *base;
+        acc
+      });
+    let rest_sum = best_multiexp(&scalars_rest, &bases_rest);
+
+    boolean_sum + rest_sum
   }
 }
 

@@ -3,7 +3,6 @@
 
 use std::marker::PhantomData;
 
-use ec_gpu_gen::threadpool::Worker;
 use ff::{Field, PrimeField, PrimeFieldBits};
 use group::{prime::PrimeCurveAffine, Curve, Group as _};
 use pairing::Engine;
@@ -13,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::{
-  digest::SimpleDigestible, frontend::{domain::EvaluationDomain, gpu::GpuName, ConstraintSystem, SynthesisError}, gadgets::AllocatedPoint, provider::{pedersen::Commitment, traits::DlogGroup, util::fb_msm}, traits::{
+  digest::SimpleDigestible, frontend::{gpu::GpuName, ConstraintSystem, SynthesisError}, gadgets::AllocatedPoint, provider::{pedersen::Commitment, traits::DlogGroup, util::fb_msm}, traits::{
     commitment::{CommitmentEngineTrait, Len},
     Engine as NovaEngine, Group, TranscriptReprTrait,
   } 
