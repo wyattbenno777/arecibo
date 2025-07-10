@@ -46,9 +46,6 @@ serde_json = { version = "1.0" }
 [target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
 grumpkin-msm = { git = "https://github.com/ICME-Lab/grumpkin-msm", branch = "dev" }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2.0", default-features = false, features = ["js"] }
-
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 proptest = "1.2.0"
 pprof = { version = "0.13", optional = true } # in benches under feature "flamegraph"
