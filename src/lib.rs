@@ -31,6 +31,7 @@ pub mod provider;
 pub(crate) mod r1cs;
 pub mod spartan;
 pub mod traits;
+pub mod jolt_compression;
 
 mod cyclefold;
 pub mod nebula;
